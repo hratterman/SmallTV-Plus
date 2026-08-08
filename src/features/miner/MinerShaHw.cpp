@@ -27,11 +27,16 @@
 //                      progressively during a compression rather than latching
 //                      it at start_block, so a fill cannot hide inside the
 //                      previous block. That is what sets the floor above.
-//   Fixed spin 72      Faster (388 KH/s) and passed its digest check, but it
-//                      waits less than the compression takes and survives only
-//                      on a few cycles of loop overhead. The failure mode is a
-//                      silently wrong hash — missed shares, invisibly — so it
-//                      is not worth 12%.
+//   Bare fixed spin    Any spin with no poll behind it, including the 95 that
+//                      shipped. The reasoning against spin 72 — undershoot is a
+//                      silently wrong hash — applied to 95 as well, just more
+//                      rarely, and the device proved it: a digest read across
+//                      the final load came back zeroed, and a zero word 7 walks
+//                      straight through the early-exit test, so the engine's
+//                      failures were biased *toward* looking like shares rather
+//                      than being filtered out as noise. Spins now always have
+//                      a busy-register poll behind them, which is also what let
+//                      the spin drop back to 72.
 //
 // On the stock NMMiner firmware's claimed 1035 KH/s: three compressions per
 // nonce are forced here, since the classic ESP32's engine state cannot be seeded
@@ -83,16 +88,21 @@ static inline __attribute__((always_inline)) void hwFillDoubleBlockFull() {
   reg[15] = 0x00000100;
 }
 
-// A fixed spin beats polling the busy register: the poll costs a DPORT read that
-// stalls the CPU, several times per nonce, to wait out a delay the engine takes
-// deterministically. 95 sits above the measured 86-94 cycle compression rather
-// than below it. CCOUNT is an internal register — no bus traffic — and the spin
-// only ever overshoots, never undershoots.
+// The spin covers most of the engine's latency without bus traffic (CCOUNT is
+// an internal register), and a busy-register poll behind it supplies the rest.
+// It used to stand alone, sized at 95 to sit above the measured 86-94 cycle
+// compression — but "above the range I measured" is not a guarantee on a chip
+// whose timing moves with bus contention, and undershooting is silent: it reads
+// the digest early and the wrong hash looks exactly like the right one.
+//
+// With a poll behind it the spin no longer has to be safe, only close, so it
+// goes back to the 72 that measured faster and was rejected for having no
+// margin. The poll is now where the margin lives.
 static inline __attribute__((always_inline)) void hwSpin(uint32_t n) {
   uint32_t t0 = esp_cpu_get_cycle_count();
   while ((esp_cpu_get_cycle_count() - t0) < n) {}
 }
-#define HW_BLOCK_SPIN 95
+#define HW_BLOCK_SPIN 72
 
 static inline __attribute__((always_inline)) void hwWaitIdle() {
   while (DPORT_REG_READ(SHA_256_BUSY_REG)) {}
@@ -130,19 +140,26 @@ static inline __attribute__((always_inline)) bool hwDoubleHash(const uint8_t* sw
   hwFillFirstBlock(swapped128);
   sha_ll_start_block(SHA2_256);
 
-  if (kPrime) hwWaitIdle(); else hwSpin(HW_BLOCK_SPIN);
+  if (!kPrime) hwSpin(HW_BLOCK_SPIN);
+  hwWaitIdle();
   hwFillSecondBlock(swapped128 + 64, nonce);
   sha_ll_continue_block(SHA2_256);
 
-  if (kPrime) hwWaitIdle(); else hwSpin(HW_BLOCK_SPIN);
+  if (!kPrime) hwSpin(HW_BLOCK_SPIN);
+  hwWaitIdle();
   sha_ll_load(SHA2_256);
 
   hwWaitIdle();
   if (kPrime) hwFillDoubleBlockFull(); else hwFillDoubleBlock();
   sha_ll_start_block(SHA2_256);
 
-  if (kPrime) hwWaitIdle(); else hwSpin(HW_BLOCK_SPIN);
+  if (!kPrime) hwSpin(HW_BLOCK_SPIN);
+  hwWaitIdle();
   sha_ll_load(SHA2_256);
+  // The load moves the digest into TEXT and is not instant. Reading across it
+  // returns zeros, and a zero word 7 walks straight through the early exit —
+  // which is how a bad digest ends up looking like a share worth submitting.
+  hwWaitIdle();
   return hwReadDigest(hash, earlyExit);
 }
 
