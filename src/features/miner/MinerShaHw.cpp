@@ -67,7 +67,13 @@ static inline __attribute__((always_inline)) bool hwWaitIdleBounded() {
 // Read the digest, byte-swapping into the standard SHA-256 output order.
 // The `if` variant first checks word 7's low half: the last two digest bytes
 // are zero only when it is, which is the cheap 16-bit early exit.
+template <bool kFastProbe = false>
 static inline __attribute__((always_inline)) bool hwReadDigestSwapped(void* out, bool earlyExit) {
+  if (kFastProbe && earlyExit) {
+    // Cheap probe first, outside the DPORT workaround. Worst case a mis-read
+    // sends us into the full sequence read below, which is still correct.
+    if ((_DPORT_REG_READ(SHA_TEXT_BASE + 7 * 4) & 0xFFFF) != 0) return false;
+  }
   DPORT_INTERRUPT_DISABLE();
   uint32_t last = DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 7 * 4);
   if (earlyExit && (last & 0xFFFF) != 0) {
@@ -125,7 +131,8 @@ static inline __attribute__((always_inline)) void hwWait() {
 // kBlockWait     — cycles to spin after a block compression (0 = poll DPORT)
 // kLoadWait      — cycles to spin after a digest load     (0 = poll DPORT)
 template <bool kFewWrites, bool kSkipFinalWait,
-          uint32_t kBlockWait = 0, uint32_t kLoadWait = 0, bool kBounded = false>
+          uint32_t kBlockWait = 0, uint32_t kLoadWait = 0, bool kBounded = false,
+          bool kFastProbe = false>
 static inline __attribute__((always_inline)) bool hwDoubleHashT(const uint8_t* swapped128, uint32_t nonce,
                                 uint8_t hash[32], bool earlyExit) {
   hwFillFirstBlock(swapped128);
@@ -145,13 +152,24 @@ static inline __attribute__((always_inline)) bool hwDoubleHashT(const uint8_t* s
   hwWait<kBlockWait, kBounded>();
   sha_ll_load(SHA2_256);
   if (!kSkipFinalWait) hwWait<kLoadWait, kBounded>();
-  return hwReadDigestSwapped(hash, earlyExit);
+  return hwReadDigestSwapped<kFastProbe>(hash, earlyExit);
 }
 
-// The production loop: the variant that measures fastest goes here.
+// The production loop: the fastest variant that stays digest-correct. Measured
+// on the NM-TV-154 at 356 KH/s against 323 for the original, checked over 64
+// nonces against the software implementation.
 static inline __attribute__((always_inline)) bool hwDoubleHash(const uint8_t* swapped128, uint32_t nonce,
                                 uint8_t hash[32], bool earlyExit) {
-  return hwDoubleHashT<false, false>(swapped128, nonce, hash, earlyExit);
+  return hwDoubleHashT<true, true>(swapped128, nonce, hash, earlyExit);
+}
+
+// The two-write double block assumes TEXT[9..14] are still zero from the
+// previous nonce. mbedTLS shares this engine for the other modes' HTTPS, so
+// after every lock acquisition one full-write pass must re-establish that
+// state — otherwise the first nonce of each 256-nonce batch could hash wrong.
+void minerHwPrime(const uint8_t* swapped128) {
+  uint8_t scratch[32];
+  hwDoubleHashT<false, false>(swapped128, 0, scratch, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -183,19 +201,25 @@ void minerHwSha256dRaw(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[3
 // one and not another, and so the IRAM copy really executes from IRAM. They all
 // pay the same one call per nonce, which keeps the comparison fair (and makes
 // the absolute numbers a shade pessimistic against production).
-#define HW_VARIANT(fn, few, skipwait, bwait, lwait)                             \
+#define HW_VARIANT(fn, few, skipwait, bwait, lwait, probe)                      \
   __attribute__((noinline)) static bool fn(                                     \
       const uint8_t* s, uint32_t n, uint8_t* h, bool early) {                   \
-    return hwDoubleHashT<few, skipwait, bwait, lwait, true>(s, n, h, early);    \
+    return hwDoubleHashT<few, skipwait, bwait, lwait, true, probe>(s, n, h, early); \
   }
 
-//          name                few    skipwait  blockWait  loadWait
-HW_VARIANT(hwVarBase,           false, false,    0,   0)   // today's production loop
-HW_VARIANT(hwVarWrites,         true,  true,     0,   0)   // fewer writes, no final wait
-HW_VARIANT(hwVarSpin130,        true,  true,     130, 40)  // conservative fixed spin
-HW_VARIANT(hwVarSpin100,        true,  true,     100, 30)
-HW_VARIANT(hwVarSpin85,         true,  true,     85,  20)
-HW_VARIANT(hwVarSpin72,         true,  true,     72,  12)  // ~the engine's block time
+// Round 2. The first pass moved the block wait and the load wait together, so
+// when every spin variant came back wrong it could not say which one was short.
+// 130/40 was both WRONG and slower than polling — meaning 130 cycles overshoots
+// the block time while 40 undershoots the load. So these hold the load wait at
+// a poll and vary only the block spin, then do the reverse.
+//
+//          name              few    skipwait  blockWait  loadWait  fastProbe
+HW_VARIANT(hwVarBase,         false, false,    0,    0,   false)  // original, for continuity
+HW_VARIANT(hwVarWinner,       true,  true,     0,    0,   false)  // current production, 356
+HW_VARIANT(hwVarBlk100,       true,  true,     100,  0,   false)  // spin block, poll load
+HW_VARIANT(hwVarBlk85,        true,  true,     85,   0,   false)
+HW_VARIANT(hwVarBlk72,        true,  true,     72,   0,   false)
+HW_VARIANT(hwVarProbe,        true,  true,     0,    0,   true)   // cheap early-exit probe
 
 typedef bool (*HwVariantFn)(const uint8_t*, uint32_t, uint8_t*, bool);
 
@@ -226,12 +250,12 @@ static void benchTask(void* arg) {
   BenchCtx* ctx = (BenchCtx*)arg;
 
   struct { const char* name; HwVariantFn fn; } kVariants[] = {
-    {"base (production)",     hwVarBase},
-    {"fewer writes+no wait",  hwVarWrites},
-    {"fixed spin 130/40",     hwVarSpin130},
-    {"fixed spin 100/30",     hwVarSpin100},
-    {"fixed spin 85/20",      hwVarSpin85},
-    {"fixed spin 72/12",      hwVarSpin72},
+    {"original loop",          hwVarBase},
+    {"production (few+nowait)",hwVarWinner},
+    {"+ block spin 100",       hwVarBlk100},
+    {"+ block spin 85",        hwVarBlk85},
+    {"+ block spin 72",        hwVarBlk72},
+    {"+ fast digest probe",    hwVarProbe},
   };
   const int count = (int)(sizeof(kVariants) / sizeof(kVariants[0]));
   const uint32_t kIters = 10000;

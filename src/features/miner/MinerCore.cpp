@@ -191,6 +191,7 @@ static void minerWorkerTask(void* arg) {
           if (hwHeld) minerHwUnlock();
           minerHwLock();
           hwHeld = true;
+          minerHwPrime(swapped);   // mbedTLS may have used the engine meanwhile
         }
         solved = minerHwSha256d(swapped, nonce, hash);
 #else

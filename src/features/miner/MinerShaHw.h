@@ -40,6 +40,10 @@ void minerHwUnlock();
 // (the hash cannot meet any share target), leaving `hash` untouched.
 bool minerHwSha256d(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[32]);
 
+// Re-establish the engine state the fast path depends on. Must be called once
+// after each minerHwLock(), since mbedTLS may have used the engine in between.
+void minerHwPrime(const uint8_t* swapped128);
+
 // Same, but always reads back the digest — used by the startup self-check.
 void minerHwSha256dRaw(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[32]);
 
