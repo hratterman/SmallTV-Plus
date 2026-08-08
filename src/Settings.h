@@ -124,6 +124,17 @@ struct MinerSettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Capacitive touch slice (device-wide input) ----------------------------
+struct TouchSettings {
+  bool    enabled;
+  int8_t  gpio;        // which candidate channel the pad is on; -1 = undiscovered
+  uint8_t threshold;   // how far below baseline counts as a press
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Top-level settings ----------------------------------------------------
 struct Settings {
   // --- WiFi station networks (the device joins one of these) ---
@@ -154,6 +165,7 @@ struct Settings {
   UsageSettings  usage;
   RadarSettings  radar;
   MinerSettings  miner;
+  TouchSettings  touch;
   ClockSettings  clock;
 
   void setDefaults();

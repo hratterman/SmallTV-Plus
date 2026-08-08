@@ -65,7 +65,6 @@ g++ -O2 -Wall -Wno-unused-variable \
     -I "$out/shim" -I "$root/src/features/miner" \
     -o "$out/selftest" \
     "$here/selftest.cpp" \
-    "$root/src/features/miner/MinerJob.cpp" \
-    "$root/src/features/miner/NerdSha256.cpp"
+    "$root/src/features/miner/MinerJob.cpp"
 
 "$out/selftest" "${EXPECTED[0]}" "${EXPECTED[1]}"

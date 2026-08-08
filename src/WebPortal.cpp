@@ -2,13 +2,17 @@
 #include "Platform.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
-#include "webui.h"
+#include "webui_gz.h"
 #include "Net.h"
 #include "Gfx.h"
 #include "OtaUpdate.h"
 #include "StockClient.h"
 #include "UsageClient.h"
 #include "Clock.h"
+#include "Notify.h"
+#if HAS_TOUCH
+#include "Touch.h"
+#endif
 #if WITH_MINER
 #include "MinerCore.h"
 #include "MinerShaHw.h"
@@ -38,9 +42,12 @@ static void sendJson(JsonDocument& doc, int code = 200) {
   server.send(code, "application/json", out);
 }
 
+// The page ships gzipped (see tools/gen_webui.py): 47 KB of HTML became 15 KB
+// of flash, and every browser has understood Content-Encoding for decades.
 static void handleRoot() {
   server.sendHeader("Cache-Control", "no-cache");
-  server.send_P(200, "text/html", WEBUI_HTML);
+  server.sendHeader("Content-Encoding", "gzip");
+  server.send_P(200, "text/html", (PGM_P)WEBUI_GZ, WEBUI_GZ_LEN);
 }
 
 static void handleGetConfig() {
@@ -53,6 +60,7 @@ static void handleGetConfig() {
   feat["usage"]  = (bool)WITH_USAGE;
   feat["radar"]  = (bool)WITH_RADAR;
   feat["miner"]  = (bool)WITH_MINER;
+  feat["touch"]  = (bool)HAS_TOUCH;
   // Which chip this build runs on (the UI warns about per-chip limitations).
 #if defined(SMALLTV_ESP32C2)
   root["chip"] = "esp32c2";
@@ -279,48 +287,45 @@ static void handleUsagePush() {
               ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
-// Time every candidate hardware driving loop on the real chip and report both
-// speed and whether each still produces the correct digest. Blocks for well
-// under a second; the mining worker just waits for the SHA engine.
-static void handleMinerBench() {
+#if HAS_TOUCH
+// Live readings for every candidate channel. The setup page polls this so you
+// can watch the numbers move while touching the lid — which is how the pad's
+// GPIO gets identified, since no datasheet says where it is wired.
+static void handleTouchDiag() {
   JsonDocument doc;
   JsonObject o = doc.to<JsonObject>();
-#if WITH_MINER && MINER_HAS_SHA_HW
-  MinerHwBench res[8];
-  int n = minerHwBenchmark(res, 8);
-  JsonArray arr = o["variants"].to<JsonArray>();
-  for (int i = 0; i < n; i++) {
-    JsonObject e = arr.add<JsonObject>();
-    e["name"]    = res[i].name;
-    e["khs"]     = res[i].khs;
-    e["correct"] = res[i].correct;
+  TouchDiag d;
+  touchDiag(d);
+  JsonArray arr = o["channels"].to<JsonArray>();
+  for (uint8_t i = 0; i < d.count; i++) {
+    JsonObject c = arr.add<JsonObject>();
+    c["gpio"]     = d.gpio[i];
+    c["raw"]      = d.raw[i];
+    c["baseline"] = d.baseline[i];
+    c["delta"]    = d.delta[i];
+    c["pressed"]  = d.pressed[i];
   }
-  MinerHwProfile hp;
-  minerHwProfileEngine(hp);
-  JsonObject pr = o["profile"].to<JsonObject>();
-  pr["writes16"]    = hp.writes16;
-  pr["blockFull"]   = hp.blockFull;
-  pr["engineBlock"] = hp.engineBlock;
-  pr["loadPoll"]    = hp.loadPoll;
-  pr["probe"]       = hp.probe;
-  pr["cpuMHz"]      = hp.cpuMHz;
-  pr["ceilingKhs"]  = hp.ceilingKhs;
-  MinerHwClock cl[3];
-  int cn = minerHwClockScan(cl, 3);
-  JsonArray ca = o["clocks"].to<JsonArray>();
-  for (int i = 0; i < cn; i++) {
-    JsonObject c = ca.add<JsonObject>();
-    c["mhz"]         = cl[i].mhz;
-    c["khs"]         = cl[i].khs;
-    c["writes16"]    = cl[i].writes16;
-    c["engineBlock"] = cl[i].engineBlock;
-  }
-  o["ok"] = true;
-#else
-  o["ok"] = false;
-  o["error"] = "no hardware SHA engine on this build";
-#endif
+  o["configured"] = S->touch.gpio;
   sendJson(doc);
+}
+
+// Watch every channel for a few seconds and report which one the user tapped.
+static void handleTouchDetect() {
+  JsonDocument doc;
+  JsonObject o = doc.to<JsonObject>();
+  int gpio = touchDetect(4000);
+  o["ok"]   = (gpio >= 0);
+  o["gpio"] = gpio;
+  if (gpio < 0) o["error"] = "no clear touch seen";
+  sendJson(doc);
+}
+#endif
+
+// Anything on the LAN can interrupt the screen with a short message.
+static void handleNotify() {
+  if (!server.hasArg("plain")) { server.send(400, "text/plain", "no body"); return; }
+  bool ok = notifyApply(server.arg("plain"));
+  server.send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
 // ---- OTA ------------------------------------------------------------------
@@ -381,7 +386,11 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/checkupdate", HTTP_GET, handleCheckUpdate);
   server.on("/api/selfupdate", HTTP_POST, handleSelfUpdate);
   server.on("/api/usage", HTTP_POST, handleUsagePush);   // daemon pushes usage here
-  server.on("/api/minerbench", HTTP_POST, handleMinerBench);
+#if HAS_TOUCH
+  server.on("/api/touch", HTTP_GET, handleTouchDiag);
+  server.on("/api/touch/detect", HTTP_POST, handleTouchDetect);
+#endif
+  server.on("/notify", HTTP_POST, handleNotify);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
 
   // Common captive-portal probe endpoints

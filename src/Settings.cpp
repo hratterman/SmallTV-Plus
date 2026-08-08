@@ -302,6 +302,27 @@ void MinerSettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
+// Touch slice
+// ===========================================================================
+void TouchSettings::setDefaults() {
+  enabled   = true;
+  gpio      = DEFAULT_TOUCH_GPIO;
+  threshold = DEFAULT_TOUCH_THRESHOLD;
+}
+
+void TouchSettings::toJson(JsonObject o) const {
+  o["enabled"]   = enabled;
+  o["gpio"]      = gpio;
+  o["threshold"] = threshold;
+}
+
+void TouchSettings::fromJson(JsonObjectConst o) {
+  if (o["enabled"].is<bool>())  enabled = o["enabled"];
+  if (o["gpio"].is<int>())      gpio = (int8_t)constrain((int)o["gpio"], -1, 39);
+  if (o["threshold"].is<int>()) threshold = (uint8_t)constrain((int)o["threshold"], 3, 200);
+}
+
+// ===========================================================================
 // Top-level settings
 // ===========================================================================
 void Settings::setDefaults() {
@@ -330,6 +351,7 @@ void Settings::setDefaults() {
   usage.setDefaults();
   radar.setDefaults();
   miner.setDefaults();
+  touch.setDefaults();
   clock.setDefaults();
 }
 
@@ -416,6 +438,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.usage.toJson(root["usage"].to<JsonObject>());
   s.radar.toJson(root["radar"].to<JsonObject>());
   s.miner.toJson(root["miner"].to<JsonObject>());
+  s.touch.toJson(root["touch"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
 }
 
@@ -492,5 +515,6 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   // Radar/miner have no legacy flat layout; only apply when nested.
   if (root["radar"].is<JsonObjectConst>()) s.radar.fromJson(root["radar"].as<JsonObjectConst>());
   if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
+  if (root["touch"].is<JsonObjectConst>()) s.touch.fromJson(root["touch"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());
 }

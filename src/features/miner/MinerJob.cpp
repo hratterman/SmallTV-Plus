@@ -2,7 +2,6 @@
 #if WITH_MINER
 
 #include "MinerJob.h"
-#include "NerdSha256.h"
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -98,6 +97,37 @@ void minerSha256d(const uint8_t* in, size_t len, uint8_t out[32]) {
   uint8_t tmp[32];
   minerSha256(in, len, tmp);
   minerSha256(tmp, 32, out);
+}
+
+// The software mining path. The header's first block is identical for every
+// nonce in a job, so it is compressed once into a midstate and only the second
+// block is redone per attempt — the same trick the hardware engine cannot do,
+// which is why software needs two compressions per nonce where hardware needs
+// three. (A fully unrolled version of this was ~25 KB of IRAM for about 7% of
+// total hashrate; with the SHA peripheral carrying the rest, the rolled loop is
+// the better trade for the OTA budget.)
+void minerMidstate(const uint8_t block1[64], uint32_t state[8]) {
+  state[0] = 0x6a09e667; state[1] = 0xbb67ae85;
+  state[2] = 0x3c6ef372; state[3] = 0xa54ff53a;
+  state[4] = 0x510e527f; state[5] = 0x9b05688c;
+  state[6] = 0x1f83d9ab; state[7] = 0x5be0cd19;
+  sha256Block(state, block1);
+}
+
+void minerSha256dFromMidstate(const uint32_t midstate[8], const uint8_t block2[64],
+                              uint8_t out[32]) {
+  uint32_t h[8];
+  memcpy(h, midstate, sizeof(h));
+  sha256Block(h, block2);
+
+  uint8_t first[32];
+  for (int i = 0; i < 8; i++) {
+    first[i * 4]     = (uint8_t)(h[i] >> 24);
+    first[i * 4 + 1] = (uint8_t)(h[i] >> 16);
+    first[i * 4 + 2] = (uint8_t)(h[i] >> 8);
+    first[i * 4 + 3] = (uint8_t)(h[i]);
+  }
+  minerSha256(first, 32, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,8 +237,7 @@ bool minerBuildWork(const char* version, const char* prevHash,
   h[126] = 0x02;
   h[127] = 0x80;
 
-  nerd_mids(out.midstate, h);
-  nerd_sha256_bake(out.midstate, h + 64, out.bake);
+  minerMidstate(h, out.midstate);
 
   return minerTargetFromNbits(nbits, out.targetLE);
 }

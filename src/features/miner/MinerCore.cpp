@@ -13,7 +13,6 @@
 #include "MinerCore.h"
 #include "MinerJob.h"
 #include "Stratum.h"
-#include "NerdSha256.h"
 #include "MinerShaHw.h"
 
 #include <WiFi.h>
@@ -199,8 +198,10 @@ static void minerWorkerTask(void* arg) {
 #endif
       } else {
         memcpy(work.header + 76, &nonce, 4);
-        // All but ~1/65536 nonces bail out inside here without finishing.
-        solved = nerd_sha256d_baked(work.midstate, work.header + 64, work.bake, hash);
+        minerSha256dFromMidstate(work.midstate, work.header + 64, hash);
+        // The cheap reject the hardware path gets from its digest register:
+        // any hash worth submitting ends in at least 16 zero bits.
+        solved = (hash[30] == 0 && hash[31] == 0);
       }
 
       if (solved) {

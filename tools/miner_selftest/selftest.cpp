@@ -3,7 +3,7 @@
 // The mining hot path is unobservable on the device: a wrong header byte or a
 // mis-ported SHA round makes the cube hash happily forever and never find a
 // share, which looks exactly like bad luck. So the platform-free half of the
-// miner (MinerJob.cpp + NerdSha256.cpp) is compiled natively here and checked
+// miner (MinerJob.cpp) is compiled natively here and checked
 // against known-good Bitcoin data.
 //
 // Build and run:  tools/miner_selftest/run.sh
@@ -13,7 +13,6 @@
 #include <stdlib.h>
 
 #include "MinerJob.h"
-#include "NerdSha256.h"
 
 static int g_fail = 0;
 
@@ -87,34 +86,18 @@ static void testBlock125552() {
   check(!strcmp(disp, knownHash),
         "test vector is sound: generic SHA-256d of the header gives the block hash");
 
-  uint32_t midstate[8], bake[16];
-  nerd_mids(midstate, header);
-  nerd_sha256_bake(midstate, header + 64, bake);
+  uint32_t midstate[8];
+  minerMidstate(header, midstate);
 
   uint8_t hash[32];
-  bool solved = nerd_sha256d_baked(midstate, header + 64, bake, hash);
-  check(solved, "block 125552's nonce survives the 16-bit early exit");
-  if (solved) {
-    hashToDisplay(hash, disp);
-    check(!strcmp(disp, knownHash),
-          "nerd_sha256d_baked reproduces block 125552's hash");
-    check(!memcmp(ref, hash, 32),
-          "optimized and generic SHA-256d agree on the same header");
-  }
-
-  // The early exit must reject wrong nonces, and must never reject a good one.
-  int survivors = 0;
-  for (uint32_t n = winning - 500; n != winning + 500; n++) {
-    memcpy(header + 76, &n, 4);
-    uint8_t h2[32];
-    if (nerd_sha256d_baked(midstate, header + 64, bake, h2)) {
-      survivors++;
-      // Anything that survives must genuinely end in 16 zero bits.
-      check(h2[30] == 0 && h2[31] == 0, "a surviving hash really has 16 zero bits");
-    }
-  }
-  check(survivors >= 1, "the early exit lets the winning nonce through");
-  printf("       (%d of 1000 neighbouring nonces survived the early exit)\n", survivors);
+  minerSha256dFromMidstate(midstate, header + 64, hash);
+  hashToDisplay(hash, disp);
+  check(!strcmp(disp, knownHash),
+        "midstate path reproduces block 125552's hash");
+  check(!memcmp(ref, hash, 32),
+        "midstate and full-message SHA-256d agree on the same header");
+  check(hash[30] == 0 && hash[31] == 0,
+        "a share-worthy hash ends in 16 zero bits (the software reject test)");
 
   // Target and validity for this block.
   uint8_t targetLE[32];
@@ -175,13 +158,10 @@ static void testJobAssembly(const char* expectedHeaderHex,
   check(!strcmp((char*)disp, expectedHashDisplay),
         "header hashes to the reference digest for a fixed nonce");
 
-  // And the optimized path must agree with the generic one, early exit aside.
+  // And the midstate path must agree with the generic one on assembled work.
   uint8_t fast[32];
-  if (nerd_sha256d_baked(w.midstate, w.header + 64, w.bake, fast))
-    check(!memcmp(fast, ref, 32), "optimized path agrees on the assembled header");
-  else
-    check(!(ref[30] == 0 && ref[31] == 0),
-          "optimized path only early-exits on hashes that lack 16 zero bits");
+  minerSha256dFromMidstate(w.midstate, w.header + 64, fast);
+  check(!memcmp(fast, ref, 32), "midstate path agrees on the assembled header");
 }
 
 // ---------------------------------------------------------------------------

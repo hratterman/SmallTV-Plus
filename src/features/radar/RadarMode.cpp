@@ -182,6 +182,18 @@ static void drawRadar(const Settings& s) {
 }
 
 // ---- DisplayMode ----------------------------------------------------------
+// Long-press steps the outer ring through the same choices the web UI offers, so
+// you can widen the view from the couch without opening a browser. Runtime only
+// — the saved range is untouched.
+void RadarMode::onContextAction(Settings& s) {
+  static const uint16_t kRanges[] = {5, 10, 15, 25, 50};
+  const uint8_t n = sizeof(kRanges) / sizeof(kRanges[0]);
+  uint8_t i = 0;
+  while (i < n && kRanges[i] != s.radar.rangeKm) i++;
+  s.radar.rangeKm = kRanges[(i + 1) % n];
+  needRender_ = true;
+}
+
 void RadarMode::begin(const Settings& s) {
   radarInit(s);
   renderedOk_ = 0xFFFFFFFF;

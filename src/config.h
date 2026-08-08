@@ -184,6 +184,23 @@
 #define DEFAULT_RADAR_POLL_SEC  10     // >=3 keeps us under the 1 req/s limit
 
 // ---------------------------------------------------------------------------
+// Capacitive touch pad (ESP32 only — native touch sensing lives on specific
+// GPIOs the other chips do not have). The pad on the NM-TV-154's lid is wired
+// and readable, but which GPIO it lands on is undocumented, so the pin is a
+// setting the web UI can discover by watching every candidate while you tap.
+// ---------------------------------------------------------------------------
+#ifndef HAS_TOUCH
+#if defined(SMALLTV_ESP32)
+#define HAS_TOUCH 1
+#else
+#define HAS_TOUCH 0
+#endif
+#endif
+
+#define DEFAULT_TOUCH_GPIO      -1    // -1 = not found yet; run detection
+#define DEFAULT_TOUCH_THRESHOLD 20    // baseline minus reading, in touch units
+
+// ---------------------------------------------------------------------------
 // Bitcoin miner (MODE_MINER): solo-mines against a stratum pool, mining core
 // ported from BitMaker-hub/NerdMiner_v2. Mining needs a BTC address set in
 // the web UI; until then the mode just shows a prompt.

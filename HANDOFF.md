@@ -6,6 +6,35 @@ This repo is my fork of giovi321/smalltv-mod, open firmware for a GeekMagic-styl
 
 **Mission: add a fourth mode called "Miner" that solo-mines bitcoin against a pool, by porting the mining core from NerdMiner_v2 (cloned at ../NerdMiner_v2).** The cube originally shipped as an NMMiner lottery miner doing 1043 KH/s on closed firmware. We are rebuilding that capability inside this open codebase, then trying to beat that number.
 
+## Status
+
+Miner: **done through M5.** Hybrid engine (SHA peripheral on core 0, software on
+core 1) at ~375 KH/s, up from ~50 KH/s dual-core software. Every optimization
+was measured on the device, and the ones that lost are recorded in
+`MinerShaHw.cpp` so nobody retries them.
+
+The 1043 KH/s target turned out not to be a like-for-like number. Three
+compressions per nonce are forced on this chip (its SHA engine cannot be seeded
+with a midstate), and at the measured 92 cycles each that caps the hardware at
+869 KH/s **even with the CPU doing nothing**. NMMiner's 1035 sits 19% above that
+ceiling, and matches what you get counting SHA-256 compressions rather than
+nonce attempts — 375 KH/s of nonces is ~1.13 M compressions/s. The realistic
+floor for this silicon is ~447 KH/s and we are at ~84% of it.
+
+Phase 2: **B1-B3 done.** The lid pad is discovered from the web UI (Touch tab)
+rather than needing a diagnostic build, and tap / double-tap / long-press are
+wired globally. B4 is partly there: radar cycles its range on long-press, the
+other modes' context actions are no-ops behind an existing hook.
+
+Phase 3: **notification flash done** (`POST /notify`). The rest is untouched.
+
+Flash budget: 93.3% of the OTA slot, ~102 KB free. It was 95.9% before a
+cleanup pass that gzipped the web UI (-33 KB), dropped the mining benchmark
+scaffolding (-13 KB), and replaced the fully unrolled software SHA with a
+compact midstate version (-25 KB, costing ~3% of hashrate that the hardware
+engine now dwarfs). Keep an eye on this: it is the binding constraint on every
+remaining feature, and `tools/gen_webui.py` means UI additions are nearly free.
+
 ## Hardware facts (verified, do not re-derive)
 
 - Board: NM-TV-154, PCB marked "NM-TV-Miner"
@@ -57,11 +86,18 @@ Development happens in a remote Claude Code session; we don't share a filesystem
 
 The cube has a capacitive touch pad on top. The stock NMMiner firmware used it to switch pages, so it is wired and readable; smalltv-mod currently ignores it entirely. The ESP32 has native capacitive touch sensing on specific GPIOs (touch0-touch9), so the pad is almost certainly on one of those pins.
 
-**B1: Discovery.** Ship a diagnostic build that reads all ESP32 touch channels and shows their raw values on screen (or serial). I tap the top; we identify the pin and a sane threshold. Check src/board_esp32.h and NMMiner's NM-TV custom firmware guide first in case the pin is already documented.
+**B1: Discovery. DONE** — better than a diagnostic build. Six of the ten ESP32
+touch channels are free (the rest drive the display), and the firmware reads all
+six live. The Touch tab has "Find the pad": tap the lid for four seconds and it
+reports which GPIO moved, with live per-channel readings as a manual fallback.
 
-**B2: Gesture layer.** A small input module producing three events with debouncing: tap, double-tap, long-press (~700ms). Calibration threshold configurable in the web UI in case temperature/humidity drifts the baseline.
+**B2: Gesture layer. DONE** — `src/Touch.{h,cpp}`. Tap, double-tap and
+long-press with debouncing; the baseline is a slow moving average taken only
+while released, so drift is handled and a resting finger can never train the
+baseline onto itself. Threshold is in the web UI.
 
-**B3: Global grammar.** Wire the events consistently across all modes:
+**B3: Global grammar. DONE** — in main.cpp, runtime-only (no flash writes, so a
+reboot returns to the saved mode):
 - Tap: advance to the next mode (manual carousel)
 - Long-press: mode-specific context action (each mode registers its own; default no-op)
 - Double-tap: display off/on (overrides the night schedule until the next tap)
@@ -74,7 +110,10 @@ Each mode is its own milestone: registers in the carousel, has a web UI tab if i
 
 1. **Server status mode.** Polls a JSON endpoint on my Mac Mini home server showing service health: Jellyfin up/down, Minecraft player count, Cloudflare tunnel status, Mini CPU/temp. Also write the companion endpoint (a small script/server suitable for running on the Mini via Docker or launchd) as part of this milestone, in a `tools/` or separate folder. Design the JSON schema so adding fields later doesn't require reflashing.
 2. **Googly eyes idle mode.** Recreate the stock GeekMagic googly-eyes clock face (eyes that blink/look around, city name + time) as an idle/screensaver mode. Original-style pixel art, drawn by us, not extracted assets. This is a callback and it should feel like one.
-3. **Notification flash.** The cube exposes a tiny HTTP endpoint (POST /notify with text + duration + optional color). Anything on my LAN can push a banner that interrupts the current mode for N seconds, then it returns. I'll wire the Mini to send these.
+3. **Notification flash. DONE** — `POST /notify` with
+   `{"text":..., "sec":8, "color":"#rrggbb"}`. Word-wrapped, auto-sized, accent
+   bars top and bottom; a lid tap clears it early. The Status tab shows a ready
+   curl line and a test button.
 4. **Countdown mode.** One or more configurable countdowns (label + date) from the web UI, days/hours remaining, rotates if multiple.
 5. **Pomodoro mode.** Long-press starts a 25-minute focus ring that visibly drains; tap dismisses the break alert. Durations configurable. This mode is only worth building after Phase 2, since the button is its whole interface.
 6. **Pixel-art/GIF frame mode.** Upload small images or GIFs via the web UI, stored in flash (mind the filesystem budget; warn me before layouts that would fight the OTA partition), displayed as a frame mode. Flash wear note: image writes should be occasional by design, not automatic.

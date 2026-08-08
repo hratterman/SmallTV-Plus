@@ -23,4 +23,10 @@ class DisplayMode {
   // Another mode drew on the screen (carousel switch): repaint from cached data,
   // do NOT refetch. Falls back to invalidate for modes without a light path.
   virtual void wake(const Settings& s) { invalidate(s); }
+
+  // Long-press on the lid pad, while this mode is showing. Each mode decides
+  // what its own gesture means; the default is to do nothing. Settings are
+  // mutable so a mode can adjust its own slice, but changes are runtime-only —
+  // nothing here writes flash, so a reboot returns to the saved configuration.
+  virtual void onContextAction(Settings& s) {}
 };

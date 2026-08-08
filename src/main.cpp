@@ -18,6 +18,7 @@
 #include "OtaUpdate.h"
 #include "Mode.h"
 #include "Clock.h"
+#include "Notify.h"
 
 #if WITH_TICKER
 #include "TickerMode.h"
@@ -30,6 +31,9 @@
 #endif
 #if WITH_MINER
 #include "MinerMode.h"
+#endif
+#if HAS_TOUCH
+#include "Touch.h"
 #endif
 
 // ---- mode registry --------------------------------------------------------
@@ -50,6 +54,14 @@ static DisplayMode* kModes[] = {
 #endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
+
+#if HAS_TOUCH
+// Touch state. Both are deliberately runtime-only: a tap changing the mode or
+// blanking the screen should not rewrite flash, and a reboot returns the cube to
+// whatever the web UI has saved.
+static int8_t g_modeOverride = -1;    // index into kModes; -1 = follow settings
+static bool   g_displayOff   = false;
+#endif
 
 // ---- carousel -------------------------------------------------------------
 // MODE_CAROUSEL rotates through the ticked features. Switches call wake() on
@@ -81,6 +93,11 @@ static void carouselNext(const Settings& s) {
 }
 
 static DisplayMode* activeMode(const Settings& s) {
+#if HAS_TOUCH
+  // A tap parks the carousel on one mode until the next tap.
+  if (g_modeOverride >= 0 && (size_t)g_modeOverride < kModeCount)
+    return kModes[g_modeOverride];
+#endif
   if (s.mode == MODE_CAROUSEL && kModeCount > 0) {
     if (g_carSwitch == 0) g_carSwitch = millis();
     if (!carouselHas(s, kModes[g_carIdx])) carouselNext(s);   // settings changed
@@ -109,6 +126,9 @@ static uint8_t  g_ldrCache   = DEFAULT_BRIGHTNESS;   // last LDR reading (2 s ca
 // Single brightness resolver: night mode overrides auto-brightness overrides the
 // manual level. Only writes the PWM when the effective target changes.
 static uint8_t appEffectiveBrightness() {
+#if HAS_TOUCH
+  if (g_displayOff) return 0;          // double-tap wins over the night schedule
+#endif
   if (clockNightActive()) return g_settings.clock.nightLevel;
 #if HAS_LDR
   if (g_settings.autoBrightness) {
@@ -138,7 +158,43 @@ const char* appResetReason() { return g_resetReason.c_str(); }
 // force a fresh repaint so a mode/URL/symbol change takes effect immediately.
 void appInvalidate() {
   for (size_t i = 0; i < kModeCount; i++) kModes[i]->invalidate(g_settings);
+#if HAS_TOUCH
+  touchInvalidate(g_settings);
+#endif
 }
+
+#if HAS_TOUCH
+// One grammar, every mode. Tap moves through the modes, double-tap blanks the
+// screen, and long-press is handed to whichever mode is showing.
+static void appHandleTouch(TouchEvent ev) {
+  switch (ev) {
+    case TOUCH_TAP:
+      if (g_displayOff) { g_displayOff = false; appApplyBrightness(); break; }
+      if (notifyActive()) { notifyDismiss(); break; }   // tap clears a banner
+      if (kModeCount) {
+        g_modeOverride = (int8_t)(((g_modeOverride < 0 ? 0 : g_modeOverride) + 1) % kModeCount);
+        kModes[g_modeOverride]->wake(g_settings);
+      }
+      break;
+
+    case TOUCH_DOUBLE:
+      g_displayOff = !g_displayOff;
+      appApplyBrightness();
+      if (!g_displayOff) {
+        DisplayMode* m = activeMode(g_settings);
+        if (m) m->wake(g_settings);    // repaint what was on screen
+      }
+      break;
+
+    case TOUCH_LONG: {
+      DisplayMode* m = activeMode(g_settings);
+      if (m) m->onContextAction(g_settings);
+      break;
+    }
+    default: break;
+  }
+}
+#endif
 
 static void bootProgress(const char* msg) {
   gfxBoot("SmallTV", msg);
@@ -200,6 +256,10 @@ void setup() {
   Serial.println("[boot] web");
   webPortalBegin(g_settings);
 
+#if HAS_TOUCH
+  touchBegin(g_settings);
+#endif
+
   Serial.println("[boot] modes");
   for (size_t i = 0; i < kModeCount; i++) kModes[i]->begin(g_settings);
   Serial.println("[boot] done");
@@ -242,6 +302,28 @@ void loop() {
   // (night override / auto-brightness / manual level).
   clockService(g_settings);
   appApplyBrightness();
+
+#if HAS_TOUCH
+  {
+    TouchEvent ev = touchService(g_settings);
+    if (ev != TOUCH_NONE) appHandleTouch(ev);
+  }
+  if (g_displayOff) { delay(5); return; }   // screen blanked; nothing to draw
+#endif
+
+  // A pushed banner owns the screen while it lasts, then the mode repaints.
+  static bool s_hadNotify = false;
+  if (notifyActive()) {
+    notifyService();
+    s_hadNotify = true;
+    delay(5);
+    return;
+  }
+  if (s_hadNotify) {
+    s_hadNotify = false;
+    DisplayMode* back = activeMode(g_settings);
+    if (back) back->wake(g_settings);
+  }
 
   DisplayMode* m = activeMode(g_settings);
   if (m) m->service(g_settings);

@@ -19,7 +19,6 @@
 struct MinerWork {
   uint8_t  header[128];   // 80-byte block header + SHA-256 padding
   uint32_t midstate[8];   // first 64-byte block, hashed once per job
-  uint32_t bake[16];      // nonce-independent part of the second block
   uint8_t  targetLE[32];  // network target, same byte order as the hash
 };
 
@@ -29,6 +28,14 @@ int minerHexToBytes(const char* in, size_t inLen, uint8_t* out);
 // SHA-256 and the double-SHA bitcoin uses everywhere.
 void minerSha256(const uint8_t* in, size_t len, uint8_t out[32]);
 void minerSha256d(const uint8_t* in, size_t len, uint8_t out[32]);
+
+// Hash the header's first 64-byte block into a midstate, once per job.
+void minerMidstate(const uint8_t block1[64], uint32_t state[8]);
+
+// The per-nonce software double hash: resume from the midstate over the second
+// 64-byte block, then hash that digest again.
+void minerSha256dFromMidstate(const uint32_t midstate[8], const uint8_t block2[64],
+                              uint8_t out[32]);
 
 // Expand compact nbits ("1a44b9f2") into a 32-byte target laid out
 // little-endian, i.e. the byte order the double-SHA output comes back in.

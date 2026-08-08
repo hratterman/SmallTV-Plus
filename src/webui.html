@@ -1,12 +1,4 @@
-// webui.h — single-page config UI served from PROGMEM
-//
-// Tabs are segmented per feature: shared Status/WiFi/Display/Update plus one tab
-// per feature (Ticker / Usage; Radar is added with WITH_RADAR). The config JSON
-// mirrors the nested Settings layout: { ..shared.., ticker:{...}, usage:{...} }.
-#pragma once
-#include <Arduino.h>
-
-static const char WEBUI_HTML[] PROGMEM = R"HTMLPAGE(<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -64,6 +56,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="usage">Usage</button>
  <button data-t="radar">Radar</button>
  <button data-t="miner">Miner</button>
+ <button data-t="touch">Touch</button>
  <button data-t="update">Update</button>
 </nav>
 <main>
@@ -73,6 +66,13 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   <div class="card"><h2>Tickers</h2><div id="tickBox" class="muted">-</div>
    <button class="btn sec" style="margin-top:10px" onclick="refreshNow()">Refresh data now</button></div>
   <div class="card" id="minerCard" style="display:none"><h2>Miner</h2><div id="minerBox" class="muted">-</div></div>
+  <div class="card"><h2>Push a message</h2>
+   <div class="muted">Anything on your network can interrupt the screen with a banner:</div>
+   <pre style="background:#0b0e13;border:1px solid var(--bd);border-radius:8px;padding:10px;overflow-x:auto;font-size:12px;margin:8px 0 0"><code>curl -X POST http://<span id="notifyHost">smalltv.local</span>/notify \
+  -d '{"text":"Build finished","sec":8,"color":"#3fb950"}'</code></pre>
+   <div style="margin-top:10px"><button class="btn sec" onclick="notifyTest()">Send a test banner</button></div>
+   <small class="hint"><code>sec</code> defaults to 8 (max 120) and <code>color</code> is any hex like <code>#f7931a</code>; only <code>text</code> is required. The banner takes over whichever mode is showing, then hands the screen back. A tap on the lid clears it early.</small>
+  </div>
  </section>
 
  <!-- WIFI -->
@@ -271,11 +271,32 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="hybrid">Hybrid (hardware SHA + software)</option>
     <option value="sw">Software only (both cores)</option>
    </select>
-   <div style="margin-top:14px"><button class="btn sec" onclick="minerBench()" id="benchBtn">Benchmark hash engines</button></div>
-   <div id="benchOut" class="muted" style="margin-top:10px"></div>
-   <small class="hint">The benchmark times every candidate hardware driving loop back to back on this chip and checks each one's digest against the software implementation, so a variant that is fast because it is broken shows up as wrong rather than silently mining garbage. Takes about a second; mining pauses while it runs.</small>
    <small class="hint">Hybrid puts core&nbsp;0 on the ESP32's SHA peripheral and leaves core&nbsp;1 on software; measured on this board that is roughly <b>380&nbsp;KH/s vs 50&nbsp;KH/s</b>, so it is the default. Only one core can hold the peripheral at a time, so this is the fastest arrangement available. The Status tab reports each core separately if you want to re-measure. The peripheral is checked against the software result before its first share and falls back automatically if they disagree. Switching takes effect within a second, no reboot.</small>
    <small class="hint">Solo lottery mining against a stratum pool (default <code>solo.ckpool.org:3333</code>): jobs come from the pool, and in the astronomically unlikely event of a found block it pays out to this address. Mining runs in the background whenever enabled and an address is set, even while another mode is on screen. It uses otherwise-idle CPU; display and web UI keep priority.</small>
+  </div>
+ </section>
+
+ <!-- TOUCH (device-wide input) -->
+ <section id="touch" class="tab">
+  <div class="card"><h2>Lid button</h2>
+   <div class="chk"><input id="touchEnabled" type="checkbox"><label>Touch pad enabled</label></div>
+   <small class="hint">The pad on top of the cube is wired to one of the ESP32's capacitive touch pins, but nothing documents which. Press Find the pad, then tap the lid a few times &mdash; whichever channel reacts is yours. The live readings below drop when a channel is touched.</small>
+   <div style="margin-top:12px">
+    <button class="btn" onclick="touchDetect()" id="tdBtn">Find the pad</button>
+    <button class="btn sec" style="margin-left:8px" onclick="touchWatch()" id="twBtn">Live readings</button>
+   </div>
+   <div id="tdMsg" class="muted" style="margin-top:10px"></div>
+   <div id="tdList" style="margin-top:8px"></div>
+   <label style="margin-top:14px">Detected pin</label>
+   <select id="touchGpio"><option value="-1">Not set</option></select>
+   <label>Sensitivity <span class="muted">(lower = more sensitive)</span></label>
+   <input id="touchThreshold" type="number" min="3" max="200">
+  </div>
+  <div class="card"><h2>Gestures</h2>
+   <div class="kv"><span>Tap</span><b>Next mode</b></div>
+   <div class="kv"><span>Double-tap</span><b>Screen off / on</b></div>
+   <div class="kv"><span>Long press</span><b>Current mode's action</b></div>
+   <small class="hint">Tap parks the cube on one mode until you tap again, and does not change the saved setting &mdash; a reboot returns to whatever is configured on the Display tab. Double-tap overrides the night schedule until you tap again.</small>
   </div>
  </section>
 
@@ -372,6 +393,7 @@ function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
 var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner'};
+var TOUCHGPIOS=[4,0,12,27,33,32];
 var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
@@ -383,6 +405,7 @@ function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
  var f=c.features||{}; ['ticker','usage','radar','miner'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ if(f.touch===false){var tb=document.querySelector('nav button[data-t="touch"]');if(tb)tb.remove();var ts=$('touch');if(ts)ts.remove();}
  var t=c.ticker||{}, u=c.usage||{};
  // shared
  ['apSsid','apPass','hostname'].forEach(function(k){$(k).value=c[k]!=null?c[k]:''});
@@ -431,6 +454,13 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
  sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
  sv('minerEngine',mn.engine||'sw');
+ // touch slice
+ var tc=c.touch||{};
+ if($('touchGpio')){var g=$('touchGpio');g.innerHTML='<option value="-1">Not set</option>'+
+   TOUCHGPIOS.map(function(n){return '<option value="'+n+'">GPIO '+n+'</option>'}).join('');}
+ sc('touchEnabled',tc.enabled!==false);
+ sv('touchGpio',tc.gpio!=null?tc.gpio:-1);
+ sv('touchThreshold',tc.threshold!=null?tc.threshold:20);
  var ap=$('apPass'); if(ap)ap.placeholder=c.apPassSet?'(unchanged)':'(open)';
 })}
 
@@ -525,6 +555,8 @@ function collect(){
   o.radar=r;
  }
  // miner slice
+ if($('touch')) o.touch={enabled:gc('touchEnabled'),
+  gpio:parseInt(gv('touchGpio')), threshold:parseInt(gv('touchThreshold'))||20};
  if($('miner')) o.miner={enabled:gc('minerEnabled'),
   poolHost:gv('poolHost').trim(), poolPort:parseInt(gv('poolPort'))||3333,
   btcAddress:gv('btcAddress').trim(), workerName:gv('minerWorker').trim(),
@@ -600,6 +632,7 @@ function loadStatus(){j('/api/status').then(function(s){
  if(!window._otaShown){window._otaShown=1;var gm=$('ghMsg');if(gm&&!gm.textContent&&s.updateMsg&&s.updateMsg!=='updating...')gm.textContent='Last update: '+s.updateMsg}
  var fv=$('footVer'); if(fv)fv.textContent=' v'+s.version;
  if(s.repo){var rl=$('repoLink'); if(rl)rl.href=s.repo+'/releases'; var fr=$('footRepo'); if(fr)fr.href=s.repo;}
+ var nh=$('notifyHost'); if(nh)nh.textContent=(C.hostname||'smalltv')+'.local';
  $('statusBox').innerHTML=
   kv('Firmware',s.fw+' '+s.version)+kv('Mode',s.mode.toUpperCase())+
   kv('Network',s.ssid||'-')+kv('IP',s.ip||'-')+kv('mDNS','http://'+(C.hostname||'smalltv')+'.local')+
@@ -626,25 +659,25 @@ function loadStatus(){j('/api/status').then(function(s){
     kv('Mining for',fmtUp(m.uptime));
  }
 })}
-function minerBench(){var b=$('benchBtn');if(!b)return;b.disabled=true;
- $('benchOut').innerHTML='Running on the device...';
- j('/api/minerbench',{method:'POST'}).then(function(r){b.disabled=false;
-  if(!r.ok){$('benchOut').textContent='Not available: '+(r.error||'unknown');return}
-  var best=0;(r.variants||[]).forEach(function(v){if(v.correct&&v.khs>best)best=v.khs});
-  $('benchOut').innerHTML=(r.variants||[]).map(function(v){
-   var tag=v.correct?(v.khs===best?' <b style="color:var(--acc)">fastest</b>':'')
-                    :' <b style="color:var(--red)">wrong digest</b>';
-   return '<div class="kv"><span>'+esc(v.name)+tag+'</span><b>'+fmtHash(v.khs*1000)+'</b></div>'}).join('')
-   +(r.profile?('<div style="margin-top:10px" class="muted">Cycle profile of one nonce at '+r.profile.cpuMHz+' MHz</div>'
-     +kv('16 register writes',r.profile.writes16+' cyc')
-     +kv('engine block compression',r.profile.engineBlock+' cyc')
-     +kv('digest load + poll',r.profile.loadPoll+' cyc')
-     +kv('early-exit probe',r.profile.probe+' cyc')
-     +kv('<b>ceiling (3 blocks, no CPU cost)</b>','<b>'+fmtHash(r.profile.ceilingKhs*1000)+'</b>')):'')
-   +((r.clocks&&r.clocks.length)?('<div style="margin-top:10px" class="muted">Clock scaling &mdash; cycles constant means it rides the CPU clock, cycles rising means a fixed peripheral bus</div>'
-     +r.clocks.map(function(c){return kv(c.mhz+' MHz',fmtHash(c.khs*1000)
-       +' <span class="muted">('+c.writes16+' cyc writes, '+c.engineBlock+' cyc block)</span>')}).join('')):'');
- }).catch(function(){b.disabled=false;$('benchOut').textContent='Benchmark failed'})}
+var twTimer=null;
+function touchRows(l){return (l||[]).map(function(c){
+ var hot=c.pressed?' style="color:var(--acc)"':'';
+ return '<div class="kv"'+hot+'><span>GPIO '+c.gpio+'</span><b>'+c.raw+' <span class="muted">(base '+c.baseline+', delta '+c.delta+')</span></b></div>'}).join('')}
+function touchWatch(){var b=$('twBtn');if(!b)return;
+ if(twTimer){clearInterval(twTimer);twTimer=null;b.textContent='Live readings';return}
+ b.textContent='Stop';
+ var tick=function(){j('/api/touch').then(function(r){$('tdList').innerHTML=touchRows(r.channels)}).catch(function(){})};
+ tick();twTimer=setInterval(tick,400);}
+function touchDetect(){var b=$('tdBtn');if(!b)return;b.disabled=true;
+ $('tdMsg').textContent='Tap the top of the cube now...';
+ j('/api/touch/detect',{method:'POST'}).then(function(r){b.disabled=false;
+  if(!r.ok){$('tdMsg').innerHTML='<span style="color:var(--red)">Nothing clear detected.</span> Try tapping firmly, or use Live readings to watch the channels by hand.';return}
+  sv('touchGpio',r.gpio);
+  $('tdMsg').innerHTML='Found the pad on <b>GPIO '+r.gpio+'</b>. Press Save settings to keep it.';
+ }).catch(function(){b.disabled=false;$('tdMsg').textContent='Detection failed'})}
+function notifyTest(){j('/notify',{method:'POST',headers:{'Content-Type':'application/json'},
+ body:JSON.stringify({text:'Hello from the web UI',sec:6,color:'#2f81f7'})})
+ .then(function(){toast('Banner sent')}).catch(function(){toast('Failed')})}
 function fmtHash(h){h=h||0;
  if(h>=1e9)return (h/1e9).toFixed(2)+' GH/s';
  if(h>=1e6)return (h/1e6).toFixed(2)+' MH/s';
@@ -716,4 +749,4 @@ function upload(){var f=$('fw').files[0];if(!f){toast('Pick a .bin first');retur
 loadConfig().then(loadStatus);
 setInterval(loadStatus,5000);
 </script>
-</body></html>)HTMLPAGE";
+</body></html>

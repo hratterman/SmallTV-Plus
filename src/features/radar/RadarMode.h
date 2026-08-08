@@ -20,6 +20,7 @@ class RadarMode : public DisplayMode {
   void service(const Settings& s) override;
   void invalidate(const Settings& s) override;
   void wake(const Settings& s) override { needRender_ = true; }  // repaint only
+  void onContextAction(Settings& s) override;   // long-press: cycle the range
 
  private:
   void render(const Settings& s);
