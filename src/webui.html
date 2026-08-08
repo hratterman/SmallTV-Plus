@@ -55,6 +55,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="ticker">Ticker</button>
  <button data-t="usage">Usage</button>
  <button data-t="radar">Radar</button>
+ <button data-t="clock">Clock</button>
+ <button data-t="spotify">Spotify</button>
  <button data-t="miner">Miner</button>
  <button data-t="touch">Touch</button>
  <button data-t="update">Update</button>
@@ -106,6 +108,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="usage">Claude usage</option>
     <option value="radar">Plane radar</option>
     <option value="miner">Bitcoin miner</option>
+    <option value="clock">Clock</option>
+    <option value="spotify">Spotify now playing</option>
     <option value="carousel">Carousel (rotate modes)</option>
    </select>
    <div id="carouselRow">
@@ -114,6 +118,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div class="chk"><input id="carouselUsage" type="checkbox"><label>Claude usage</label></div>
     <div class="chk"><input id="carouselRadar" type="checkbox"><label>Plane radar</label></div>
     <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
+    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
+    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
    </div>
    <small class="hint">Pick the active feature, then configure it in its own tab. Carousel rotates through the ticked features.</small>
   </div>
@@ -276,6 +282,34 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   </div>
  </section>
 
+ <!-- CLOCK (feature) -->
+ <section id="clock" class="tab">
+  <div class="card"><h2>Clock face</h2>
+   <label>Hour format</label>
+   <select id="clockMode12h"><option value="false">24-hour</option><option value="true">12-hour</option></select>
+   <div class="chk" style="margin-top:10px"><input id="clockShowSeconds" type="checkbox"><label>Seconds sweep bar</label></div>
+   <div class="chk"><input id="clockShowDate" type="checkbox"><label>Date</label></div>
+   <small class="hint">Time comes from NTP using the timezone set on the Display tab, so DST is handled for you. The clock only syncs when something needs it &mdash; selecting this mode is enough. A dot appears top-right if the last sync is too old to trust. Long-press the lid pad to flip 12/24-hour.</small>
+  </div>
+ </section>
+
+ <!-- SPOTIFY (feature) -->
+ <section id="spotify" class="tab">
+  <div class="card"><h2>Now playing</h2>
+   <div class="chk"><input id="spotifyEnabled" type="checkbox"><label>Enabled</label></div>
+   <div class="chk"><input id="spotifyAutoShow" type="checkbox"><label>Take over the screen while something is playing</label></div>
+   <label>Client ID</label><input id="spotifyClientId" type="text" placeholder="from developer.spotify.com">
+   <label>Client secret</label><input id="spotifyClientSecret" type="password" placeholder="(unchanged)">
+   <label>Refresh token</label><input id="spotifyRefreshToken" type="password" placeholder="(unchanged)">
+   <label>Poll every (s)</label><input id="spotifyPollSec" type="number" min="5" max="300">
+   <small class="hint"><b>Linking, once.</b> Spotify only allows HTTPS or loopback redirect URIs, and the cube can offer neither, so the browser half runs on your computer:
+    <br>1. <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com/dashboard</a> &rarr; Create app, redirect URI <code>http://127.0.0.1:8888/callback</code>
+    <br>2. <code>python3 tools/spotify_auth.py --id &lt;CLIENT_ID&gt; --secret &lt;CLIENT_SECRET&gt;</code>
+    <br>3. Paste all three values above and save.
+    <br>Only <code>user-read-currently-playing</code> is requested &mdash; it can read what is playing and nothing else. Revoke any time at <a href="https://www.spotify.com/account/apps/" target="_blank">your Spotify apps page</a>. The secret and token are never sent back to this page once saved; leave them blank to keep what is stored.</small>
+  </div>
+ </section>
+
  <!-- TOUCH (device-wide input) -->
  <section id="touch" class="tab">
   <div class="card"><h2>Lid button</h2>
@@ -392,9 +426,9 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner'};
+var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify'};
 var TOUCHGPIOS=[4,0,12,27,33,32];
-var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner'};
+var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
  var sec=$(name); if(sec)sec.remove();
@@ -404,7 +438,7 @@ function hideFeat(name){
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
- var f=c.features||{}; ['ticker','usage','radar','miner'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  if(f.touch===false){var tb=document.querySelector('nav button[data-t="touch"]');if(tb)tb.remove();var ts=$('touch');if(ts)ts.remove();}
  var t=c.ticker||{}, u=c.usage||{};
  // shared
@@ -422,10 +456,12 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  if(ck.tz && !(ck.tz in TZMAP)){var _ts=$('tz'); if(_ts){var _o=document.createElement('option');_o.value=ck.tz;_o.textContent=ck.tz;_ts.appendChild(_o);}}
  sv('tz',ck.tz||''); sc('nightEnabled',!!ck.nightEnabled);
  sv('nightStart',ck.nightStart||'22:00'); sv('nightEnd',ck.nightEnd||'07:00');
+ sv('clockMode12h',ck.mode12h?'true':'false');
+ sc('clockShowSeconds',ck.showSeconds!==false); sc('clockShowDate',ck.showDate!==false);
  sv('nightLevel',ck.nightLevel!=null?ck.nightLevel:0); $('nlVal')&&($('nlVal').textContent=(ck.nightLevel!=null?ck.nightLevel:0));
  $('mode').value=c.mode||'stocks'; modeChanged();
  sv('carouselSec',c.carouselSec||30);
- sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false); sc('carouselMiner',c.carouselMiner!==false);
+ sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false); sc('carouselMiner',c.carouselMiner!==false); sc('carouselClock',c.carouselClock!==false); sc('carouselSpotify',c.carouselSpotify!==false);
  // ticker slice
  T_TEXT.forEach(function(k){sv(k,t[k])});
  T_NUM.forEach(function(k){sv(k,t[k])});
@@ -454,6 +490,12 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
  sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
  sv('minerEngine',mn.engine||'sw');
+ // spotify slice
+ var sp=c.spotify||{};
+ sc('spotifyEnabled',!!sp.enabled); sc('spotifyAutoShow',sp.autoShow!==false);
+ sv('spotifyClientId',sp.clientId); sv('spotifyPollSec',sp.pollSec||10);
+ var scs=$('spotifyClientSecret'); if(scs)scs.placeholder=sp.secretSet?'(unchanged)':'paste the client secret';
+ var srt=$('spotifyRefreshToken'); if(srt)srt.placeholder=sp.tokenSet?'(unchanged)':'paste the refresh token';
  // touch slice
  var tc=c.touch||{};
  if($('touchGpio')){var g=$('touchGpio');g.innerHTML='<option value="-1">Not set</option>'+
@@ -512,6 +554,7 @@ function collect(){
  var o={mode:gv('mode'),
   carouselSec:parseInt(gv('carouselSec'))||30,
   carouselTicker:gc('carouselTicker'), carouselUsage:gc('carouselUsage'), carouselRadar:gc('carouselRadar'),
+  carouselMiner:gc('carouselMiner'), carouselClock:gc('carouselClock'), carouselSpotify:gc('carouselSpotify'),
   brightness:parseInt(gv('brightness'))||0,
   rotation:parseInt(gv('rotation')),
   autoBrightness:gc('autoBrightness'),
@@ -538,7 +581,8 @@ function collect(){
  if($('tz')){var _tzn=gv('tz'); var _tzp=(_tzn in TZMAP)?TZMAP[_tzn]:((C.clock&&C.clock.tz===_tzn&&C.clock.tzPosix)?C.clock.tzPosix:'UTC0');
   o.clock={tz:_tzn,tzPosix:_tzp,
   nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
-  nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0};}
+  nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,
+  mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
  // radar slice
  if($('radar')){
   var r={lat:parseFloat(gv('radarLat'))||0, lon:parseFloat(gv('radarLon'))||0,
@@ -555,6 +599,9 @@ function collect(){
   o.radar=r;
  }
  // miner slice
+ if($('spotify')) o.spotify={enabled:gc('spotifyEnabled'),autoShow:gc('spotifyAutoShow'),
+  clientId:gv('spotifyClientId').trim(), clientSecret:gv('spotifyClientSecret').trim(),
+  refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
  if($('touch')) o.touch={enabled:gc('touchEnabled'),
   gpio:parseInt(gv('touchGpio')), threshold:parseInt(gv('touchThreshold'))||20};
  if($('miner')) o.miner={enabled:gc('minerEnabled'),

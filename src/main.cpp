@@ -32,6 +32,13 @@
 #if WITH_MINER
 #include "MinerMode.h"
 #endif
+#if WITH_CLOCK
+#include "ClockMode.h"
+#endif
+#if WITH_SPOTIFY
+#include "SpotifyMode.h"
+#include "SpotifyClient.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -51,6 +58,12 @@ static DisplayMode* kModes[] = {
 #endif
 #if WITH_MINER
   &g_minerMode,
+#endif
+#if WITH_CLOCK
+  &g_clockMode,
+#endif
+#if WITH_SPOTIFY
+  &g_spotifyMode,
 #endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
@@ -75,6 +88,8 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
     case MODE_USAGE:  return s.carouselUsage;
     case MODE_RADAR:  return s.carouselRadar;
     case MODE_MINER:  return s.carouselMiner;
+    case MODE_CLOCK:  return s.carouselClock;
+    case MODE_SPOTIFY: return s.carouselSpotify;
     default:          return true;
   }
 }
@@ -92,7 +107,25 @@ static void carouselNext(const Settings& s) {
   }
 }
 
+#if WITH_SPOTIFY
+// Index of the Spotify mode in the registry, resolved once.
+static int spotifyIdx() {
+  for (size_t i = 0; i < kModeCount; i++)
+    if (kModes[i]->modeConst() == MODE_SPOTIFY) return (int)i;
+  return -1;
+}
+#endif
+
 static DisplayMode* activeMode(const Settings& s) {
+#if WITH_SPOTIFY
+  // Music takes the screen while it is actually playing, then hands it back.
+  // Polling still has to happen when another mode is showing, which is why
+  // spotifyService() also runs from the loop below.
+  if (s.spotify.autoShow && spotifyIsPlaying(s)) {
+    const int i = spotifyIdx();
+    if (i >= 0) return kModes[i];
+  }
+#endif
 #if HAS_TOUCH
   // A tap parks the carousel on one mode until the next tap.
   if (g_modeOverride >= 0 && (size_t)g_modeOverride < kModeCount)
@@ -309,6 +342,12 @@ void loop() {
     if (ev != TOUCH_NONE) appHandleTouch(ev);
   }
   if (g_displayOff) { delay(5); return; }   // screen blanked; nothing to draw
+#endif
+
+#if WITH_SPOTIFY
+  // Poll regardless of what is showing: auto-takeover depends on noticing that
+  // playback started while a different mode has the screen.
+  spotifyService(g_settings);
 #endif
 
   // A pushed banner owns the screen while it lasts, then the mode repaints.

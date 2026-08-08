@@ -66,12 +66,16 @@
 //   2 = plane radar
 //   3 = carousel: rotate through the ticked features on a timer
 //   4 = bitcoin solo miner (ESP32 targets only, see WITH_MINER below)
+//   5 = clock (SNTP wall time, big digits)
+//   6 = spotify now-playing (ESP32 targets only)
 // ---------------------------------------------------------------------------
 #define MODE_STOCKS    0
 #define MODE_USAGE     1
 #define MODE_RADAR     2
 #define MODE_CAROUSEL  3
 #define MODE_MINER     4
+#define MODE_CLOCK     5
+#define MODE_SPOTIFY   6
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -90,6 +94,20 @@
 #ifndef WITH_RADAR
 #define WITH_RADAR 1
 #endif
+#ifndef WITH_CLOCK
+#define WITH_CLOCK 1
+#endif
+// Spotify needs TLS, a few KB of JSON parsing and the flash to hold both, so it
+// is ESP32-only like the miner.
+#ifndef WITH_SPOTIFY
+#if defined(SMALLTV_ESP32)
+#define WITH_SPOTIFY 1
+#else
+#define WITH_SPOTIFY 0
+#endif
+#endif
+
+#define DEFAULT_SPOTIFY_POLL_SEC 10
 // Miner is classic-ESP32 only: the mining core runs FreeRTOS worker tasks
 // pinned across both cores and (optionally) the ESP32 SHA peripheral. The
 // ESP8266 has neither, and the single-core C2 has no cycles to spare.

@@ -81,6 +81,11 @@ struct ClockSettings {
   uint16_t nightEndMin;
   uint8_t  nightLevel;    // 0..100, 0 = backlight off
 
+  // Clock mode presentation (the night-mode fields above are device-wide)
+  bool     mode12h;
+  bool     showSeconds;   // seconds sweep bar under the time
+  bool     showDate;
+
   void setDefaults();
   void toJson(JsonObject o) const;
   void fromJson(JsonObjectConst o);
@@ -124,6 +129,22 @@ struct MinerSettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Spotify now-playing slice ---------------------------------------------
+// The refresh token is the only long-lived secret; the device trades it for
+// short-lived access tokens itself. tools/spotify_auth.py obtains it once.
+struct SpotifySettings {
+  bool     enabled;
+  String   clientId;
+  String   clientSecret;
+  String   refreshToken;
+  uint16_t pollSec;
+  bool     autoShow;      // take over the screen while something is playing
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Capacitive touch slice (device-wide input) ----------------------------
 struct TouchSettings {
   bool    enabled;
@@ -151,7 +172,8 @@ struct Settings {
 
   // --- Carousel (mode == MODE_CAROUSEL): dwell + which features rotate ---
   uint16_t carouselSec;
-  bool carouselTicker, carouselUsage, carouselRadar, carouselMiner;
+  bool carouselTicker, carouselUsage, carouselRadar, carouselMiner, carouselClock;
+  bool carouselSpotify;
 
   // --- Shared HTTP / display ---
   uint16_t httpTimeout; // ms
@@ -164,8 +186,9 @@ struct Settings {
   TickerSettings ticker;
   UsageSettings  usage;
   RadarSettings  radar;
-  MinerSettings  miner;
-  TouchSettings  touch;
+  MinerSettings   miner;
+  SpotifySettings spotify;
+  TouchSettings   touch;
   ClockSettings  clock;
 
   void setDefaults();

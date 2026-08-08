@@ -60,7 +60,9 @@ static void handleGetConfig() {
   feat["usage"]  = (bool)WITH_USAGE;
   feat["radar"]  = (bool)WITH_RADAR;
   feat["miner"]  = (bool)WITH_MINER;
-  feat["touch"]  = (bool)HAS_TOUCH;
+  feat["touch"]   = (bool)HAS_TOUCH;
+  feat["clock"]   = (bool)WITH_CLOCK;
+  feat["spotify"] = (bool)WITH_SPOTIFY;
   // Which chip this build runs on (the UI warns about per-chip limitations).
 #if defined(SMALLTV_ESP32C2)
   root["chip"] = "esp32c2";

@@ -160,6 +160,9 @@ void ClockSettings::setDefaults() {
   nightStartMin = DEFAULT_NIGHT_START_MIN;
   nightEndMin   = DEFAULT_NIGHT_END_MIN;
   nightLevel    = DEFAULT_NIGHT_LEVEL;
+  mode12h       = false;
+  showSeconds   = true;
+  showDate      = true;
 }
 
 void ClockSettings::toJson(JsonObject o) const {
@@ -169,6 +172,9 @@ void ClockSettings::toJson(JsonObject o) const {
   o["nightStart"]   = minToHhmm(nightStartMin);
   o["nightEnd"]     = minToHhmm(nightEndMin);
   o["nightLevel"]   = nightLevel;
+  o["mode12h"]      = mode12h;
+  o["showSeconds"]  = showSeconds;
+  o["showDate"]     = showDate;
 }
 
 void ClockSettings::fromJson(JsonObjectConst o) {
@@ -178,6 +184,9 @@ void ClockSettings::fromJson(JsonObjectConst o) {
   if (o["nightStart"].is<const char*>())  nightStartMin = hhmmToMin(o["nightStart"], nightStartMin);
   if (o["nightEnd"].is<const char*>())    nightEndMin   = hhmmToMin(o["nightEnd"], nightEndMin);
   if (o["nightLevel"].is<int>())          nightLevel = constrain((int)o["nightLevel"], 0, 100);
+  if (o["mode12h"].is<bool>())            mode12h = o["mode12h"];
+  if (o["showSeconds"].is<bool>())        showSeconds = o["showSeconds"];
+  if (o["showDate"].is<bool>())           showDate = o["showDate"];
 }
 
 // ===========================================================================
@@ -302,6 +311,45 @@ void MinerSettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
+// Spotify slice
+// ===========================================================================
+void SpotifySettings::setDefaults() {
+  enabled      = false;         // needs linking before it can do anything
+  clientId     = "";
+  clientSecret = "";
+  refreshToken = "";
+  pollSec      = DEFAULT_SPOTIFY_POLL_SEC;
+  autoShow     = true;
+}
+
+void SpotifySettings::toJson(JsonObject o) const {
+  o["enabled"]  = enabled;
+  o["clientId"] = clientId;
+  o["pollSec"]  = pollSec;
+  o["autoShow"] = autoShow;
+  // The secret and the refresh token are write-only over the API: the page only
+  // learns whether they are set, the same way WiFi passwords are handled.
+  o["secretSet"] = clientSecret.length() > 0;
+  o["tokenSet"]  = refreshToken.length() > 0;
+}
+
+void SpotifySettings::fromJson(JsonObjectConst o) {
+  if (o["enabled"].is<bool>())            enabled = o["enabled"];
+  if (o["autoShow"].is<bool>())           autoShow = o["autoShow"];
+  if (o["clientId"].is<const char*>())    { clientId = o["clientId"].as<String>(); clientId.trim(); }
+  if (o["pollSec"].is<int>())             pollSec = constrain((int)o["pollSec"], 5, 300);
+  // Blank means "keep what is stored", so saving the page does not wipe them.
+  if (o["clientSecret"].is<const char*>()) {
+    String v = o["clientSecret"].as<String>(); v.trim();
+    if (v.length()) clientSecret = v;
+  }
+  if (o["refreshToken"].is<const char*>()) {
+    String v = o["refreshToken"].as<String>(); v.trim();
+    if (v.length()) refreshToken = v;
+  }
+}
+
+// ===========================================================================
 // Touch slice
 // ===========================================================================
 void TouchSettings::setDefaults() {
@@ -339,7 +387,8 @@ void Settings::setDefaults() {
 
   mode = DEFAULT_MODE;
   carouselSec = DEFAULT_CAROUSEL_SEC;
-  carouselTicker = carouselUsage = carouselRadar = carouselMiner = true;
+  carouselTicker = carouselUsage = carouselRadar = carouselMiner = carouselClock = true;
+  carouselSpotify = true;
   httpTimeout = DEFAULT_HTTP_TIMEOUT;
 
   brightness = DEFAULT_BRIGHTNESS;
@@ -351,6 +400,7 @@ void Settings::setDefaults() {
   usage.setDefaults();
   radar.setDefaults();
   miner.setDefaults();
+  spotify.setDefaults();
   touch.setDefaults();
   clock.setDefaults();
 }
@@ -421,12 +471,16 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   root["mode"]              = (s.mode == MODE_RADAR)    ? "radar"
                             : (s.mode == MODE_USAGE)    ? "usage"
                             : (s.mode == MODE_MINER)    ? "miner"
+                            : (s.mode == MODE_CLOCK)    ? "clock"
+                            : (s.mode == MODE_SPOTIFY)  ? "spotify"
                             : (s.mode == MODE_CAROUSEL) ? "carousel" : "stocks";
   root["carouselSec"]       = s.carouselSec;
   root["carouselTicker"]    = s.carouselTicker;
   root["carouselUsage"]     = s.carouselUsage;
   root["carouselRadar"]     = s.carouselRadar;
   root["carouselMiner"]     = s.carouselMiner;
+  root["carouselClock"]     = s.carouselClock;
+  root["carouselSpotify"]   = s.carouselSpotify;
   root["httpTimeout"]       = s.httpTimeout;
   root["brightness"]        = s.brightness;
   root["autoBrightness"]    = s.autoBrightness;
@@ -438,6 +492,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.usage.toJson(root["usage"].to<JsonObject>());
   s.radar.toJson(root["radar"].to<JsonObject>());
   s.miner.toJson(root["miner"].to<JsonObject>());
+  s.spotify.toJson(root["spotify"].to<JsonObject>());
   s.touch.toJson(root["touch"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
 }
@@ -491,6 +546,8 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
     s.mode = m.equalsIgnoreCase("radar")    ? MODE_RADAR
            : m.equalsIgnoreCase("usage")    ? MODE_USAGE
            : m.equalsIgnoreCase("miner")    ? MODE_MINER
+           : m.equalsIgnoreCase("clock")    ? MODE_CLOCK
+           : m.equalsIgnoreCase("spotify")  ? MODE_SPOTIFY
            : m.equalsIgnoreCase("carousel") ? MODE_CAROUSEL : MODE_STOCKS;
   }
   if (root["carouselSec"].is<int>())      s.carouselSec = constrain((int)root["carouselSec"], 5, 3600);
@@ -498,6 +555,8 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["carouselUsage"].is<bool>())   s.carouselUsage = root["carouselUsage"];
   if (root["carouselRadar"].is<bool>())   s.carouselRadar = root["carouselRadar"];
   if (root["carouselMiner"].is<bool>())   s.carouselMiner = root["carouselMiner"];
+  if (root["carouselClock"].is<bool>())   s.carouselClock = root["carouselClock"];
+  if (root["carouselSpotify"].is<bool>()) s.carouselSpotify = root["carouselSpotify"];
 
   if (root["httpTimeout"].is<int>())        s.httpTimeout = constrain((int)root["httpTimeout"], 1000, 20000);
   if (root["brightness"].is<int>())         s.brightness = constrain((int)root["brightness"], 0, 100);
@@ -515,6 +574,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   // Radar/miner have no legacy flat layout; only apply when nested.
   if (root["radar"].is<JsonObjectConst>()) s.radar.fromJson(root["radar"].as<JsonObjectConst>());
   if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
+  if (root["spotify"].is<JsonObjectConst>()) s.spotify.fromJson(root["spotify"].as<JsonObjectConst>());
   if (root["touch"].is<JsonObjectConst>()) s.touch.fromJson(root["touch"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());
 }
