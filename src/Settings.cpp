@@ -322,15 +322,20 @@ void SpotifySettings::setDefaults() {
   autoShow     = true;
 }
 
-void SpotifySettings::toJson(JsonObject o) const {
+void SpotifySettings::toJson(JsonObject o, bool includeSecrets) const {
   o["enabled"]  = enabled;
   o["clientId"] = clientId;
   o["pollSec"]  = pollSec;
   o["autoShow"] = autoShow;
-  // The secret and the refresh token are write-only over the API: the page only
-  // learns whether they are set, the same way WiFi passwords are handled.
+  // Over the web API the page only learns whether these are set, never their
+  // values — same as the WiFi passwords. They must still reach config.json,
+  // though, or linking Spotify would not survive a power cycle.
   o["secretSet"] = clientSecret.length() > 0;
   o["tokenSet"]  = refreshToken.length() > 0;
+  if (includeSecrets) {
+    o["clientSecret"] = clientSecret;
+    o["refreshToken"] = refreshToken;
+  }
 }
 
 void SpotifySettings::fromJson(JsonObjectConst o) {
@@ -492,7 +497,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.usage.toJson(root["usage"].to<JsonObject>());
   s.radar.toJson(root["radar"].to<JsonObject>());
   s.miner.toJson(root["miner"].to<JsonObject>());
-  s.spotify.toJson(root["spotify"].to<JsonObject>());
+  s.spotify.toJson(root["spotify"].to<JsonObject>(), includeSecrets);
   s.touch.toJson(root["touch"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
 }

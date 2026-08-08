@@ -141,7 +141,11 @@ struct SpotifySettings {
   bool     autoShow;      // take over the screen while something is playing
 
   void setDefaults();
-  void toJson(JsonObject o) const;
+  // Unlike the other slices this one holds secrets, so it needs the same
+  // includeSecrets distinction the WiFi passwords use: false for the web API
+  // (which must not hand them back out), true when writing config.json — where
+  // omitting them means they do not survive a reboot.
+  void toJson(JsonObject o, bool includeSecrets) const;
   void fromJson(JsonObjectConst o);
 };
 

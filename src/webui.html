@@ -356,7 +356,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <button class="btn sec" onclick="location.href='/api/export'">Export settings</button>
    <input id="cfgFile" type="file" accept=".json,application/json" style="margin-top:10px">
    <div style="margin-top:10px"><button class="btn" onclick="importCfg()">Import &amp; reboot</button></div>
-   <small class="hint">The export is the device's <code>config.json</code>, including WiFi passwords in clear text; treat the file accordingly. Import applies everything and reboots.</small>
+   <small class="hint">The export is the device's <code>config.json</code>, including WiFi passwords and the Spotify refresh token in clear text; treat the file accordingly. Import applies everything and reboots.</small>
   </div>
   <div class="card"><h2>Maintenance</h2>
    <button class="btn sec" onclick="reboot()">Reboot</button>
