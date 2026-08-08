@@ -39,6 +39,9 @@
 #include "SpotifyMode.h"
 #include "SpotifyClient.h"
 #endif
+#if WITH_STORY
+#include "StoryMode.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -65,6 +68,9 @@ static DisplayMode* kModes[] = {
 #if WITH_SPOTIFY
   &g_spotifyMode,
 #endif
+#if WITH_STORY
+  &g_storyMode,
+#endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
 
@@ -90,6 +96,7 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
     case MODE_MINER:  return s.carouselMiner;
     case MODE_CLOCK:  return s.carouselClock;
     case MODE_SPOTIFY: return s.carouselSpotify;
+    case MODE_STORY:   return s.carouselStory;
     default:          return true;
   }
 }
@@ -134,6 +141,14 @@ static DisplayMode* activeMode(const Settings& s) {
   if (s.mode == MODE_CAROUSEL && kModeCount > 0) {
     if (g_carSwitch == 0) g_carSwitch = millis();
     if (!carouselHas(s, kModes[g_carIdx])) carouselNext(s);   // settings changed
+#if WITH_STORY
+    // A story in progress keeps the screen until it finishes. Rotating away
+    // mid-sentence would both lose it and waste the work already spent.
+    if (kModes[g_carIdx] == &g_storyMode && g_storyMode.busy()) {
+      g_carSwitch = millis();
+      return kModes[g_carIdx];
+    }
+#endif
     if (millis() - g_carSwitch >= (uint32_t)s.carouselSec * 1000UL) {
       g_carSwitch = millis();
       carouselNext(s);

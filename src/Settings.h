@@ -154,6 +154,18 @@ struct SpotifySettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- On-device story writer slice ------------------------------------------
+struct StorySettings {
+  String  prompt;        // optional opening; empty starts the model on its own
+  float   temperature;   // 0 makes it deterministic, so every story is identical
+  float   topP;
+  uint16_t maxTokens;    // caps context; the heap may allow less, never more
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Capacitive touch slice (device-wide input) ----------------------------
 struct TouchSettings {
   bool    enabled;
@@ -182,7 +194,7 @@ struct Settings {
   // --- Carousel (mode == MODE_CAROUSEL): dwell + which features rotate ---
   uint16_t carouselSec;
   bool carouselTicker, carouselUsage, carouselRadar, carouselMiner, carouselClock;
-  bool carouselSpotify;
+  bool carouselSpotify, carouselStory;
 
   // --- Shared HTTP / display ---
   uint16_t httpTimeout; // ms
@@ -197,6 +209,7 @@ struct Settings {
   RadarSettings  radar;
   MinerSettings   miner;
   SpotifySettings spotify;
+  StorySettings   story;
   TouchSettings   touch;
   ClockSettings  clock;
 

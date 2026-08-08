@@ -17,6 +17,9 @@
 #include "MinerCore.h"
 #include "MinerShaHw.h"
 #endif
+#if WITH_STORY
+#include "StoryMode.h"
+#endif
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
 extern void appInvalidate();
@@ -169,6 +172,15 @@ static void handleStatus() {
       w["rate"] = ms.workerRate[i];
       w["hw"]   = ms.workerHw[i];
     }
+  }
+#endif
+#if WITH_STORY
+  {
+    JsonObject st = o["story"].to<JsonObject>();
+    st["model"]   = StoryMode::modelPresent();
+    st["size"]    = (uint32_t)StoryMode::modelSize();
+    st["context"] = g_storyMode.contextTokens();   // 0 until a story has run
+    st["tps"]     = g_storyMode.tokensPerSec();
   }
 #endif
   sendJson(doc);
@@ -379,6 +391,71 @@ static void handleUpdateUpload() {
   yield();
 }
 
+#if WITH_STORY
+// ---- story model upload ---------------------------------------------------
+// The model is ~274 KB and lives on the filesystem rather than in the image:
+// the app slot has ~115 KB spare and the filesystem has 960 KB, and keeping it
+// out of the image means updating the model does not cost an OTA cycle.
+static File s_modelUp;
+static String s_modelErr;
+
+static void handleModelDone() {
+  const bool ok = s_modelErr.length() == 0;
+  JsonDocument res;
+  res["ok"] = ok;
+  if (ok) res["size"] = (uint32_t)StoryMode::modelSize();
+  else    res["error"] = s_modelErr;
+  sendJson(res, ok ? 200 : 400);
+}
+
+static void handleModelUpload() {
+  HTTPUpload& up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    s_modelErr = "";
+    // Written to a temporary name so a failed or half-finished upload cannot
+    // replace a model that currently works.
+    LittleFS.remove("/story.tmp");
+    s_modelUp = LittleFS.open("/story.tmp", "w");
+    if (!s_modelUp) s_modelErr = "cannot open the filesystem for writing";
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (s_modelUp && s_modelUp.write(up.buf, up.currentSize) != up.currentSize)
+      s_modelErr = "filesystem full";
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (s_modelUp) {
+      const size_t n = s_modelUp.size();
+      s_modelUp.close();
+      // Cheapest possible sanity check before it replaces anything: the magic
+      // and a plausible length. TinyLlm validates the rest when it loads.
+      File f = LittleFS.open("/story.tmp", "r");
+      char magic[4] = {0};
+      if (f) { f.read((uint8_t*)magic, 4); f.close(); }
+      if (s_modelErr.length()) {
+        // keep the existing error
+      } else if (n < 1024 || memcmp(magic, "TLLM", 4) != 0) {
+        s_modelErr = "not a .tll file (run tools/tinyllm_export.py)";
+      } else {
+        LittleFS.remove("/story.tll");
+        if (!LittleFS.rename("/story.tmp", "/story.tll"))
+          s_modelErr = "could not replace the existing model";
+      }
+    }
+    LittleFS.remove("/story.tmp");
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    if (s_modelUp) s_modelUp.close();
+    LittleFS.remove("/story.tmp");
+    s_modelErr = "upload aborted";
+  }
+  yield();
+}
+
+static void handleModelDelete() {
+  LittleFS.remove("/story.tll");
+  JsonDocument res;
+  res["ok"] = true;
+  sendJson(res);
+}
+#endif  // WITH_STORY
+
 // ---- captive portal -------------------------------------------------------
 static void handleNotFound() {
   if (netMode() == NET_AP) {
@@ -417,6 +494,10 @@ void webPortalBegin(Settings& settings) {
 #endif
   server.on("/notify", HTTP_POST, handleNotify);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
+#if WITH_STORY
+  server.on("/api/model", HTTP_POST, handleModelDone, handleModelUpload);
+  server.on("/api/model", HTTP_DELETE, handleModelDelete);
+#endif
 
   // Common captive-portal probe endpoints
   server.on("/generate_204", handleNotFound);

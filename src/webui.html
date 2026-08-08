@@ -57,11 +57,37 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="radar">Radar</button>
  <button data-t="clock">Clock</button>
  <button data-t="spotify">Spotify</button>
+ <button data-t="story">Story</button>
  <button data-t="miner">Miner</button>
  <button data-t="touch">Touch</button>
  <button data-t="update">Update</button>
 </nav>
 <main>
+
+ <!-- STORY -->
+ <section id="story" class="tab">
+  <div class="card"><h2>On-device story writer</h2>
+   <small class="hint">A 264,000-parameter language model that runs entirely on the cube &mdash; no network, no API. It was trained on simple children's stories and that is genuinely all it can do: it cannot answer questions, follow instructions, or know anything about the world. At this size that is the ceiling, not a setting. Tap round to the Story screen and it starts writing; hold the pad for a new one.</small>
+   <div id="modelBox" class="kv"><span class="muted">checking&hellip;</span></div>
+   <label>Model file <span class="muted">(built by <code>tools/tinyllm_export.py</code>)</span></label>
+   <input id="modelFile" type="file" accept=".tll">
+   <button onclick="uploadModel()">Upload model</button>
+   <button class="ghost" onclick="deleteModel()">Remove</button>
+   <div id="modelMsg" class="hint"></div>
+   <small class="hint">About 274 KB, stored on the filesystem rather than in the firmware, so replacing it costs no OTA cycle. Weights stream off flash as it writes &mdash; there is nowhere near enough RAM to hold them &mdash; which is why it runs at a few words a second rather than instantly.</small>
+  </div>
+  <div class="card"><h2>Writing</h2>
+   <label>Opening words <span class="muted">(optional)</span></label>
+   <input id="storyPrompt" type="text" placeholder="Once upon a time">
+   <label>Temperature: <span id="stVal"></span> <span class="muted">(0 = the same story every time)</span></label>
+   <input id="storyTemp" type="range" min="0" max="150" oninput="stVal.textContent=(this.value/100).toFixed(2)">
+   <label>Top-p: <span id="spVal"></span></label>
+   <input id="storyTopP" type="range" min="5" max="100" oninput="spVal.textContent=(this.value/100).toFixed(2)">
+   <label>Maximum length (tokens)</label><input id="storyMaxTokens" type="number" min="16" max="512">
+   <small class="hint">Length is capped by memory as well: the attention cache is 1,280 bytes per token and has to come out of the same heap as WiFi, so the device takes the longest context that fits when it starts and reports it on screen. Roughly three words per four tokens.</small>
+  </div>
+ </section>
+
  <!-- STATUS -->
  <section id="status" class="tab active">
   <div class="card"><h2>Device</h2><div id="statusBox" class="muted">Loading...</div></div>
@@ -110,6 +136,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="miner">Bitcoin miner</option>
     <option value="clock">Clock</option>
     <option value="spotify">Spotify now playing</option>
+    <option value="story">Story writer</option>
     <option value="carousel">Carousel (rotate modes)</option>
    </select>
    <div id="carouselRow">
@@ -122,6 +149,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
+   <div class="chk"><input id="carouselStory" type="checkbox"><label>Story writer</label></div>
    <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
   </div>
   <div class="card"><h2>Screen</h2>
@@ -429,9 +457,9 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify'};
+var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify',story:'story'};
 var TOUCHGPIOS=[4,0,12,27,33,32];
-var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify'};
+var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify',story:'carouselStory'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
  var sec=$(name); if(sec)sec.remove();
@@ -441,7 +469,7 @@ function hideFeat(name){
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
- var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify','story'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  if(f.touch===false){var tb=document.querySelector('nav button[data-t="touch"]');if(tb)tb.remove();var ts=$('touch');if(ts)ts.remove();}
  var t=c.ticker||{}, u=c.usage||{};
  // shared
@@ -493,6 +521,13 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
  sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
  sv('minerEngine',mn.engine||'sw');
+ // story slice
+ var so=c.story||{};
+ sv('storyPrompt',so.prompt||'');
+ var stv=$('storyTemp'); if(stv){stv.value=Math.round((so.temperature==null?0.9:so.temperature)*100);stv.oninput();}
+ var spv=$('storyTopP'); if(spv){spv.value=Math.round((so.topP==null?0.9:so.topP)*100);spv.oninput();}
+ sv('storyMaxTokens',so.maxTokens||96);
+ refreshModel();
  // spotify slice
  var sp=c.spotify||{};
  sc('spotifyEnabled',!!sp.enabled); sc('spotifyAutoShow',sp.autoShow!==false);
@@ -586,6 +621,10 @@ function collect(){
   nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
   nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,nightMining:gc('nightMining'),
   mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
+ // story slice
+ if($('storyPrompt')){o.story={prompt:gv('storyPrompt'),
+  temperature:parseInt(gv('storyTemp'))/100,topP:parseInt(gv('storyTopP'))/100,
+  maxTokens:parseInt(gv('storyMaxTokens'))||96};}
  // radar slice
  if($('radar')){
   var r={lat:parseFloat(gv('radarLat'))||0, lon:parseFloat(gv('radarLon'))||0,
@@ -748,6 +787,28 @@ function fmtDiff(d){d=d||0;
  if(d>=1e3)return (d/1e3).toFixed(2)+'K';
  if(d>=1)return d.toFixed(2);
  return d.toFixed(5)}
+
+function refreshModel(){var b=$('modelBox'); if(!b)return;
+ j('/api/status').then(function(s){var st=s.story||{};
+  b.innerHTML=st.model
+   ?'<span class="muted">Model</span><b>'+(st.size/1024).toFixed(0)+' KB loaded'+
+     (st.context?' &middot; '+st.context+' token context':'')+
+     (st.tps?' &middot; '+st.tps.toFixed(1)+' tok/s':'')+'</b>'
+   :'<span class="muted">Model</span><b style="color:var(--red)">none uploaded</b>';
+ }).catch(function(){b.textContent='?'})}
+
+function uploadModel(){var f=$('modelFile'); var m=$('modelMsg');
+ if(!f||!f.files.length){m.textContent='Choose a .tll file first.';return}
+ m.textContent='Uploading '+(f.files[0].size/1024).toFixed(0)+' KB...';
+ var fd=new FormData(); fd.append('model',f.files[0]);
+ fetch('/api/model',{method:'POST',body:fd}).then(function(r){return r.json()}).then(function(r){
+  m.textContent=r.ok?'Uploaded. Tap round to the Story screen.':('Failed: '+(r.error||'?'));
+  refreshModel();
+ }).catch(function(e){m.textContent='Failed: '+e})}
+
+function deleteModel(){if(!confirm('Remove the story model from the device?'))return;
+ fetch('/api/model',{method:'DELETE'}).then(function(){$('modelMsg').textContent='Removed.';refreshModel()})}
+
 function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+'</b></div>'}
 function fmtUp(s){var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
  return (d?d+'d ':'')+(h?h+'h ':'')+m+'m'}
