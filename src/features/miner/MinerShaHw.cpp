@@ -54,6 +54,16 @@ static inline __attribute__((always_inline)) void hwWaitIdle() {
   while (DPORT_REG_READ(SHA_256_BUSY_REG)) {}
 }
 
+// Same, but gives up. Benchmark variants use this: a spin that is too short can
+// leave the engine out of step, and an unbounded poll would then spin forever at
+// high priority on core 0 and take the watchdog down with it. The bound is far
+// above any legitimate block time (~72 cycles).
+static inline __attribute__((always_inline)) bool hwWaitIdleBounded() {
+  for (uint32_t i = 0; i < 20000; i++)
+    if (!DPORT_REG_READ(SHA_256_BUSY_REG)) return true;
+  return false;
+}
+
 // Read the digest, byte-swapping into the standard SHA-256 output order.
 // The `if` variant first checks word 7's low half: the last two digest bytes
 // are zero only when it is, which is the cheap 16-bit early exit.
@@ -104,9 +114,10 @@ static inline __attribute__((always_inline)) void hwSpinCycles(uint32_t n) {
   while ((esp_cpu_get_cycle_count() - t0) < n) {}
 }
 
-template <uint32_t kCycles>
+template <uint32_t kCycles, bool kBounded>
 static inline __attribute__((always_inline)) void hwWait() {
-  if (kCycles == 0) hwWaitIdle(); else hwSpinCycles(kCycles);
+  if (kCycles == 0) { if (kBounded) hwWaitIdleBounded(); else hwWaitIdle(); }
+  else hwSpinCycles(kCycles);
 }
 
 // kFewWrites     — two-write double block instead of eight
@@ -114,26 +125,26 @@ static inline __attribute__((always_inline)) void hwWait() {
 // kBlockWait     — cycles to spin after a block compression (0 = poll DPORT)
 // kLoadWait      — cycles to spin after a digest load     (0 = poll DPORT)
 template <bool kFewWrites, bool kSkipFinalWait,
-          uint32_t kBlockWait = 0, uint32_t kLoadWait = 0>
+          uint32_t kBlockWait = 0, uint32_t kLoadWait = 0, bool kBounded = false>
 static inline __attribute__((always_inline)) bool hwDoubleHashT(const uint8_t* swapped128, uint32_t nonce,
                                 uint8_t hash[32], bool earlyExit) {
   hwFillFirstBlock(swapped128);
   sha_ll_start_block(SHA2_256);
 
-  hwWait<kBlockWait>();
+  hwWait<kBlockWait, kBounded>();
   hwFillSecondBlock(swapped128 + 64, nonce);
   sha_ll_continue_block(SHA2_256);
 
-  hwWait<kBlockWait>();
+  hwWait<kBlockWait, kBounded>();
   sha_ll_load(SHA2_256);
 
-  hwWait<kLoadWait>();
+  hwWait<kLoadWait, kBounded>();
   if (kFewWrites) hwFillDoubleBlockFew(); else hwFillDoubleBlock();
   sha_ll_start_block(SHA2_256);
 
-  hwWait<kBlockWait>();
+  hwWait<kBlockWait, kBounded>();
   sha_ll_load(SHA2_256);
-  if (!kSkipFinalWait) hwWait<kLoadWait>();
+  if (!kSkipFinalWait) hwWait<kLoadWait, kBounded>();
   return hwReadDigestSwapped(hash, earlyExit);
 }
 
@@ -151,6 +162,7 @@ void minerHwSwapHeader(const uint8_t* header128, uint8_t* swappedOut128) {
 }
 
 void minerHwLock()   { esp_sha_lock_engine(SHA2_256); }
+bool minerHwTryLock() { return esp_sha_try_lock_engine(SHA2_256); }
 void minerHwUnlock() { esp_sha_unlock_engine(SHA2_256); }
 
 bool minerHwSha256d(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[32]) {
@@ -174,7 +186,7 @@ void minerHwSha256dRaw(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[3
 #define HW_VARIANT(fn, few, skipwait, bwait, lwait)                             \
   __attribute__((noinline)) static bool fn(                                     \
       const uint8_t* s, uint32_t n, uint8_t* h, bool early) {                   \
-    return hwDoubleHashT<few, skipwait, bwait, lwait>(s, n, h, early);          \
+    return hwDoubleHashT<few, skipwait, bwait, lwait, true>(s, n, h, early);    \
   }
 
 //          name                few    skipwait  blockWait  loadWait
@@ -187,16 +199,28 @@ HW_VARIANT(hwVarSpin72,         true,  true,     72,  12)  // ~the engine's bloc
 
 typedef bool (*HwVariantFn)(const uint8_t*, uint32_t, uint8_t*, bool);
 
-// Runs on core 0 with the hash workers suspended: the first version of this
-// benchmark ran in the web-server task on core 1, time-slicing against the
-// software worker there, and so reported about half the real rate and ranked
-// IRAM the opposite way round from production.
+// Runs pinned to core 0 — the core the production hardware worker uses — so
+// placement and contention effects reproduce instead of being measured away.
+// (The first version ran in the web-server task on core 1, time-slicing against
+// the software worker there, and reported about half the real rate.)
+//
+// It does NOT suspend the hash workers. An earlier version did, and since the
+// core-0 worker holds the SHA engine mutex almost continuously, suspending it
+// froze that mutex locked and deadlocked the device. Instead the bench simply
+// takes the engine the ordinary way: the worker releases it every 256 nonces,
+// then blocks on it for the duration and resumes on its own.
 struct BenchCtx {
   MinerHwBench* out;
-  int maxOut;
-  int count;
+  int  maxOut;
+  int  count;
+  bool acquired;
+  volatile bool finished;
   SemaphoreHandle_t done;
 };
+
+// File-scope, not on the caller's stack: if the wait below ever times out, the
+// bench task must still have somewhere valid to write.
+static BenchCtx s_bench;
 
 static void benchTask(void* arg) {
   BenchCtx* ctx = (BenchCtx*)arg;
@@ -210,7 +234,7 @@ static void benchTask(void* arg) {
     {"fixed spin 72/12",      hwVarSpin72},
   };
   const int count = (int)(sizeof(kVariants) / sizeof(kVariants[0]));
-  const uint32_t kIters = 20000;
+  const uint32_t kIters = 10000;
   const uint32_t kCheckIters = 64;
 
   // Mainnet block 125552's header: a known-good reference, and it keeps results
@@ -229,13 +253,28 @@ static void benchTask(void* arg) {
   uint8_t swapped[128];
   minerHwSwapHeader(header, swapped);
 
+  // Take the engine without ever blocking indefinitely. The worker releases it
+  // every 256 nonces, so this normally succeeds on the first or second try.
+  ctx->acquired = false;
+  for (int i = 0; i < 200 && !ctx->acquired; i++) {
+    if (minerHwTryLock()) ctx->acquired = true;
+    else vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  if (!ctx->acquired) {
+    Serial.println("[miner] bench could not take the SHA engine");
+    ctx->count = 0;
+    ctx->finished = true;
+    xSemaphoreGive(ctx->done);
+    vTaskDelete(NULL);
+    return;
+  }
+
   int n = 0;
-  minerHwLock();
   for (int i = 0; i < count && i < ctx->maxOut; i++) {
     HwVariantFn fn = kVariants[i].fn;
 
-    // Correctness first, over many nonces: a spin that is a few cycles short
-    // fails intermittently, so checking a single nonce would miss it.
+    // Correctness first, over many nonces: a spin a few cycles short fails
+    // intermittently, so checking one nonce would wave it through.
     bool correct = true;
     for (uint32_t k = 0; k < kCheckIters; k++) {
       uint32_t nonce = 0x9546a142 + k;
@@ -258,28 +297,46 @@ static void benchTask(void* arg) {
     Serial.printf("[miner] bench %-22s %6lu KH/s  %s\n", ctx->out[n].name,
                   (unsigned long)ctx->out[n].khs, correct ? "ok" : "WRONG DIGEST");
     n++;
-  }
-  minerHwUnlock();
 
+    // Leave the engine settled before the next variant, and hand core 0 back
+    // briefly so the idle task can feed the watchdog. If a variant ever wedges
+    // the engine, take the hardware path out of service rather than let the
+    // production loop — which waits unbounded — hang on it when mining resumes.
+    if (!hwWaitIdleBounded()) {
+      minerCoreReportHwFault("engine did not return to idle after benchmark");
+      break;
+    }
+    vTaskDelay(1);
+  }
+
+  minerHwUnlock();
   ctx->count = n;
+  ctx->finished = true;
   xSemaphoreGive(ctx->done);
   vTaskDelete(NULL);
 }
 
 int minerHwBenchmark(MinerHwBench* out, int maxOut) {
-  BenchCtx ctx = {out, maxOut, 0, xSemaphoreCreateBinary()};
-  if (!ctx.done) return 0;
+  if (s_bench.done && !s_bench.finished) return 0;   // one at a time
 
-  minerCoreSuspendWorkers();
+  s_bench.out      = out;
+  s_bench.maxOut   = maxOut;
+  s_bench.count    = 0;
+  s_bench.acquired = false;
+  s_bench.finished = false;
+  if (!s_bench.done) s_bench.done = xSemaphoreCreateBinary();
+  if (!s_bench.done) return 0;
+
   TaskHandle_t t = nullptr;
-  // Pinned to core 0, the same core the production hardware worker runs on, so
-  // placement and contention effects reproduce rather than being measured away.
-  if (xTaskCreatePinnedToCore(benchTask, "miner-bench", 4096, &ctx, 3, &t, 0) == pdPASS)
-    xSemaphoreTake(ctx.done, portMAX_DELAY);
-  minerCoreResumeWorkers();
+  if (xTaskCreatePinnedToCore(benchTask, "miner-bench", 6144, &s_bench, 3, &t, 0) != pdPASS)
+    return 0;
 
-  vSemaphoreDelete(ctx.done);
-  return ctx.count;
+  // Bounded: the web server must come back even if the bench somehow wedges.
+  if (xSemaphoreTake(s_bench.done, pdMS_TO_TICKS(15000)) != pdTRUE) {
+    Serial.println("[miner] bench timed out");
+    return 0;
+  }
+  return s_bench.count;
 }
 
 #endif  // MINER_HAS_SHA_HW

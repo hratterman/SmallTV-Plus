@@ -53,8 +53,8 @@ void minerCoreBegin(const Settings& s);
 void minerCoreApplyConfig(const Settings& s);   // pool/address changed -> reconnect
 void minerCoreSnapshot(MinerStats& out);
 
-// Pause/resume the hash workers so a benchmark can have the cores to itself.
-void minerCoreSuspendWorkers();
-void minerCoreResumeWorkers();
+// Force the hardware path off for the rest of the run (software keeps mining).
+// Used when the engine is left in a state the production loop could hang on.
+void minerCoreReportHwFault(const char* why);
 
 #endif  // WITH_MINER

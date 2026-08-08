@@ -33,6 +33,7 @@
 void minerHwSwapHeader(const uint8_t* header128, uint8_t* swappedOut128);
 
 void minerHwLock();
+bool minerHwTryLock();   // never blocks; the benchmark must not wait forever
 void minerHwUnlock();
 
 // One nonce. Returns false on the same 16-bit early exit the software path uses

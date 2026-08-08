@@ -539,16 +539,10 @@ void minerCoreApplyConfig(const Settings& s) {
   if (s_cfg.configured) ensureTasks();
 }
 
-// The benchmark needs both cores to itself: with the workers running it
-// time-slices against the core-1 software worker and reports roughly half the
-// real rate, which is how the first version of it managed to rank IRAM the
-// opposite way round from production.
-void minerCoreSuspendWorkers() {
-  for (auto t : s_workerTask) if (t) vTaskSuspend(t);
-}
-
-void minerCoreResumeWorkers() {
-  for (auto t : s_workerTask) if (t) vTaskResume(t);
+void minerCoreReportHwFault(const char* why) {
+  Serial.printf("[miner] hardware SHA disabled: %s\n", why ? why : "unspecified");
+  s_hwFaulted = true;
+  if (s_lock) { lockTake(); s_stats.hwFaulted = true; lockGive(); }
 }
 
 void minerCoreSnapshot(MinerStats& out) {
