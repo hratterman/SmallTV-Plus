@@ -6,12 +6,17 @@
 #include <hal/sha_ll.h>
 #include <sha/sha_parallel_engine.h>
 
+// Only minerHwSha256d() carries IRAM_ATTR. The helpers must not: an explicit
+// section attribute makes GCC keep a static inline function out of line, which
+// turned this loop into 7 calls per nonce and cost ~20% of hashrate. They are
+// always_inline instead, so they fold into the IRAM entry point.
+//
 // The register poking below is kept close to NerdMiner_v2's original: the
 // classic ESP32's DPORT peripheral needs the sequence-read/interrupt-disable
 // dance when the other core is active, and that is exactly the kind of detail
 // worth copying rather than re-deriving.
 
-static inline IRAM_ATTR void hwFillFirstBlock(const void* text) {
+static inline __attribute__((always_inline)) void hwFillFirstBlock(const void* text) {
   const uint32_t* w = (const uint32_t*)text;
   uint32_t* reg = (uint32_t*)(SHA_TEXT_BASE);
   for (int i = 0; i < 16; i++) reg[i] = w[i];
@@ -19,7 +24,7 @@ static inline IRAM_ATTR void hwFillFirstBlock(const void* text) {
 
 // Second block: words 0-2 are the merkle tail / ntime / nbits, word 3 is the
 // nonce, and the rest is SHA padding for an 80-byte message (640 bits).
-static inline IRAM_ATTR void hwFillSecondBlock(const void* text, uint32_t nonce) {
+static inline __attribute__((always_inline)) void hwFillSecondBlock(const void* text, uint32_t nonce) {
   const uint32_t* w = (const uint32_t*)text;
   uint32_t* reg = (uint32_t*)(SHA_TEXT_BASE);
   reg[0]  = w[0];
@@ -35,7 +40,7 @@ static inline IRAM_ATTR void hwFillSecondBlock(const void* text, uint32_t nonce)
 
 // Second hash: the first digest is already sitting in words 0-7 after a load,
 // so only the padding for a 32-byte message (256 bits) needs writing.
-static inline IRAM_ATTR void hwFillDoubleBlock() {
+static inline __attribute__((always_inline)) void hwFillDoubleBlock() {
   uint32_t* reg = (uint32_t*)(SHA_TEXT_BASE);
   reg[8]  = 0x80000000;
   reg[9]  = 0; reg[10] = 0; reg[11] = 0;
@@ -43,14 +48,14 @@ static inline IRAM_ATTR void hwFillDoubleBlock() {
   reg[15] = 0x00000100;
 }
 
-static inline IRAM_ATTR void hwWaitIdle() {
+static inline __attribute__((always_inline)) void hwWaitIdle() {
   while (DPORT_REG_READ(SHA_256_BUSY_REG)) {}
 }
 
 // Read the digest, byte-swapping into the standard SHA-256 output order.
 // The `if` variant first checks word 7's low half: the last two digest bytes
 // are zero only when it is, which is the cheap 16-bit early exit.
-static inline IRAM_ATTR bool hwReadDigestSwapped(void* out, bool earlyExit) {
+static inline __attribute__((always_inline)) bool hwReadDigestSwapped(void* out, bool earlyExit) {
   DPORT_INTERRUPT_DISABLE();
   uint32_t last = DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 7 * 4);
   if (earlyExit && (last & 0xFFFF) != 0) {
@@ -71,7 +76,7 @@ static inline IRAM_ATTR bool hwReadDigestSwapped(void* out, bool earlyExit) {
 }
 
 // The whole two-block double hash for one nonce.
-static inline IRAM_ATTR bool hwDoubleHash(const uint8_t* swapped128, uint32_t nonce,
+static inline __attribute__((always_inline)) bool hwDoubleHash(const uint8_t* swapped128, uint32_t nonce,
                                 uint8_t hash[32], bool earlyExit) {
   hwFillFirstBlock(swapped128);
   sha_ll_start_block(SHA2_256);
