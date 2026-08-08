@@ -63,6 +63,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="ticker">Ticker</button>
  <button data-t="usage">Usage</button>
  <button data-t="radar">Radar</button>
+ <button data-t="miner">Miner</button>
  <button data-t="update">Update</button>
 </nav>
 <main>
@@ -103,6 +104,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="stocks">Stock / crypto ticker</option>
     <option value="usage">Claude usage</option>
     <option value="radar">Plane radar</option>
+    <option value="miner">Bitcoin miner</option>
     <option value="carousel">Carousel (rotate modes)</option>
    </select>
    <div id="carouselRow">
@@ -110,6 +112,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div class="chk"><input id="carouselTicker" type="checkbox"><label>Ticker</label></div>
     <div class="chk"><input id="carouselUsage" type="checkbox"><label>Claude usage</label></div>
     <div class="chk"><input id="carouselRadar" type="checkbox"><label>Plane radar</label></div>
+    <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
    </div>
    <small class="hint">Pick the active feature, then configure it in its own tab. Carousel rotates through the ticked features.</small>
   </div>
@@ -250,6 +253,22 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   </div>
  </section>
 
+ <!-- MINER (feature) -->
+ <section id="miner" class="tab">
+  <div class="card"><h2>Solo mining</h2>
+   <div class="chk"><input id="minerEnabled" type="checkbox"><label>Mining enabled</label></div>
+   <div class="row">
+    <div><label>Pool host</label><input id="poolHost" type="text" placeholder="solo.ckpool.org"></div>
+    <div style="flex:0 0 110px"><label>Port</label><input id="poolPort" type="number" min="1" max="65535"></div>
+   </div>
+   <label>BTC address <span class="muted">(pool user — where a found block pays out)</span></label>
+   <input id="btcAddress" type="text" placeholder="bc1q...">
+   <label>Worker name <span class="muted">(optional)</span></label>
+   <input id="minerWorker" type="text" placeholder="smalltv">
+   <small class="hint">Solo lottery mining against a stratum pool (default <code>solo.ckpool.org:3333</code>): jobs come from the pool, and in the astronomically unlikely event of a found block it pays out to this address. Mining runs in the background whenever enabled and an address is set, even while another mode is on screen. It uses otherwise-idle CPU; display and web UI keep priority.</small>
+  </div>
+ </section>
+
  <!-- UPDATE -->
  <section id="update" class="tab">
   <div class="card"><h2>Update from GitHub</h2>
@@ -342,8 +361,8 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar'};
-var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar'};
+var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner'};
+var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
  var sec=$(name); if(sec)sec.remove();
@@ -353,7 +372,7 @@ function hideFeat(name){
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
- var f=c.features||{}; ['ticker','usage','radar'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ var f=c.features||{}; ['ticker','usage','radar','miner'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  var t=c.ticker||{}, u=c.usage||{};
  // shared
  ['apSsid','apPass','hostname'].forEach(function(k){$(k).value=c[k]!=null?c[k]:''});
@@ -373,7 +392,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('nightLevel',ck.nightLevel!=null?ck.nightLevel:0); $('nlVal')&&($('nlVal').textContent=(ck.nightLevel!=null?ck.nightLevel:0));
  $('mode').value=c.mode||'stocks'; modeChanged();
  sv('carouselSec',c.carouselSec||30);
- sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false);
+ sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false); sc('carouselMiner',c.carouselMiner!==false);
  // ticker slice
  T_TEXT.forEach(function(k){sv(k,t[k])});
  T_NUM.forEach(function(k){sv(k,t[k])});
@@ -396,6 +415,11 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('radarUiScale',r.uiScale!=null?r.uiScale:1);
  sv('radarMinAlt',r.minAltFt!=null?r.minAltFt:0);
  renderAps(r.airports||[]);
+ // miner slice
+ var mn=c.miner||{};
+ sc('minerEnabled',mn.enabled!==false);
+ sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
+ sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
  var ap=$('apPass'); if(ap)ap.placeholder=c.apPassSet?'(unchanged)':'(open)';
 })}
 
@@ -489,6 +513,10 @@ function collect(){
   });
   o.radar=r;
  }
+ // miner slice
+ if($('miner')) o.miner={enabled:gc('minerEnabled'),
+  poolHost:gv('poolHost').trim(), poolPort:parseInt(gv('poolPort'))||3333,
+  btcAddress:gv('btcAddress').trim(), workerName:gv('minerWorker').trim()};
  return o;
 }
 function saveAll(){j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())})

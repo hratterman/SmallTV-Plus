@@ -110,6 +110,19 @@ struct RadarSettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Bitcoin miner feature slice -------------------------------------------
+struct MinerSettings {
+  bool     enabled;       // master switch; mining also needs a BTC address
+  String   poolHost;      // stratum pool, e.g. solo.ckpool.org
+  uint16_t poolPort;
+  String   btcAddress;    // pool user (the payout address)
+  String   workerName;    // optional; authorized as address.worker when set
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Top-level settings ----------------------------------------------------
 struct Settings {
   // --- WiFi station networks (the device joins one of these) ---
@@ -122,11 +135,11 @@ struct Settings {
   String hostname;      // mDNS name => http://<hostname>.local
 
   // --- Active feature ---
-  uint8_t mode;         // MODE_STOCKS / MODE_USAGE / MODE_RADAR / MODE_CAROUSEL
+  uint8_t mode;         // MODE_STOCKS / MODE_USAGE / MODE_RADAR / MODE_MINER / MODE_CAROUSEL
 
   // --- Carousel (mode == MODE_CAROUSEL): dwell + which features rotate ---
   uint16_t carouselSec;
-  bool carouselTicker, carouselUsage, carouselRadar;
+  bool carouselTicker, carouselUsage, carouselRadar, carouselMiner;
 
   // --- Shared HTTP / display ---
   uint16_t httpTimeout; // ms
@@ -139,6 +152,7 @@ struct Settings {
   TickerSettings ticker;
   UsageSettings  usage;
   RadarSettings  radar;
+  MinerSettings  miner;
   ClockSettings  clock;
 
   void setDefaults();

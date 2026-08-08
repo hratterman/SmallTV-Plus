@@ -65,11 +65,13 @@
 //   1 = Claude usage meter (mascot + 5h/7d usage bars, fed by the daemon/)
 //   2 = plane radar
 //   3 = carousel: rotate through the ticked features on a timer
+//   4 = bitcoin solo miner (ESP32 targets only, see WITH_MINER below)
 // ---------------------------------------------------------------------------
 #define MODE_STOCKS    0
 #define MODE_USAGE     1
 #define MODE_RADAR     2
 #define MODE_CAROUSEL  3
+#define MODE_MINER     4
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -87,6 +89,16 @@
 #endif
 #ifndef WITH_RADAR
 #define WITH_RADAR 1
+#endif
+// Miner is classic-ESP32 only: the mining core runs FreeRTOS worker tasks
+// pinned across both cores and (optionally) the ESP32 SHA peripheral. The
+// ESP8266 has neither, and the single-core C2 has no cycles to spare.
+#ifndef WITH_MINER
+#if defined(SMALLTV_ESP32)
+#define WITH_MINER 1
+#else
+#define WITH_MINER 0
+#endif
 #endif
 
 // Claude usage mode: once data stops arriving for this long (PC asleep, daemon
@@ -170,6 +182,14 @@
 #define DEFAULT_RADAR_LON       0.0f
 #define DEFAULT_RADAR_RANGE_KM  20
 #define DEFAULT_RADAR_POLL_SEC  10     // >=3 keeps us under the 1 req/s limit
+
+// ---------------------------------------------------------------------------
+// Bitcoin miner (MODE_MINER): solo-mines against a stratum pool, mining core
+// ported from BitMaker-hub/NerdMiner_v2. Mining needs a BTC address set in
+// the web UI; until then the mode just shows a prompt.
+// ---------------------------------------------------------------------------
+#define DEFAULT_POOL_HOST  "solo.ckpool.org"
+#define DEFAULT_POOL_PORT  3333
 
 // ---------------------------------------------------------------------------
 // Defaults (used on first boot / factory reset)

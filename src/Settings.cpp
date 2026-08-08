@@ -260,6 +260,43 @@ void RadarSettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
+// Miner slice
+// ===========================================================================
+void MinerSettings::setDefaults() {
+  enabled    = true;
+  poolHost   = DEFAULT_POOL_HOST;
+  poolPort   = DEFAULT_POOL_PORT;
+  btcAddress = "";
+  workerName = "";
+}
+
+void MinerSettings::toJson(JsonObject o) const {
+  o["enabled"]    = enabled;
+  o["poolHost"]   = poolHost;
+  o["poolPort"]   = poolPort;
+  o["btcAddress"] = btcAddress;
+  o["workerName"] = workerName;
+}
+
+void MinerSettings::fromJson(JsonObjectConst o) {
+  if (o["enabled"].is<bool>()) enabled = o["enabled"];
+  if (o["poolHost"].is<const char*>()) {
+    poolHost = o["poolHost"].as<String>();
+    poolHost.trim();
+    if (!poolHost.length()) poolHost = DEFAULT_POOL_HOST;   // blank = back to default
+  }
+  if (o["poolPort"].is<int>()) poolPort = constrain((int)o["poolPort"], 1, 65535);
+  if (o["btcAddress"].is<const char*>()) {
+    btcAddress = o["btcAddress"].as<String>();
+    btcAddress.trim();
+  }
+  if (o["workerName"].is<const char*>()) {
+    workerName = o["workerName"].as<String>();
+    workerName.trim();
+  }
+}
+
+// ===========================================================================
 // Top-level settings
 // ===========================================================================
 void Settings::setDefaults() {
@@ -276,7 +313,7 @@ void Settings::setDefaults() {
 
   mode = DEFAULT_MODE;
   carouselSec = DEFAULT_CAROUSEL_SEC;
-  carouselTicker = carouselUsage = carouselRadar = true;
+  carouselTicker = carouselUsage = carouselRadar = carouselMiner = true;
   httpTimeout = DEFAULT_HTTP_TIMEOUT;
 
   brightness = DEFAULT_BRIGHTNESS;
@@ -287,6 +324,7 @@ void Settings::setDefaults() {
   ticker.setDefaults();
   usage.setDefaults();
   radar.setDefaults();
+  miner.setDefaults();
   clock.setDefaults();
 }
 
@@ -355,11 +393,13 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   // Mode + shared HTTP/display
   root["mode"]              = (s.mode == MODE_RADAR)    ? "radar"
                             : (s.mode == MODE_USAGE)    ? "usage"
+                            : (s.mode == MODE_MINER)    ? "miner"
                             : (s.mode == MODE_CAROUSEL) ? "carousel" : "stocks";
   root["carouselSec"]       = s.carouselSec;
   root["carouselTicker"]    = s.carouselTicker;
   root["carouselUsage"]     = s.carouselUsage;
   root["carouselRadar"]     = s.carouselRadar;
+  root["carouselMiner"]     = s.carouselMiner;
   root["httpTimeout"]       = s.httpTimeout;
   root["brightness"]        = s.brightness;
   root["autoBrightness"]    = s.autoBrightness;
@@ -370,6 +410,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.ticker.toJson(root["ticker"].to<JsonObject>());
   s.usage.toJson(root["usage"].to<JsonObject>());
   s.radar.toJson(root["radar"].to<JsonObject>());
+  s.miner.toJson(root["miner"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
 }
 
@@ -421,12 +462,14 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
     String m = root["mode"].as<String>();
     s.mode = m.equalsIgnoreCase("radar")    ? MODE_RADAR
            : m.equalsIgnoreCase("usage")    ? MODE_USAGE
+           : m.equalsIgnoreCase("miner")    ? MODE_MINER
            : m.equalsIgnoreCase("carousel") ? MODE_CAROUSEL : MODE_STOCKS;
   }
   if (root["carouselSec"].is<int>())      s.carouselSec = constrain((int)root["carouselSec"], 5, 3600);
   if (root["carouselTicker"].is<bool>())  s.carouselTicker = root["carouselTicker"];
   if (root["carouselUsage"].is<bool>())   s.carouselUsage = root["carouselUsage"];
   if (root["carouselRadar"].is<bool>())   s.carouselRadar = root["carouselRadar"];
+  if (root["carouselMiner"].is<bool>())   s.carouselMiner = root["carouselMiner"];
 
   if (root["httpTimeout"].is<int>())        s.httpTimeout = constrain((int)root["httpTimeout"], 1000, 20000);
   if (root["brightness"].is<int>())         s.brightness = constrain((int)root["brightness"], 0, 100);
@@ -441,7 +484,8 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   s.ticker.fromJson(t);
   JsonObjectConst u = root["usage"].is<JsonObjectConst>() ? root["usage"].as<JsonObjectConst>() : root;
   s.usage.fromJson(u);
-  // Radar has no legacy flat layout; only apply when its nested object is present.
+  // Radar/miner have no legacy flat layout; only apply when nested.
   if (root["radar"].is<JsonObjectConst>()) s.radar.fromJson(root["radar"].as<JsonObjectConst>());
+  if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());
 }
