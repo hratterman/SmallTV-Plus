@@ -66,6 +66,7 @@ static void handleGetConfig() {
   feat["touch"]   = (bool)HAS_TOUCH;
   feat["clock"]   = (bool)WITH_CLOCK;
   feat["spotify"] = (bool)WITH_SPOTIFY;
+  feat["story"]   = (bool)WITH_STORY;
   // Which chip this build runs on (the UI warns about per-chip limitations).
 #if defined(SMALLTV_ESP32C2)
   root["chip"] = "esp32c2";
@@ -181,6 +182,7 @@ static void handleStatus() {
     st["size"]    = (uint32_t)StoryMode::modelSize();
     st["context"] = g_storyMode.contextTokens();   // 0 until a story has run
     st["tps"]     = g_storyMode.tokensPerSec();
+    st["fsFree"]  = (uint32_t)(LittleFS.totalBytes() - LittleFS.usedBytes());
   }
 #endif
   sendJson(doc);
@@ -415,6 +417,15 @@ static void handleModelUpload() {
     // Written to a temporary name so a failed or half-finished upload cannot
     // replace a model that currently works.
     LittleFS.remove("/story.tmp");
+    // Fail now rather than after a minute of uploading into a full filesystem.
+    const size_t freeB = LittleFS.totalBytes() - LittleFS.usedBytes();
+    if (freeB < 320 * 1024) {
+      char why[80];
+      snprintf(why, sizeof(why), "only %u KB free on the filesystem, need ~300 KB",
+               (unsigned)(freeB / 1024));
+      s_modelErr = why;
+      return;
+    }
     s_modelUp = LittleFS.open("/story.tmp", "w");
     if (!s_modelUp) s_modelErr = "cannot open the filesystem for writing";
   } else if (up.status == UPLOAD_FILE_WRITE) {
@@ -422,17 +433,32 @@ static void handleModelUpload() {
       s_modelErr = "filesystem full";
   } else if (up.status == UPLOAD_FILE_END) {
     if (s_modelUp) {
-      const size_t n = s_modelUp.size();
+      // Close before measuring. size() on a handle still open for writing does
+      // not account for whatever is still buffered, so asking it first reports
+      // a short file and rejects a perfectly good upload.
       s_modelUp.close();
-      // Cheapest possible sanity check before it replaces anything: the magic
-      // and a plausible length. TinyLlm validates the rest when it loads.
-      File f = LittleFS.open("/story.tmp", "r");
+
+      size_t n = 0;
       char magic[4] = {0};
-      if (f) { f.read((uint8_t*)magic, 4); f.close(); }
+      File f = LittleFS.open("/story.tmp", "r");
+      if (f) {
+        n = f.size();
+        f.read((uint8_t*)magic, 4);
+        f.close();
+      }
+      // Cheapest sanity check before it replaces anything: the magic and a
+      // plausible length. TinyLlm validates the rest when it loads.
       if (s_modelErr.length()) {
-        // keep the existing error
+        // keep the earlier, more specific error
       } else if (n < 1024 || memcmp(magic, "TLLM", 4) != 0) {
-        s_modelErr = "not a .tll file (run tools/tinyllm_export.py)";
+        // Say what was actually seen: "not a .tll" is unhelpful when the file
+        // is fine and the device simply failed to store all of it.
+        char why[96];
+        snprintf(why, sizeof(why),
+                 "stored %u of %u bytes, starts %02x%02x%02x%02x (want TLLM)",
+                 (unsigned)n, (unsigned)up.totalSize, magic[0] & 0xFF,
+                 magic[1] & 0xFF, magic[2] & 0xFF, magic[3] & 0xFF);
+        s_modelErr = why;
       } else {
         LittleFS.remove("/story.tll");
         if (!LittleFS.rename("/story.tmp", "/story.tll"))

@@ -795,6 +795,7 @@ function refreshModel(){var b=$('modelBox'); if(!b)return;
      (st.context?' &middot; '+st.context+' token context':'')+
      (st.tps?' &middot; '+st.tps.toFixed(1)+' tok/s':'')+'</b>'
    :'<span class="muted">Model</span><b style="color:var(--red)">none uploaded</b>';
+  if(st.fsFree!=null)b.innerHTML+='<br><span class="muted">Filesystem free</span><b>'+(st.fsFree/1024).toFixed(0)+' KB</b>';
  }).catch(function(){b.textContent='?'})}
 
 function uploadModel(){var f=$('modelFile'); var m=$('modelMsg');
