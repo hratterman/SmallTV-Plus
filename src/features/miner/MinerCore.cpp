@@ -14,6 +14,7 @@
 #include "MinerJob.h"
 #include "Stratum.h"
 #include "NerdSha256.h"
+#include "MinerShaHw.h"
 
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
@@ -69,6 +70,11 @@ static struct {
   String   user;          // address, or address.worker
 } s_cfg;
 
+// Engine selection, read by worker 0 at each chunk boundary so switching
+// engines in the web UI takes effect without a reboot.
+static volatile bool s_engineHybrid = false;
+static volatile bool s_hwFaulted = false;   // self-check failed -> software only
+
 static MinerStats s_stats;
 static bool       s_tasksStarted = false;
 
@@ -85,6 +91,32 @@ static void clearJob() {
 // ---------------------------------------------------------------------------
 // Hash worker
 // ---------------------------------------------------------------------------
+#if MINER_HAS_SHA_HW
+// The register-level engine path cannot be checked off-device, so prove it
+// against the software implementation (which tools/miner_selftest checks against
+// a real block) before trusting a single share to it. A mismatch disables the
+// hardware path for the rest of the run rather than mining garbage.
+static bool hwSelfCheck(const MinerWork& w) {
+  const uint32_t testNonce = 0x12345678;
+  uint8_t hdr[128];
+  memcpy(hdr, w.header, sizeof(hdr));
+  memcpy(hdr + 76, &testNonce, 4);
+
+  uint8_t want[32];
+  minerSha256d(hdr, 80, want);
+
+  uint8_t swapped[128], got[32];
+  minerHwSwapHeader(hdr, swapped);
+  minerHwLock();
+  minerHwSha256dRaw(swapped, testNonce, got);
+  minerHwUnlock();
+
+  bool ok = memcmp(want, got, 32) == 0;
+  Serial.printf("[miner] hardware SHA self-check %s\n", ok ? "passed" : "FAILED");
+  return ok;
+}
+#endif
+
 static void minerWorkerTask(void* arg) {
   const uint32_t idx = (uint32_t)(uintptr_t)arg;
 
@@ -93,6 +125,10 @@ static void minerWorkerTask(void* arg) {
   uint32_t  localSeq = 0;
   uint8_t   hash[32];
   uint32_t  lastYield = millis();
+#if MINER_HAS_SHA_HW
+  uint8_t   swapped[128];       // engine-order copy of the current header
+  bool      hwChecked = false;
+#endif
 
   esp_task_wdt_add(NULL);
   Serial.printf("[miner] worker %u on core %d\n", (unsigned)idx, xPortGetCoreID());
@@ -101,11 +137,13 @@ static void minerWorkerTask(void* arg) {
     uint32_t nonceStart = 0;
     bool haveWork = false;
 
+    bool newJob = false;
     lockTake();
     if (s_workSeq) {
       if (localSeq != s_workSeq) {
         work = s_work;              // ~250 B, only on a job change
         localSeq = s_workSeq;
+        newJob = true;
       }
       poolDiff = s_poolDiff;
       nonceStart = s_nonceCursor;
@@ -120,13 +158,50 @@ static void minerWorkerTask(void* arg) {
       continue;
     }
 
+    // Worker 0 may drive the SHA peripheral; worker 1 always stays on software,
+    // so hybrid mode benchmarks both engines against each other in one run.
+    bool useHw = false;
+#if MINER_HAS_SHA_HW
+    if (idx == 0 && s_engineHybrid && !s_hwFaulted) {
+      if (!hwChecked) {
+        hwChecked = true;
+        if (!hwSelfCheck(work)) s_hwFaulted = true;
+      }
+      useHw = !s_hwFaulted;
+    }
+    if (useHw && newJob) minerHwSwapHeader(work.header, swapped);
+#else
+    (void)newJob;
+#endif
+    s_stats.workerHw[idx & 1] = useHw;
+
     uint32_t done = MINER_NONCE_CHUNK;
+    bool hwHeld = false;
     for (uint32_t i = 0; i < MINER_NONCE_CHUNK; i++) {
       const uint32_t nonce = nonceStart + i;
-      memcpy(work.header + 76, &nonce, 4);
+      bool solved;
 
-      // All but ~1/65536 nonces bail out inside here without finishing.
-      if (nerd_sha256d_baked(work.midstate, work.header + 64, work.bake, hash)) {
+      if (useHw) {
+#if MINER_HAS_SHA_HW
+        // Re-take the engine every 256 nonces (well under a millisecond of
+        // holding) so mbedTLS — which needs it for the other modes' HTTPS —
+        // never waits on a whole chunk.
+        if ((i & 0xFF) == 0) {
+          if (hwHeld) minerHwUnlock();
+          minerHwLock();
+          hwHeld = true;
+        }
+        solved = minerHwSha256d(swapped, nonce, hash);
+#else
+        solved = false;
+#endif
+      } else {
+        memcpy(work.header + 76, &nonce, 4);
+        // All but ~1/65536 nonces bail out inside here without finishing.
+        solved = nerd_sha256d_baked(work.midstate, work.header + 64, work.bake, hash);
+      }
+
+      if (solved) {
         double d = minerDiffFromHash(hash);
         if (d >= poolDiff) {
           lockTake();
@@ -145,6 +220,11 @@ static void minerWorkerTask(void* arg) {
       // Abandon the chunk promptly when the pool sends new work.
       if ((i & 0xFF) == 0xFF && s_workSeq != localSeq) { done = i + 1; break; }
     }
+#if MINER_HAS_SHA_HW
+    if (hwHeld) minerHwUnlock();
+#else
+    (void)hwHeld;
+#endif
 
     s_hashCount[idx] += done;
     esp_task_wdt_reset();
@@ -196,7 +276,8 @@ static void stratumTask(void*) {
 
   uint32_t lastTxMs = millis(), lastJobMs = millis();
   uint32_t lastRateMs = millis(), startedMs = millis();
-  uint64_t lastTotal = 0;
+  uint32_t lastPer[MINER_WORKERS] = {};   // previous per-worker counter reads
+  uint64_t accum[MINER_WORKERS] = {};     // wrap-safe lifetime totals
   uint32_t backoffMs = 2000;
 
   client.setTimeout(5);   // seconds on ESP32; bounds a truncated line
@@ -380,15 +461,29 @@ static void stratumTask(void*) {
 
     // --- 1 Hz stats ---
     if (now - lastRateMs >= 1000) {
-      uint64_t total = 0;
-      for (uint8_t i = 0; i < MINER_WORKERS; i++) total += s_hashCount[i];
-      uint32_t rate = (uint32_t)(((total - lastTotal) * 1000ULL) / (now - lastRateMs));
-      lastTotal = total;
+      uint32_t dt = now - lastRateMs;
+      uint32_t rate[MINER_WORKERS];
+      for (uint8_t i = 0; i < MINER_WORKERS; i++) {
+        uint32_t c = s_hashCount[i];
+        uint32_t d = c - lastPer[i];      // unsigned: survives the 32-bit wrap
+        lastPer[i] = c;
+        accum[i] += d;
+        rate[i] = (uint32_t)((uint64_t)d * 1000ULL / dt);
+      }
       lastRateMs = now;
+
       lockTake();
+      uint64_t total = 0;
+      uint32_t sum = 0;
+      for (uint8_t i = 0; i < MINER_WORKERS; i++) {
+        total += accum[i];
+        sum += rate[i];
+        if (i < 2) s_stats.workerRate[i] = rate[i];
+      }
       s_stats.totalHashes = total;
-      s_stats.hashrate = rate;
+      s_stats.hashrate = sum;
       s_stats.uptimeSec = (now - startedMs) / 1000;
+      s_stats.hwFaulted = s_hwFaulted;
       lockGive();
     }
 
@@ -409,6 +504,7 @@ static void storeConfig(const Settings& s) {
   s_cfg.port = s.miner.poolPort;
   s_cfg.user = user;
   s_cfg.epoch++;
+  s_engineHybrid = (s.miner.engine == MINER_ENGINE_HYBRID);
   s_stats.configured = s_cfg.configured;
   strlcpy(s_stats.poolHost, s.miner.poolHost.c_str(), sizeof(s_stats.poolHost));
   lockGive();

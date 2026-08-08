@@ -266,6 +266,12 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <input id="btcAddress" type="text" placeholder="bc1q...">
    <label>Worker name <span class="muted">(optional)</span></label>
    <input id="minerWorker" type="text" placeholder="smalltv">
+   <label>Hash engine</label>
+   <select id="minerEngine">
+    <option value="sw">Software (both cores)</option>
+    <option value="hybrid">Hybrid (hardware SHA + software)</option>
+   </select>
+   <small class="hint">Software runs the optimized double-hash on both cores; it is the verified default. Hybrid puts core&nbsp;0 on the ESP32's SHA peripheral and leaves core&nbsp;1 on software, so the Status tab shows both engines' hashrates side by side and you can see which is actually faster on this chip. The peripheral is checked against the software result before its first share, and falls back automatically if they disagree. Switching takes effect within a second, no reboot.</small>
    <small class="hint">Solo lottery mining against a stratum pool (default <code>solo.ckpool.org:3333</code>): jobs come from the pool, and in the astronomically unlikely event of a found block it pays out to this address. Mining runs in the background whenever enabled and an address is set, even while another mode is on screen. It uses otherwise-idle CPU; display and web UI keep priority.</small>
   </div>
  </section>
@@ -421,6 +427,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sc('minerEnabled',mn.enabled!==false);
  sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
  sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
+ sv('minerEngine',mn.engine||'sw');
  var ap=$('apPass'); if(ap)ap.placeholder=c.apPassSet?'(unchanged)':'(open)';
 })}
 
@@ -517,7 +524,8 @@ function collect(){
  // miner slice
  if($('miner')) o.miner={enabled:gc('minerEnabled'),
   poolHost:gv('poolHost').trim(), poolPort:parseInt(gv('poolPort'))||3333,
-  btcAddress:gv('btcAddress').trim(), workerName:gv('minerWorker').trim()};
+  btcAddress:gv('btcAddress').trim(), workerName:gv('minerWorker').trim(),
+  engine:gv('minerEngine')};
  return o;
 }
 function saveAll(){j('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())})
@@ -606,6 +614,9 @@ function loadStatus(){j('/api/status').then(function(s){
   $('minerBox').innerHTML=!m.configured
    ?'<span class="muted">Not configured — set a BTC address in the Miner tab.</span>'
    :kv('State',m.state)+kv('Pool',m.pool||'-')+kv('Hashrate',fmtHash(m.hashrate))+
+    (m.workers?m.workers.map(function(w,i){
+      return kv('&nbsp;&nbsp;core '+i+' ('+(w.hw?'hardware':'software')+')',fmtHash(w.rate))}).join(''):'')+
+    (m.hwFaulted?kv('Hardware SHA','<span style="color:var(--red)">self-check failed, using software</span>'):'')+
     kv('Shares','accepted '+m.accepted+' / sent '+m.shares+(m.rejected?' / rejected '+m.rejected:''))+
     kv('Best share',fmtDiff(m.bestDiff))+kv('Pool difficulty',fmtDiff(m.poolDiff))+
     kv('Jobs',m.jobs)+kv('Total hashes',fmtHash(m.hashes).replace('/s',''))+

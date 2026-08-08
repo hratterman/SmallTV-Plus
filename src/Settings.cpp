@@ -268,6 +268,7 @@ void MinerSettings::setDefaults() {
   poolPort   = DEFAULT_POOL_PORT;
   btcAddress = "";
   workerName = "";
+  engine     = DEFAULT_MINER_ENGINE;
 }
 
 void MinerSettings::toJson(JsonObject o) const {
@@ -276,6 +277,7 @@ void MinerSettings::toJson(JsonObject o) const {
   o["poolPort"]   = poolPort;
   o["btcAddress"] = btcAddress;
   o["workerName"] = workerName;
+  o["engine"]     = (engine == MINER_ENGINE_HYBRID) ? "hybrid" : "sw";
 }
 
 void MinerSettings::fromJson(JsonObjectConst o) {
@@ -294,6 +296,9 @@ void MinerSettings::fromJson(JsonObjectConst o) {
     workerName = o["workerName"].as<String>();
     workerName.trim();
   }
+  if (o["engine"].is<const char*>())
+    engine = o["engine"].as<String>().equalsIgnoreCase("hybrid")
+               ? MINER_ENGINE_HYBRID : MINER_ENGINE_SW;
 }
 
 // ===========================================================================

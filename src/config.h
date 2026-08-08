@@ -191,6 +191,19 @@
 #define DEFAULT_POOL_HOST  "solo.ckpool.org"
 #define DEFAULT_POOL_PORT  3333
 
+// Which SHA-256 implementation the hash workers use.
+//   sw     — both workers run the optimized software double-hash (midstate
+//            cached per job + 16-bit early exit). Verified against real block
+//            data by tools/miner_selftest.
+//   hybrid — worker 0 drives the ESP32's hardware SHA peripheral while worker 1
+//            stays on software, so one run measures both on the same chip. The
+//            classic ESP32's engine cannot be seeded with a midstate, so it
+//            hashes both header blocks per nonce; whether that beats software
+//            is a measurement. Defaults off until measured on hardware.
+#define MINER_ENGINE_SW      0
+#define MINER_ENGINE_HYBRID  1
+#define DEFAULT_MINER_ENGINE MINER_ENGINE_SW
+
 // ---------------------------------------------------------------------------
 // Defaults (used on first boot / factory reset)
 // ---------------------------------------------------------------------------

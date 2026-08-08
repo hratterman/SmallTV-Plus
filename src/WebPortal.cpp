@@ -126,6 +126,15 @@ static void handleStatus() {
     m["bestDiff"]  = ms.bestDiff;
     m["poolDiff"]  = ms.poolDiff;
     m["uptime"]    = ms.uptimeSec;
+    m["hwFaulted"] = ms.hwFaulted;
+    // Per-worker rates: in hybrid mode these are the hardware-vs-software
+    // comparison, measured simultaneously on the same chip.
+    JsonArray wk = m["workers"].to<JsonArray>();
+    for (uint8_t i = 0; i < 2; i++) {
+      JsonObject w = wk.add<JsonObject>();
+      w["rate"] = ms.workerRate[i];
+      w["hw"]   = ms.workerHw[i];
+    }
   }
 #endif
   sendJson(doc);

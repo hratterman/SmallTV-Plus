@@ -117,6 +117,7 @@ struct MinerSettings {
   uint16_t poolPort;
   String   btcAddress;    // pool user (the payout address)
   String   workerName;    // optional; authorized as address.worker when set
+  uint8_t  engine;        // MINER_ENGINE_SW or MINER_ENGINE_HYBRID
 
   void setDefaults();
   void toJson(JsonObject o) const;

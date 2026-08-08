@@ -41,6 +41,12 @@ struct MinerStats {
   uint32_t hashrate;       // H/s, updated ~1 Hz
   uint32_t uptimeSec;      // seconds since the engine started
   char     poolHost[64];
+
+  // Per-worker rates. In hybrid mode worker 0 runs on the SHA peripheral and
+  // worker 1 on software, so a single run measures both engines on one chip.
+  uint32_t workerRate[2];  // H/s each
+  bool     workerHw[2];    // true where that worker is using the peripheral
+  bool     hwFaulted;      // the hardware engine failed its self-check
 };
 
 void minerCoreBegin(const Settings& s);
