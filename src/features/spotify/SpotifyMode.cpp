@@ -3,7 +3,6 @@
 
 #include <Arduino_GFX_Library.h>
 #include "Gfx.h"
-#include "SpotifyClient.h"
 
 SpotifyMode g_spotifyMode;
 
@@ -11,20 +10,28 @@ SpotifyMode g_spotifyMode;
 #define C_DIM   0xB574
 #define C_PANEL 0x18E3
 
+// Progress bar geometry, shared by the full paint and the incremental update.
+static const int BAR_X = 18;
+static const int BAR_Y = 178;
+static const int BAR_W = TFT_WIDTH - 36;
+static const int BAR_H = 8;
+static const int TIME_Y = BAR_Y + 14;
+
 void SpotifyMode::begin(const Settings& s) {
   spotifyInit(s);
-  needFull_ = true;
+  invalidate(s);
 }
 
 void SpotifyMode::invalidate(const Settings& s) {
   spotifyInit(s);
   spotifyForceRefresh();
   needFull_ = true;
+  drawnTrack_[0] = drawnArtist_[0] = 0;
+  barW_ = elapsed_ = -1;
 }
 
 void SpotifyMode::onContextAction(Settings& s) {
   spotifyForceRefresh();     // long-press: poll now instead of waiting
-  needFull_ = true;
 }
 
 static void fmtTime(uint32_t ms, char* out, size_t n) {
@@ -59,14 +66,13 @@ static void drawTitle(Arduino_GFX* gfx, const char* text, int y, uint8_t size) {
   }
 }
 
-void SpotifyMode::render(const Settings& s) {
+void SpotifyMode::renderAll(const Settings& s) {
   Arduino_GFX* gfx = gfxDev();
   if (!gfx) return;
   const SpotifyData& d = spotifyGet();
 
   gfx->fillScreen(C_BLACK);
 
-  // Header: the wordmark dot plus state.
   gfx->fillCircle(22, 22, 9, C_SPOT);
   gfx->setTextSize(1);
   gfx->setTextColor(C_DIM);
@@ -93,31 +99,68 @@ void SpotifyMode::render(const Settings& s) {
     return;
   }
 
-  // Track, then artist.
   const uint8_t tsz = (strlen(d.track) > 22) ? 2 : 3;
   drawTitle(gfx, d.track, 62, tsz);
   gfxDrawCentered(d.artist, 132, 2, C_DIM);
 
-  // Progress bar with elapsed / total.
-  const uint32_t pos = spotifyProgressNow();
-  const int bx = 18, by = 178, bw = TFT_WIDTH - 36, bh = 8;
-  gfx->fillRoundRect(bx, by, bw, bh, bh / 2, C_PANEL);
-  if (d.durationMs) {
-    int fw = (int)((uint64_t)bw * pos / d.durationMs);
-    if (fw > bw) fw = bw;
-    if (fw >= bh)     gfx->fillRoundRect(bx, by, fw, bh, bh / 2, C_SPOT);
-    else if (fw > 0)  gfx->fillRect(bx, by, fw, bh, C_SPOT);
-  }
-
-  char a[12], b[12];
-  fmtTime(pos, a, sizeof(a));
+  // Bar track and total duration are static for this song; only the fill and
+  // the elapsed label move from here on.
+  gfx->fillRoundRect(BAR_X, BAR_Y, BAR_W, BAR_H, BAR_H / 2, C_PANEL);
+  char b[12];
   fmtTime(d.durationMs, b, sizeof(b));
   gfx->setTextSize(1);
   gfx->setTextColor(C_DIM);
-  gfx->setCursor(bx, by + 14);
-  gfx->print(a);
-  gfx->setCursor(bx + bw - gfxTextW(b, 1), by + 14);
+  gfx->setCursor(BAR_X + BAR_W - gfxTextW(b, 1), TIME_Y);
   gfx->print(b);
+
+  barW_ = 0;
+  elapsed_ = -1;
+  renderProgress(s);
+}
+
+// Called once a second while playing. Touches only the pixels that changed: the
+// newly-filled slice of the bar, and the elapsed-time label. No screen clear, so
+// nothing blinks.
+void SpotifyMode::renderProgress(const Settings& s) {
+  Arduino_GFX* gfx = gfxDev();
+  if (!gfx) return;
+  const SpotifyData& d = spotifyGet();
+  if (!d.valid || !d.playing || !d.durationMs) return;
+
+  const uint32_t pos = spotifyProgressNow();
+
+  int fw = (int)((uint64_t)BAR_W * pos / d.durationMs);
+  if (fw > BAR_W) fw = BAR_W;
+  if (fw != barW_) {
+    if (fw > barW_ && barW_ >= 0) {
+      // Extend the fill rather than redrawing it: a few pixels of new colour.
+      const int from = (barW_ < BAR_H) ? 0 : barW_;
+      if (fw >= BAR_H) {
+        gfx->fillRoundRect(BAR_X, BAR_Y, fw, BAR_H, BAR_H / 2, C_SPOT);
+      } else if (fw > 0) {
+        gfx->fillRect(BAR_X + from, BAR_Y, fw - from, BAR_H, C_SPOT);
+      }
+    } else {
+      // Jumped backwards (seek, or a new song): repaint the whole bar once.
+      gfx->fillRoundRect(BAR_X, BAR_Y, BAR_W, BAR_H, BAR_H / 2, C_PANEL);
+      if (fw >= BAR_H)     gfx->fillRoundRect(BAR_X, BAR_Y, fw, BAR_H, BAR_H / 2, C_SPOT);
+      else if (fw > 0)     gfx->fillRect(BAR_X, BAR_Y, fw, BAR_H, C_SPOT);
+    }
+    barW_ = fw;
+  }
+
+  const int sec = (int)(pos / 1000);
+  if (sec != elapsed_) {
+    elapsed_ = sec;
+    char a[12];
+    fmtTime(pos, a, sizeof(a));
+    // Erase just this label's box; "88:88" at size 1 is the widest it gets.
+    gfx->fillRect(BAR_X, TIME_Y, gfxTextW("88:88", 1) + 6, 8, C_BLACK);
+    gfx->setTextSize(1);
+    gfx->setTextColor(C_DIM);
+    gfx->setCursor(BAR_X, TIME_Y);
+    gfx->print(a);
+  }
 }
 
 void SpotifyMode::service(const Settings& s) {
@@ -125,17 +168,35 @@ void SpotifyMode::service(const Settings& s) {
 
   const SpotifyData& d = spotifyGet();
   const uint32_t now = millis();
+  const bool linked = s.spotify.refreshToken.length() > 0;
 
-  // Repaint when the track changes, and once a second while playing so the
-  // progress bar moves; otherwise leave the panel alone.
-  bool changed = needFull_ || d.lastOkMs != seenOk_;
-  if (!changed && d.playing && (now - lastDraw_) >= 1000) changed = true;
-  if (!changed) return;
+  // A full repaint only when what the panel says has actually changed.
+  const bool contentChanged =
+      needFull_ ||
+      linked != drawnLinked_ ||
+      d.valid != drawnValid_ ||
+      d.error != drawnError_ ||
+      d.playing != drawnPlaying_ ||
+      strncmp(d.track, drawnTrack_, sizeof(drawnTrack_)) != 0 ||
+      strncmp(d.artist, drawnArtist_, sizeof(drawnArtist_)) != 0;
 
-  needFull_ = false;
-  seenOk_ = d.lastOkMs;
-  lastDraw_ = now;
-  render(s);
+  if (contentChanged) {
+    needFull_ = false;
+    drawnLinked_  = linked;
+    drawnValid_   = d.valid;
+    drawnError_   = d.error;
+    drawnPlaying_ = d.playing;
+    strlcpy(drawnTrack_, d.track, sizeof(drawnTrack_));
+    strlcpy(drawnArtist_, d.artist, sizeof(drawnArtist_));
+    lastTick_ = now;
+    renderAll(s);
+    return;
+  }
+
+  if (d.playing && (now - lastTick_) >= 500) {
+    lastTick_ = now;
+    renderProgress(s);
+  }
 }
 
 #endif  // WITH_SPOTIFY

@@ -5,8 +5,10 @@
 // and minutes large, seconds and date subordinate, in the same dark-panel
 // language as the other screens.
 #pragma once
-#include "Mode.h"
 #include "config.h"
+#if WITH_CLOCK
+
+#include "Mode.h"
 
 class ClockMode : public DisplayMode {
  public:
@@ -29,3 +31,5 @@ class ClockMode : public DisplayMode {
 };
 
 extern ClockMode g_clockMode;
+
+#endif  // WITH_CLOCK

@@ -364,7 +364,16 @@ void loop() {
     if (back) back->wake(g_settings);
   }
 
+  // Whenever the active mode changes for any reason — carousel, a tap, or
+  // Spotify pulling focus while music plays — the incoming mode repaints from
+  // its cached data. Without this a mode that thinks its panel is already
+  // correct would leave the previous mode's screen up.
   DisplayMode* m = activeMode(g_settings);
+  static DisplayMode* s_lastMode = nullptr;
+  if (m && m != s_lastMode) {
+    s_lastMode = m;
+    m->wake(g_settings);
+  }
   if (m) m->service(g_settings);
 
   delay(5);
