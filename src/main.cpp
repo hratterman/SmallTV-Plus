@@ -145,6 +145,20 @@ static DisplayMode* activeMode(const Settings& s) {
   return kModeCount ? kModes[0] : nullptr;   // fall back to the first compiled mode
 }
 
+// Night mining: while the night window is active, the cube goes fully dark and
+// does nothing but hash. A tap wakes the screen for a while so you can look at
+// it without waiting for morning.
+static uint32_t g_nightWakeUntil = 0;
+
+static bool nightMiningActive(const Settings& s) {
+  if (!s.clock.nightMining || !clockNightActive()) return false;
+  if (g_nightWakeUntil) {
+    if ((int32_t)(millis() - g_nightWakeUntil) < 0) return false;
+    g_nightWakeUntil = 0;   // expired; clear it so the millis() wrap can't revive it
+  }
+  return true;
+}
+
 static Settings g_settings;
 static String   g_resetReason;        // why the chip last reset (diagnostics)
 static bool     g_safeMode = false;   // last reset was an exception -> don't re-enter the crash
@@ -162,6 +176,9 @@ static uint8_t appEffectiveBrightness() {
 #if HAS_TOUCH
   if (g_displayOff) return 0;          // double-tap wins over the night schedule
 #endif
+  // Fully dark, not merely dim — except for a pushed banner, which is allowed to
+  // light the screen to the night level like it would on any other night.
+  if (nightMiningActive(g_settings) && !notifyActive()) return 0;
   if (clockNightActive()) return g_settings.clock.nightLevel;
 #if HAS_LDR
   if (g_settings.autoBrightness) {
@@ -202,11 +219,38 @@ void appInvalidate() {
 static void appHandleTouch(TouchEvent ev) {
   switch (ev) {
     case TOUCH_TAP:
+      // A tap during night mining buys a couple of minutes of screen.
+      if (nightMiningActive(g_settings)) {
+        g_nightWakeUntil = millis() + 120000UL;
+        appApplyBrightness();
+        DisplayMode* nm = activeMode(g_settings);
+        if (nm) nm->wake(g_settings);
+        break;
+      }
       if (g_displayOff) { g_displayOff = false; appApplyBrightness(); break; }
       if (notifyActive()) { notifyDismiss(); break; }   // tap clears a banner
+      // Step to the next *included* mode: the same ticks that govern the
+      // carousel, so unticking a feature removes it from the tap cycle too.
+      // Stepping starts from whatever is on the glass right now, not from the
+      // last tap, so the first tap after a carousel switch goes where you expect.
       if (kModeCount) {
-        g_modeOverride = (int8_t)(((g_modeOverride < 0 ? 0 : g_modeOverride) + 1) % kModeCount);
-        kModes[g_modeOverride]->wake(g_settings);
+        size_t from = (g_modeOverride < 0) ? 0 : (size_t)g_modeOverride;
+        const DisplayMode* cur = activeMode(g_settings);
+        for (size_t i = 0; i < kModeCount; i++)
+          if (kModes[i] == cur) { from = i; break; }
+        bool stepped = false;
+        for (size_t hop = 1; hop <= kModeCount && !stepped; hop++) {
+          const size_t cand = (from + hop) % kModeCount;
+          if (!carouselHas(g_settings, kModes[cand])) continue;
+          g_modeOverride = (int8_t)cand;
+          kModes[cand]->wake(g_settings);
+          stepped = true;
+        }
+        // Nothing ticked at all: don't leave the tap dead, just step anyway.
+        if (!stepped) {
+          g_modeOverride = (int8_t)((from + 1) % kModeCount);
+          kModes[g_modeOverride]->wake(g_settings);
+        }
       }
       break;
 
@@ -343,6 +387,15 @@ void loop() {
   }
   if (g_displayOff) { delay(5); return; }   // screen blanked; nothing to draw
 #endif
+
+  // Night mining: dark and silent, every spare cycle to the miner. The web
+  // server stays up (OTA recovery, and /api/status still reports the hashrate),
+  // and touch stays live so a tap can wake the screen — everything else stops.
+  // A pushed notification still gets through, since that is its whole point.
+  if (nightMiningActive(g_settings) && !notifyActive()) {
+    delay(5);
+    return;
+  }
 
 #if WITH_SPOTIFY
   // Poll regardless of what is showing: auto-takeover depends on noticing that

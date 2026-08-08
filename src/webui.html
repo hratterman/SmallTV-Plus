@@ -114,14 +114,15 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    </select>
    <div id="carouselRow">
     <label>Switch mode every (s)</label><input id="carouselSec" type="number" min="5" max="3600">
-    <div class="chk"><input id="carouselTicker" type="checkbox"><label>Ticker</label></div>
-    <div class="chk"><input id="carouselUsage" type="checkbox"><label>Claude usage</label></div>
-    <div class="chk"><input id="carouselRadar" type="checkbox"><label>Plane radar</label></div>
-    <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
-    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
-    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
    </div>
-   <small class="hint">Pick the active feature, then configure it in its own tab. Carousel rotates through the ticked features.</small>
+   <label style="margin-top:14px">Modes to include</label>
+   <div class="chk"><input id="carouselTicker" type="checkbox"><label>Ticker</label></div>
+   <div class="chk"><input id="carouselUsage" type="checkbox"><label>Claude usage</label></div>
+   <div class="chk"><input id="carouselRadar" type="checkbox"><label>Plane radar</label></div>
+   <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
+   <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
+   <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
+   <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
   </div>
   <div class="card"><h2>Screen</h2>
    <label>Brightness: <span id="brVal"></span>%</label>
@@ -143,6 +144,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    </div>
    <label>Night brightness: <span id="nlVal"></span>% <span class="muted">(0 = screen off)</span></label>
    <input id="nightLevel" type="range" min="0" max="100" oninput="nlVal.textContent=this.value">
+   <div class="chk" style="margin-top:12px"><input id="nightMining" type="checkbox"><label>Night mining: dark, silent, all cycles to the miner</label></div>
+   <small class="hint">During the night window the screen goes fully off (ignoring the brightness above), rendering stops, and the other modes stop fetching &mdash; no ticker requests, no radar polling, no Spotify checks. Only the miner keeps running. The web UI stays reachable, so <code>/api/status</code> still reports the hashrate, and a tap on the lid brings the screen back for two minutes. A pushed notification still comes through.</small>
    <small class="hint">Needs internet once to set the clock over NTP (no on-screen clock, this just drives the schedule). While the window is active it overrides the brightness and auto-brightness above. Times are local to the selected timezone; DST is handled automatically. After a reboot the schedule resumes once the clock re-syncs, so the screen may show normal brightness for a few seconds.</small>
   </div>
  </section>
@@ -454,7 +457,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  // clock slice
  fillTz(); var ck=c.clock||{};
  if(ck.tz && !(ck.tz in TZMAP)){var _ts=$('tz'); if(_ts){var _o=document.createElement('option');_o.value=ck.tz;_o.textContent=ck.tz;_ts.appendChild(_o);}}
- sv('tz',ck.tz||''); sc('nightEnabled',!!ck.nightEnabled);
+ sv('tz',ck.tz||''); sc('nightEnabled',!!ck.nightEnabled); sc('nightMining',!!ck.nightMining);
  sv('nightStart',ck.nightStart||'22:00'); sv('nightEnd',ck.nightEnd||'07:00');
  sv('clockMode12h',ck.mode12h?'true':'false');
  sc('clockShowSeconds',ck.showSeconds!==false); sc('clockShowDate',ck.showDate!==false);
@@ -581,7 +584,7 @@ function collect(){
  if($('tz')){var _tzn=gv('tz'); var _tzp=(_tzn in TZMAP)?TZMAP[_tzn]:((C.clock&&C.clock.tz===_tzn&&C.clock.tzPosix)?C.clock.tzPosix:'UTC0');
   o.clock={tz:_tzn,tzPosix:_tzp,
   nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
-  nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,
+  nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,nightMining:gc('nightMining'),
   mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
  // radar slice
  if($('radar')){

@@ -81,6 +81,11 @@ struct ClockSettings {
   uint16_t nightEndMin;
   uint8_t  nightLevel;    // 0..100, 0 = backlight off
 
+  // During the night window, go fully dark and stop everything that is not the
+  // miner: no rendering, no polling, no display. Only meaningful with the miner
+  // compiled in; harmless otherwise (it just blanks the screen).
+  bool     nightMining;
+
   // Clock mode presentation (the night-mode fields above are device-wide)
   bool     mode12h;
   bool     showSeconds;   // seconds sweep bar under the time
