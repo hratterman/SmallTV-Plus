@@ -703,7 +703,9 @@ function loadStatus(){j('/api/status').then(function(s){
     (m.workers?m.workers.map(function(w,i){
       return kv('&nbsp;&nbsp;core '+i+' ('+(w.hw?'hardware':'software')+')',fmtHash(w.rate))}).join(''):'')+
     (m.hwFaulted?kv('Hardware SHA','<span style="color:var(--red)">self-check failed, using software</span>'):'')+
-    kv('Shares','accepted '+m.accepted+' / sent '+m.shares+(m.rejected?' / rejected '+m.rejected:''))+
+    (m.lastError?kv('Pool said','<span style="color:var(--red)">'+esc(m.lastError)+'</span>'):'')+
+    (m.state==='auth-failed'?kv('','<span style="color:var(--red)">The pool refused this address, so submitting is stopped. Check the BTC address and worker name in the Miner tab.</span>'):'')+
+    kv('Shares','accepted '+m.accepted+' / sent '+m.shares+(m.rejected?' / <span style="color:var(--red)">rejected '+m.rejected+'</span>':''))+
     kv('Best share',fmtDiff(m.bestDiff))+kv('Pool difficulty',fmtDiff(m.poolDiff))+
     kv('Jobs',m.jobs)+kv('Total hashes',fmtHash(m.hashes).replace('/s',''))+
     kv('Mining for',fmtUp(m.uptime));

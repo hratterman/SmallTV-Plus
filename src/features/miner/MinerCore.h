@@ -22,8 +22,9 @@
 enum MinerPoolState : uint8_t {
   MINER_IDLE = 0,     // disabled or no BTC address
   MINER_CONNECTING,   // resolving / opening the socket
-  MINER_SUBSCRIBED,   // subscribed + authorized, waiting for first job
+  MINER_SUBSCRIBED,   // subscribed, waiting for the first job
   MINER_MINING,       // has a job, hashing
+  MINER_AUTH_FAILED,  // pool refused mining.authorize; every share would bounce
 };
 
 // A snapshot of engine state for the UI. Copied under the engine lock so the
@@ -47,6 +48,11 @@ struct MinerStats {
   uint32_t workerRate[2];  // H/s each
   bool     workerHw[2];    // true where that worker is using the peripheral
   bool     hwFaulted;      // the hardware engine failed its self-check
+
+  // Why the pool last said no. Shares that are all rejected look identical on
+  // screen whatever the cause, but the pool distinguishes them ("Low difficulty
+  // share" vs "Job not found" vs "Unauthorized"), so keep its own words.
+  char     lastError[48];
 };
 
 void minerCoreBegin(const Settings& s);

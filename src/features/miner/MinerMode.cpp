@@ -69,19 +69,21 @@ static void fmtUptime(uint32_t sec, char* out, size_t n) {
 
 static const char* stateLabel(const MinerStats& st) {
   switch (st.state) {
-    case MINER_CONNECTING: return "connecting";
-    case MINER_SUBSCRIBED: return "waiting job";
-    case MINER_MINING:     return "mining";
-    default:               return "idle";
+    case MINER_CONNECTING:  return "connecting";
+    case MINER_SUBSCRIBED:  return "waiting job";
+    case MINER_MINING:      return "mining";
+    case MINER_AUTH_FAILED: return "rejected";
+    default:                return "idle";
   }
 }
 
 static uint16_t stateColor(const MinerStats& st) {
   switch (st.state) {
-    case MINER_MINING:     return C_GREEN;
+    case MINER_MINING:      return C_GREEN;
     case MINER_SUBSCRIBED:
-    case MINER_CONNECTING: return C_YELLOW;
-    default:               return C_GRAY;
+    case MINER_CONNECTING:  return C_YELLOW;
+    case MINER_AUTH_FAILED: return C_RED;
+    default:                return C_GRAY;
   }
 }
 
@@ -189,10 +191,16 @@ void MinerMode::render(const Settings& s, bool full) {
 
   // Stat rows.
   char buf[24];
-  snprintf(buf, sizeof(buf), "%lu/%lu", (unsigned long)st.accepted,
-           (unsigned long)st.shares);
+  // accepted/submitted, and the reject count once there is one — "0/28" alone
+  // cannot distinguish "the pool turned them all down" from "no reply yet".
+  if (st.rejected)
+    snprintf(buf, sizeof(buf), "%lu/%lu -%lu", (unsigned long)st.accepted,
+             (unsigned long)st.shares, (unsigned long)st.rejected);
+  else
+    snprintf(buf, sizeof(buf), "%lu/%lu", (unsigned long)st.accepted,
+             (unsigned long)st.shares);
   drawSlotRight(gfx, s_rows[0], buf, VAL_R, ROW0_Y, 2,
-                st.rejected ? C_YELLOW : C_WHITE, C_PANEL);
+                st.rejected ? C_RED : C_WHITE, C_PANEL);
 
   fmtDiff(st.bestDiff, buf, sizeof(buf));
   drawSlotRight(gfx, s_rows[1], buf, VAL_R, ROW0_Y + ROW_DY, 2, C_BTC, C_PANEL);
@@ -203,14 +211,22 @@ void MinerMode::render(const Settings& s, bool full) {
   snprintf(buf, sizeof(buf), "%lu", (unsigned long)st.templates);
   drawSlotRight(gfx, s_rows[3], buf, VAL_R, ROW0_Y + 3 * ROW_DY, 2, C_WHITE, C_PANEL);
 
-  // Footer: pool and how long this run has been going.
+  // Footer: normally the pool and how long this run has been going, but a
+  // pool complaint displaces it. Shares that all bounce look the same on screen
+  // whatever the cause; the pool's own wording is what tells them apart, so it
+  // gets the line rather than sitting on a serial port nobody is watching.
   char up[16], foot[40];
-  fmtUptime(st.uptimeSec, up, sizeof(up));
-  snprintf(foot, sizeof(foot), "%s  %s", st.poolHost, up);
+  const bool bad = st.lastError[0] != 0;
+  if (bad) {
+    snprintf(foot, sizeof(foot), "pool: %s", st.lastError);
+  } else {
+    fmtUptime(st.uptimeSec, up, sizeof(up));
+    snprintf(foot, sizeof(foot), "%s  %s", st.poolHost, up);
+  }
   if (strcmp(s_foot.text, foot)) {
     strlcpy(s_foot.text, foot, sizeof(s_foot.text));
     gfx->fillRect(0, 214, TFT_WIDTH, 10, C_BLACK);
-    gfxDrawCentered(foot, 214, 1, C_DIM);
+    gfxDrawCentered(foot, 214, 1, bad ? C_RED : C_DIM);
   }
 }
 

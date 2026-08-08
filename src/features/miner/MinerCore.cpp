@@ -128,6 +128,7 @@ static void minerWorkerTask(void* arg) {
 #if MINER_HAS_SHA_HW
   uint8_t   swapped[128];       // engine-order copy of the current header
   bool      hwChecked = false;
+  bool      hadHw = false;      // was the hardware path in use last chunk?
 #endif
 
   esp_task_wdt_add(NULL);
@@ -169,7 +170,12 @@ static void minerWorkerTask(void* arg) {
       }
       useHw = !s_hwFaulted;
     }
-    if (useHw && newJob) minerHwSwapHeader(work.header, swapped);
+    // Rebuild the byte-swapped header on a new job *or* the first chunk after
+    // the engine is switched on: the web UI can flip to hybrid mid-job, and
+    // hashing a stale buffer produces plausible-looking shares whose nonces do
+    // not reproduce at the pool — silently rejected, every one.
+    if (useHw && (newJob || !hadHw)) minerHwSwapHeader(work.header, swapped);
+    hadHw = useHw;
 #else
     (void)newJob;
 #endif
@@ -277,6 +283,13 @@ static void stratumTask(void*) {
   uint32_t extranonce2Ctr = 0;
   String   extranonce2;
 
+  // mining.authorize is answered asynchronously, so its reply is matched by id
+  // from the dispatch loop below. Until it lands we submit optimistically (a
+  // pool that never answers should not cost us shares); once it is refused we
+  // stop, because from that point the pool turns every share down.
+  enum { AUTH_PENDING, AUTH_OK, AUTH_FAILED } auth = AUTH_PENDING;
+  unsigned long authId = 0;
+
   uint32_t lastTxMs = millis(), lastJobMs = millis();
   uint32_t lastRateMs = millis(), startedMs = millis();
   uint32_t lastPer[MINER_WORKERS] = {};   // previous per-worker counter reads
@@ -333,14 +346,19 @@ static void stratumTask(void*) {
         if (backoffMs < 60000) backoffMs *= 2;
         continue;
       }
-      stratumAuthorize(client, user.c_str(), "x");
+      stratumClearError();
+      auth = AUTH_PENDING;
+      stratumAuthorize(client, user.c_str(), "x", authId);
       stratumSuggestDifficulty(client, MINER_SUGGEST_DIFF);
 
       subscribed = true;
       backoffMs = 2000;
       lastTxMs = lastJobMs = millis();
       for (auto& p : pending) p.used = false;
-      lockTake(); s_stats.state = MINER_SUBSCRIBED; lockGive();
+      lockTake();
+      s_stats.state = MINER_SUBSCRIBED;
+      s_stats.lastError[0] = 0;
+      lockGive();
       Serial.printf("[miner] subscribed, extranonce1=%s size=%d\n",
                     sub.extranonce1.c_str(), sub.extranonce2Size);
     }
@@ -376,7 +394,9 @@ static void stratumTask(void*) {
             lastJobMs = millis();
             lockTake();
             s_stats.templates++;
-            s_stats.state = MINER_MINING;
+            // Jobs keep arriving after a refused authorize; don't let that
+            // repaint the screen as if everything were fine.
+            s_stats.state = (auth == AUTH_FAILED) ? MINER_AUTH_FAILED : MINER_MINING;
             lockGive();
           } else {
             Serial.println("[miner] could not build work from this job");
@@ -394,6 +414,11 @@ static void stratumTask(void*) {
           break;
         case STRATUM_SUCCESS: {
           unsigned long id = stratumExtractId(line);
+          if (id && id == authId) {
+            auth = AUTH_OK;
+            Serial.println("[miner] authorized");
+            break;
+          }
           for (auto& p : pending)
             if (p.used && p.id == id) {
               p.used = false;
@@ -405,11 +430,26 @@ static void stratumTask(void*) {
         }
         case STRATUM_PARSE_ERROR: {
           unsigned long id = stratumExtractId(line);
+          // Whatever the pool objected to, its wording is the diagnosis; keep
+          // it whether or not the frame matches something we are tracking.
+          lockTake();
+          strlcpy(s_stats.lastError, stratumLastError(), sizeof(s_stats.lastError));
+          lockGive();
+
+          // An authorize the pool refuses is the one failure that used to be
+          // silent: jobs keep arriving, hashing keeps working, and every share
+          // bounces. Stop submitting and say so instead of racking up rejects.
+          if (id && id == authId) {
+            auth = AUTH_FAILED;
+            Serial.printf("[miner] authorize refused: %s\n", stratumLastError());
+            lockTake(); s_stats.state = MINER_AUTH_FAILED; lockGive();
+            break;
+          }
           for (auto& p : pending)
             if (p.used && p.id == id) {
               p.used = false;
               lockTake(); s_stats.rejected++; lockGive();
-              Serial.println("[miner] share rejected");
+              Serial.printf("[miner] share rejected: %s\n", stratumLastError());
               break;
             }
           break;
@@ -420,7 +460,9 @@ static void stratumTask(void*) {
     }
 
     // --- submit solved nonces ---
-    for (;;) {
+    // Nothing to gain by submitting into a refused authorization: the pool
+    // rejects each one, and the counter climbing hides the real fault.
+    while (auth != AUTH_FAILED) {
       Solution sol;
       bool popped = false, fresh = false;
       lockTake();

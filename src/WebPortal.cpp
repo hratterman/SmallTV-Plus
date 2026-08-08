@@ -124,9 +124,13 @@ static void handleStatus() {
     minerCoreSnapshot(ms);
     JsonObject m = o["miner"].to<JsonObject>();
     m["configured"] = ms.configured;
-    m["state"]      = (ms.state == MINER_MINING)     ? "mining"
-                    : (ms.state == MINER_SUBSCRIBED) ? "subscribed"
-                    : (ms.state == MINER_CONNECTING) ? "connecting" : "idle";
+    m["state"]      = (ms.state == MINER_MINING)      ? "mining"
+                    : (ms.state == MINER_SUBSCRIBED)  ? "subscribed"
+                    : (ms.state == MINER_CONNECTING)  ? "connecting"
+                    : (ms.state == MINER_AUTH_FAILED) ? "auth-failed" : "idle";
+    // The pool's own words for its last complaint — the only thing that tells
+    // a low-difficulty share apart from a stale job or a refused address.
+    m["lastError"] = ms.lastError;
     m["pool"]      = ms.poolHost;
     m["hashrate"]  = ms.hashrate;          // H/s, ~1 Hz average
     m["hashes"]    = ms.totalHashes;

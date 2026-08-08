@@ -40,8 +40,14 @@ enum StratumMethod {
 };
 
 bool stratumSubscribe(WiFiClient& c, StratumSub& sub);   // tx + parse the reply
-bool stratumAuthorize(WiFiClient& c, const char* user, const char* pass);
 bool stratumSuggestDifficulty(WiFiClient& c, double difficulty);
+
+// The reply is not read here: notifications are usually already interleaved by
+// the time it arrives, so it comes back through the main dispatch loop. authId
+// receives the rpc id so that reply can be recognised — an authorize that fails
+// is otherwise invisible, and every share after it is rejected.
+bool stratumAuthorize(WiFiClient& c, const char* user, const char* pass,
+                      unsigned long& authId);
 
 StratumMethod stratumParseMethod(const String& line);
 bool stratumParseNotify(const String& line, StratumJob& job);
@@ -53,5 +59,12 @@ unsigned long stratumExtractId(const String& line);
 bool stratumSubmit(WiFiClient& c, const char* user, const StratumJob& job,
                    const String& extranonce2, uint32_t nonce,
                    unsigned long& submitId);
+
+// Text of the most recent "error" array the pool sent, or "" if none since the
+// last clear. The pool always says why it turned a share down ("Low difficulty
+// share", "Job not found", "Unauthorized"); those point at completely different
+// faults, so the reason belongs in the UI rather than only on the serial port.
+const char* stratumLastError();
+void        stratumClearError();
 
 #endif  // WITH_MINER

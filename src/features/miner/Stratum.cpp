@@ -12,11 +12,19 @@ static unsigned long nextId() {
   return ++s_id;
 }
 
+// Most recent pool error text, for the UI. Written and read only by the stratum
+// task, which copies it into the stats snapshot under the engine lock.
+static char s_lastError[64] = "";
+
+const char* stratumLastError() { return s_lastError; }
+void        stratumClearError() { s_lastError[0] = 0; }
+
 // A result frame with a non-empty "error" array (logged, treated as failure).
 static bool frameHasError(JsonDocument& doc) {
   if (doc["error"].isNull() || doc["error"].size() == 0) return false;
-  Serial.printf("[miner] pool error %d: %s\n", (int)doc["error"][0],
-                (const char*)(doc["error"][1] | "?"));
+  const char* msg = doc["error"][1] | "?";
+  Serial.printf("[miner] pool error %d: %s\n", (int)doc["error"][0], msg);
+  strlcpy(s_lastError, msg, sizeof(s_lastError));
   return true;
 }
 
@@ -44,16 +52,17 @@ bool stratumSubscribe(WiFiClient& c, StratumSub& sub) {
   return sub.extranonce1.length() > 0 && sub.extranonce2Size > 0;
 }
 
-bool stratumAuthorize(WiFiClient& c, const char* user, const char* pass) {
+bool stratumAuthorize(WiFiClient& c, const char* user, const char* pass,
+                      unsigned long& authId) {
   char payload[256];
+  authId = nextId();
   snprintf(payload, sizeof(payload),
            "{\"params\":[\"%s\",\"%s\"],\"id\":%lu,\"method\":\"mining.authorize\"}\n",
-           user, pass, nextId());
+           user, pass, authId);
   Serial.printf("[miner] > %s", payload);
-  c.print(payload);
   // The reply is read from the main dispatch loop: notifications may already
-  // be interleaved by the time it arrives.
-  return true;
+  // be interleaved by the time it arrives. The caller matches it by authId.
+  return c.print(payload) > 0;
 }
 
 bool stratumSuggestDifficulty(WiFiClient& c, double difficulty) {
