@@ -141,6 +141,18 @@ static void handleStatus() {
     // Solutions the software path could not reproduce. Non-zero means the
     // hardware engine is returning bad digests, not that the pool is unhappy.
     m["unverified"] = ms.unverified;
+    // Every candidate the engine raised and got wrong, plus the first one in
+    // full: the difference between got and want names the fault directly.
+    m["badDigests"] = ms.badDigests;
+    if (ms.badSampled) {
+      JsonObject b = m["badSample"].to<JsonObject>();
+      char hex[65];
+      b["nonce"] = ms.badNonce;
+      for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badGot[i]);
+      b["got"] = hex;
+      for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badWant[i]);
+      b["want"] = hex;
+    }
     m["bestDiff"]  = ms.bestDiff;
     m["poolDiff"]  = ms.poolDiff;
     m["uptime"]    = ms.uptimeSec;

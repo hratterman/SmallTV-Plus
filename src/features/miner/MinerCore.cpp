@@ -92,10 +92,27 @@ static void clearJob() {
 // Hash worker
 // ---------------------------------------------------------------------------
 #if MINER_HAS_SHA_HW
+// Record a digest the SHA peripheral got wrong. The first one of the run is
+// kept in full alongside what software expected, because the difference between
+// the two identifies the fault where a count alone cannot.
+static void hwBadDigest(uint32_t nonce, const uint8_t* got, const uint8_t* want) {
+  lockTake();
+  s_stats.badDigests++;
+  if (!s_stats.badSampled) {
+    s_stats.badSampled = true;
+    s_stats.badNonce = nonce;
+    memcpy(s_stats.badGot, got, 32);
+    memcpy(s_stats.badWant, want, 32);
+  }
+  lockGive();
+  Serial.printf("[miner] hw digest mismatch at nonce %08lx\n", (unsigned long)nonce);
+}
+
 // The register-level engine path cannot be checked off-device, so prove it
 // against the software implementation (which tools/miner_selftest checks against
-// a real block) before trusting a single share to it. A mismatch disables the
-// hardware path for the rest of the run rather than mining garbage.
+// a real block) before trusting a single share to it. This catches an engine
+// that is wrong every time; the per-candidate recheck in the worker is what
+// catches one that is wrong occasionally.
 static bool hwSelfCheck(const MinerWork& w) {
   const uint32_t testNonce = 0x12345678;
   uint8_t hdr[128];
@@ -199,6 +216,21 @@ static void minerWorkerTask(void* arg) {
           minerHwPrime(swapped);   // mbedTLS may have used the engine meanwhile
         }
         solved = minerHwSha256d(swapped, nonce, hash);
+        // The engine has been caught returning digests that do not reproduce,
+        // so every candidate it raises is rechecked in software before it can
+        // become a solution. Candidates arrive ~3x a second and a software
+        // double hash is ~60 us, so this costs about 0.02% of the core — and
+        // unlike the check at submit time it sees *every* bad digest, not only
+        // the ~1-in-2^32 that would also clear pool difficulty.
+        if (solved) {
+          uint8_t check[32];
+          memcpy(work.header + 76, &nonce, 4);
+          minerSha256dFromMidstate(work.midstate, work.header + 64, check);
+          if (memcmp(check, hash, 32) != 0) {
+            hwBadDigest(nonce, hash, check);
+            solved = false;
+          }
+        }
 #else
         solved = false;
 #endif
