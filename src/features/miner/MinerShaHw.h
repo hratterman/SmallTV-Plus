@@ -68,4 +68,18 @@ struct MinerHwBench {
 // engine for the duration (the mining worker simply waits).
 int minerHwBenchmark(MinerHwBench* out, int maxOut);
 
+// Cycle-level profile of the pieces of one nonce, so the ceiling can be
+// computed from what this engine actually does rather than from round counts.
+// Everything is average CPU cycles at the current clock.
+struct MinerHwProfile {
+  uint32_t writes16;     // the 16 register writes of a block fill, alone
+  uint32_t blockFull;    // fill + start_block + poll until idle
+  uint32_t loadPoll;     // load + poll until idle
+  uint32_t probe;        // the early-exit digest read
+  uint32_t engineBlock;  // blockFull - writes16: the engine's own block time
+  uint32_t cpuMHz;
+  uint32_t ceilingKhs;   // 3 engine blocks per nonce, zero CPU overhead
+};
+void minerHwProfileEngine(MinerHwProfile& out);
+
 #endif  // MINER_HAS_SHA_HW

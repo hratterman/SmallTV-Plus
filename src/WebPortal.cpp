@@ -295,6 +295,16 @@ static void handleMinerBench() {
     e["khs"]     = res[i].khs;
     e["correct"] = res[i].correct;
   }
+  MinerHwProfile hp;
+  minerHwProfileEngine(hp);
+  JsonObject pr = o["profile"].to<JsonObject>();
+  pr["writes16"]    = hp.writes16;
+  pr["blockFull"]   = hp.blockFull;
+  pr["engineBlock"] = hp.engineBlock;
+  pr["loadPoll"]    = hp.loadPoll;
+  pr["probe"]       = hp.probe;
+  pr["cpuMHz"]      = hp.cpuMHz;
+  pr["ceilingKhs"]  = hp.ceilingKhs;
   o["ok"] = true;
 #else
   o["ok"] = false;

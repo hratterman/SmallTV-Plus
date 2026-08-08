@@ -634,7 +634,13 @@ function minerBench(){var b=$('benchBtn');if(!b)return;b.disabled=true;
   $('benchOut').innerHTML=(r.variants||[]).map(function(v){
    var tag=v.correct?(v.khs===best?' <b style="color:var(--acc)">fastest</b>':'')
                     :' <b style="color:var(--red)">wrong digest</b>';
-   return '<div class="kv"><span>'+esc(v.name)+tag+'</span><b>'+fmtHash(v.khs*1000)+'</b></div>'}).join('');
+   return '<div class="kv"><span>'+esc(v.name)+tag+'</span><b>'+fmtHash(v.khs*1000)+'</b></div>'}).join('')
+   +(r.profile?('<div style="margin-top:10px" class="muted">Cycle profile of one nonce at '+r.profile.cpuMHz+' MHz</div>'
+     +kv('16 register writes',r.profile.writes16+' cyc')
+     +kv('engine block compression',r.profile.engineBlock+' cyc')
+     +kv('digest load + poll',r.profile.loadPoll+' cyc')
+     +kv('early-exit probe',r.profile.probe+' cyc')
+     +kv('<b>ceiling (3 blocks, no CPU cost)</b>','<b>'+fmtHash(r.profile.ceilingKhs*1000)+'</b>')):'');
  }).catch(function(){b.disabled=false;$('benchOut').textContent='Benchmark failed'})}
 function fmtHash(h){h=h||0;
  if(h>=1e9)return (h/1e9).toFixed(2)+' GH/s';

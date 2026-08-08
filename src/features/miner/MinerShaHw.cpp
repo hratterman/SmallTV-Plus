@@ -20,7 +20,7 @@
 
 static inline __attribute__((always_inline)) void hwFillFirstBlock(const void* text) {
   const uint32_t* w = (const uint32_t*)text;
-  uint32_t* reg = (uint32_t*)(SHA_TEXT_BASE);
+  volatile uint32_t* reg = (volatile uint32_t*)(SHA_TEXT_BASE);
   for (int i = 0; i < 16; i++) reg[i] = w[i];
 }
 
@@ -28,7 +28,7 @@ static inline __attribute__((always_inline)) void hwFillFirstBlock(const void* t
 // nonce, and the rest is SHA padding for an 80-byte message (640 bits).
 static inline __attribute__((always_inline)) void hwFillSecondBlock(const void* text, uint32_t nonce) {
   const uint32_t* w = (const uint32_t*)text;
-  uint32_t* reg = (uint32_t*)(SHA_TEXT_BASE);
+  volatile uint32_t* reg = (volatile uint32_t*)(SHA_TEXT_BASE);
   reg[0]  = w[0];
   reg[1]  = w[1];
   reg[2]  = w[2];
@@ -43,7 +43,7 @@ static inline __attribute__((always_inline)) void hwFillSecondBlock(const void* 
 // Second hash: the first digest is already sitting in words 0-7 after a load,
 // so only the padding for a 32-byte message (256 bits) needs writing.
 static inline __attribute__((always_inline)) void hwFillDoubleBlock() {
-  uint32_t* reg = (uint32_t*)(SHA_TEXT_BASE);
+  volatile uint32_t* reg = (volatile uint32_t*)(SHA_TEXT_BASE);
   reg[8]  = 0x80000000;
   reg[9]  = 0; reg[10] = 0; reg[11] = 0;
   reg[12] = 0; reg[13] = 0; reg[14] = 0;
@@ -100,7 +100,7 @@ static inline __attribute__((always_inline)) bool hwReadDigestSwapped(void* out,
 // writes per nonce; correctness depends on load() not touching TEXT[8..15],
 // which is exactly what the benchmark's digest check verifies.
 static inline __attribute__((always_inline)) void hwFillDoubleBlockFew() {
-  uint32_t* reg = (uint32_t*)(SHA_TEXT_BASE);
+  volatile uint32_t* reg = (volatile uint32_t*)(SHA_TEXT_BASE);
   reg[8]  = 0x80000000;
   reg[15] = 0x00000100;
 }
@@ -246,6 +246,61 @@ struct BenchCtx {
 // bench task must still have somewhere valid to write.
 static BenchCtx s_bench;
 
+// Measure what one nonce is actually made of, in CPU cycles. This is the number
+// that decides whether a given hashrate is physically reachable at all: three
+// engine block times per nonce is the floor, and everything the CPU does sits
+// on top of it. Must be called with the engine held.
+static void profileEngine(const uint8_t* swapped, MinerHwProfile& p) {
+  const uint32_t N = 2000;
+  uint32_t t0;
+
+  // 1. The 16 register writes of a block fill, with the engine idle.
+  t0 = esp_cpu_get_cycle_count();
+  for (uint32_t k = 0; k < N; k++) hwFillFirstBlock(swapped);
+  p.writes16 = (esp_cpu_get_cycle_count() - t0) / N;
+
+  // 2. Fill + start + wait for the compression to finish.
+  t0 = esp_cpu_get_cycle_count();
+  for (uint32_t k = 0; k < N; k++) {
+    hwFillFirstBlock(swapped);
+    sha_ll_start_block(SHA2_256);
+    hwWaitIdleBounded();
+  }
+  p.blockFull = (esp_cpu_get_cycle_count() - t0) / N;
+
+  // 3. A digest load and its wait.
+  t0 = esp_cpu_get_cycle_count();
+  for (uint32_t k = 0; k < N; k++) {
+    sha_ll_load(SHA2_256);
+    hwWaitIdleBounded();
+  }
+  p.loadPoll = (esp_cpu_get_cycle_count() - t0) / N;
+
+  // 4. The per-nonce early-exit digest probe.
+  uint8_t sink[32];
+  t0 = esp_cpu_get_cycle_count();
+  for (uint32_t k = 0; k < N; k++) hwReadDigestSwapped<false>(sink, true);
+  p.probe = (esp_cpu_get_cycle_count() - t0) / N;
+
+  p.engineBlock = (p.blockFull > p.writes16) ? p.blockFull - p.writes16 : 0;
+  p.cpuMHz = (uint32_t)(ets_get_cpu_frequency());
+  // Three compressions per nonce is unavoidable on this chip: its engine state
+  // cannot be seeded with a midstate, so both header blocks are redone each time.
+  uint32_t perNonce = p.engineBlock * 3;
+  p.ceilingKhs = perNonce ? (uint32_t)((uint64_t)p.cpuMHz * 1000ULL / perNonce) : 0;
+
+  Serial.printf("[miner] profile: writes16=%lu blockFull=%lu engineBlock=%lu "
+                "loadPoll=%lu probe=%lu -> ceiling %lu KH/s at %lu MHz\n",
+                (unsigned long)p.writes16, (unsigned long)p.blockFull,
+                (unsigned long)p.engineBlock, (unsigned long)p.loadPoll,
+                (unsigned long)p.probe, (unsigned long)p.ceilingKhs,
+                (unsigned long)p.cpuMHz);
+}
+
+static MinerHwProfile s_profile;
+
+void minerHwProfileEngine(MinerHwProfile& out) { out = s_profile; }
+
 static void benchTask(void* arg) {
   BenchCtx* ctx = (BenchCtx*)arg;
 
@@ -292,6 +347,8 @@ static void benchTask(void* arg) {
     vTaskDelete(NULL);
     return;
   }
+
+  profileEngine(swapped, s_profile);
 
   int n = 0;
   for (int i = 0; i < count && i < ctx->maxOut; i++) {
