@@ -305,6 +305,16 @@ static void handleMinerBench() {
   pr["probe"]       = hp.probe;
   pr["cpuMHz"]      = hp.cpuMHz;
   pr["ceilingKhs"]  = hp.ceilingKhs;
+  MinerHwClock cl[3];
+  int cn = minerHwClockScan(cl, 3);
+  JsonArray ca = o["clocks"].to<JsonArray>();
+  for (int i = 0; i < cn; i++) {
+    JsonObject c = ca.add<JsonObject>();
+    c["mhz"]         = cl[i].mhz;
+    c["khs"]         = cl[i].khs;
+    c["writes16"]    = cl[i].writes16;
+    c["engineBlock"] = cl[i].engineBlock;
+  }
   o["ok"] = true;
 #else
   o["ok"] = false;

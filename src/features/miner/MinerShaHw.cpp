@@ -325,6 +325,8 @@ static void profileEngine(const uint8_t* swapped, MinerHwProfile& p) {
 }
 
 static MinerHwProfile s_profile;
+static MinerHwClock   s_clocks[3];
+static int            s_clockCount = 0;
 
 void minerHwProfileEngine(MinerHwProfile& out) { out = s_profile; }
 
@@ -377,6 +379,36 @@ static void benchTask(void* arg) {
 
   profileEngine(swapped, s_profile);
 
+  // Clock scaling sweep. Only the officially supported frequencies are used —
+  // nothing here overclocks anything — but the trend across them says whether
+  // overclocking could help at all: work on the CPU clock holds a constant cycle
+  // count, work on the fixed peripheral bus costs more cycles as the clock rises.
+  {
+    static const uint32_t kFreqs[3] = {240, 160, 80};
+    const uint32_t restoreMhz = (uint32_t)ets_get_cpu_frequency();
+    s_clockCount = 0;
+    for (int f = 0; f < 3; f++) {
+      if (!setCpuFrequencyMhz(kFreqs[f])) continue;
+      MinerHwProfile p;
+      profileEngine(swapped, p);
+
+      uint8_t sink[32];
+      const uint32_t kIt = 4000;
+      int64_t t0 = esp_timer_get_time();
+      for (uint32_t k = 0; k < kIt; k++)
+        hwVarProd(swapped, 0x20000000 + k, sink, true);
+      int64_t dt = esp_timer_get_time() - t0;
+
+      s_clocks[s_clockCount].mhz         = kFreqs[f];
+      s_clocks[s_clockCount].khs         = dt ? (uint32_t)((int64_t)kIt * 1000 / dt) : 0;
+      s_clocks[s_clockCount].writes16    = p.writes16;
+      s_clocks[s_clockCount].engineBlock = p.engineBlock;
+      s_clockCount++;
+    }
+    // Always come back, including if a step above bailed out.
+    setCpuFrequencyMhz(restoreMhz ? restoreMhz : 240);
+  }
+
   int n = 0;
   for (int i = 0; i < count && i < ctx->maxOut; i++) {
     HwVariantFn fn = kVariants[i].fn;
@@ -427,6 +459,12 @@ static void benchTask(void* arg) {
   ctx->finished = true;
   xSemaphoreGive(ctx->done);
   vTaskDelete(NULL);
+}
+
+int minerHwClockScan(MinerHwClock* out, int maxOut) {
+  int n = (s_clockCount < maxOut) ? s_clockCount : maxOut;
+  for (int i = 0; i < n; i++) out[i] = s_clocks[i];
+  return n;
 }
 
 int minerHwBenchmark(MinerHwBench* out, int maxOut) {

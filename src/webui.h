@@ -640,7 +640,10 @@ function minerBench(){var b=$('benchBtn');if(!b)return;b.disabled=true;
      +kv('engine block compression',r.profile.engineBlock+' cyc')
      +kv('digest load + poll',r.profile.loadPoll+' cyc')
      +kv('early-exit probe',r.profile.probe+' cyc')
-     +kv('<b>ceiling (3 blocks, no CPU cost)</b>','<b>'+fmtHash(r.profile.ceilingKhs*1000)+'</b>')):'');
+     +kv('<b>ceiling (3 blocks, no CPU cost)</b>','<b>'+fmtHash(r.profile.ceilingKhs*1000)+'</b>')):'')
+   +((r.clocks&&r.clocks.length)?('<div style="margin-top:10px" class="muted">Clock scaling &mdash; cycles constant means it rides the CPU clock, cycles rising means a fixed peripheral bus</div>'
+     +r.clocks.map(function(c){return kv(c.mhz+' MHz',fmtHash(c.khs*1000)
+       +' <span class="muted">('+c.writes16+' cyc writes, '+c.engineBlock+' cyc block)</span>')}).join('')):'');
  }).catch(function(){b.disabled=false;$('benchOut').textContent='Benchmark failed'})}
 function fmtHash(h){h=h||0;
  if(h>=1e9)return (h/1e9).toFixed(2)+' GH/s';

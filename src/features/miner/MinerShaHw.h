@@ -82,4 +82,16 @@ struct MinerHwProfile {
 };
 void minerHwProfileEngine(MinerHwProfile& out);
 
+// Clock scaling: the same loop measured at each supported CPU frequency. This
+// answers whether overclocking would buy anything — parts on the CPU clock keep
+// a constant cycle count as the clock rises, parts on the fixed peripheral bus
+// cost proportionally MORE cycles for the same wall-clock time.
+struct MinerHwClock {
+  uint32_t mhz;
+  uint32_t khs;          // production loop at that clock
+  uint32_t writes16;     // cycles for a 16-word fill
+  uint32_t engineBlock;  // cycles for one compression
+};
+int minerHwClockScan(MinerHwClock* out, int maxOut);
+
 #endif  // MINER_HAS_SHA_HW
