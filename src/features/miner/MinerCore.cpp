@@ -465,17 +465,43 @@ static void stratumTask(void*) {
     while (auth != AUTH_FAILED) {
       Solution sol;
       bool popped = false, fresh = false;
+      uint32_t vMid[8];
+      uint8_t  vBlock[64];
       lockTake();
       if (s_solTail != s_solHead) {
         sol = s_sol[s_solTail];
         s_solTail = (uint8_t)((s_solTail + 1) % MINER_SOLUTIONS);
         popped = true;
         fresh = (sol.seq == s_workSeq);  // stale job -> nothing to submit against
+        if (fresh) {                     // the work this nonce was found against
+          memcpy(vMid, s_work.midstate, sizeof(vMid));
+          memcpy(vBlock, s_work.header + 64, sizeof(vBlock));
+        }
       }
       lockGive();
       if (!popped) break;
       if (!fresh) continue;
       if (!client.connected()) break;
+
+      // Reproduce the hash in software before it goes anywhere. Software is the
+      // implementation the self-test checks against real block data; hardware is
+      // the one running a fixed 95-cycle spin instead of polling the busy flag,
+      // so a digest read a cycle early would otherwise reach the pool as a share
+      // that cannot be verified. This costs one double hash per submitted share
+      // — a handful per hour — and turns "the pool says no" into a local answer
+      // about which engine produced the bad share.
+      uint8_t verify[32];
+      memcpy(vBlock + 12, &sol.nonce, 4);   // header offset 76 -> block offset 12
+      minerSha256dFromMidstate(vMid, vBlock, verify);
+      if (memcmp(verify, sol.hash, 32) != 0) {
+        lockTake();
+        s_stats.unverified++;
+        strlcpy(s_stats.lastError, "bad digest (not sent)", sizeof(s_stats.lastError));
+        lockGive();
+        Serial.printf("[miner] discarded unverifiable solution, nonce %08lx\n",
+                      (unsigned long)sol.nonce);
+        continue;
+      }
 
       unsigned long id = 0;
       if (stratumSubmit(client, user.c_str(), job, extranonce2, sol.nonce, id)) {

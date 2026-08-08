@@ -42,7 +42,7 @@ static const uint32_t kK[64] = {
 
 #define RR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
 
-static void sha256Block(uint32_t* h, const uint8_t* p) {
+static MINER_HOT void sha256Block(uint32_t* h, const uint8_t* p) {
   uint32_t w[64];
   for (int i = 0; i < 16; i++)
     w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16) |
@@ -68,7 +68,7 @@ static void sha256Block(uint32_t* h, const uint8_t* p) {
   h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
 }
 
-void minerSha256(const uint8_t* in, size_t len, uint8_t out[32]) {
+MINER_HOT void minerSha256(const uint8_t* in, size_t len, uint8_t out[32]) {
   uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
   size_t full = len / 64;
@@ -103,9 +103,15 @@ void minerSha256d(const uint8_t* in, size_t len, uint8_t out[32]) {
 // nonce in a job, so it is compressed once into a midstate and only the second
 // block is redone per attempt — the same trick the hardware engine cannot do,
 // which is why software needs two compressions per nonce where hardware needs
-// three. (A fully unrolled version of this was ~25 KB of IRAM for about 7% of
-// total hashrate; with the SHA peripheral carrying the rest, the rolled loop is
-// the better trade for the OTA budget.)
+// three.
+//
+// The unrolled predecessor was ~25 KB of IRAM; replacing it with this rolled
+// loop was scored as costing ~7% of hashrate, which was wrong — that was its
+// share of the total *after* the swap, not before. Measured on the device the
+// software core went from ~110 KH/s to 16.3 KH/s, i.e. a quarter of the hybrid
+// total, and nearly all of that was cache: the rolled loop is small but it was
+// executing from flash on the core that also serves WiFi and the hardware SHA
+// loop. Hence MINER_HOT below rather than a return to 25 KB of unrolling.
 void minerMidstate(const uint8_t block1[64], uint32_t state[8]) {
   state[0] = 0x6a09e667; state[1] = 0xbb67ae85;
   state[2] = 0x3c6ef372; state[3] = 0xa54ff53a;
@@ -114,8 +120,8 @@ void minerMidstate(const uint8_t block1[64], uint32_t state[8]) {
   sha256Block(state, block1);
 }
 
-void minerSha256dFromMidstate(const uint32_t midstate[8], const uint8_t block2[64],
-                              uint8_t out[32]) {
+MINER_HOT void minerSha256dFromMidstate(const uint32_t midstate[8],
+                                       const uint8_t block2[64], uint8_t out[32]) {
   uint32_t h[8];
   memcpy(h, midstate, sizeof(h));
   sha256Block(h, block2);

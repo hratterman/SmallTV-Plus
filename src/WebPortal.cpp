@@ -138,6 +138,9 @@ static void handleStatus() {
     m["shares"]    = ms.shares;
     m["accepted"]  = ms.accepted;
     m["rejected"]  = ms.rejected;
+    // Solutions the software path could not reproduce. Non-zero means the
+    // hardware engine is returning bad digests, not that the pool is unhappy.
+    m["unverified"] = ms.unverified;
     m["bestDiff"]  = ms.bestDiff;
     m["poolDiff"]  = ms.poolDiff;
     m["uptime"]    = ms.uptimeSec;

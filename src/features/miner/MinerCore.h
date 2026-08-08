@@ -38,6 +38,7 @@ struct MinerStats {
   uint32_t shares;         // shares submitted (met pool diff)
   uint32_t accepted;       // shares the pool acknowledged
   uint32_t rejected;       // shares the pool rejected
+  uint32_t unverified;     // solutions software could not reproduce -> not sent
   uint64_t totalHashes;    // lifetime hashes this run
   uint32_t hashrate;       // H/s, updated ~1 Hz
   uint32_t uptimeSec;      // seconds since the engine started

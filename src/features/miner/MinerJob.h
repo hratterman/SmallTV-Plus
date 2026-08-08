@@ -12,6 +12,19 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// The per-nonce software path is compute-bound and runs on core 0, whose
+// instruction cache is also serving WiFi and the hardware SHA loop. Executing
+// it from flash means competing for that cache on every block; MINER_HOT pins
+// it in IRAM instead. Off-device (the self-test) it expands to nothing.
+// Applied at the definitions only: repeating a section attribute on the
+// declaration makes GCC ignore one of the two.
+#if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
+#  include <esp_attr.h>
+#  define MINER_HOT IRAM_ATTR
+#else
+#  define MINER_HOT
+#endif
+
 // Longest coinbase (in bytes) a job may carry; its hex form is twice this.
 #define MINER_MAX_COINBASE 1024
 
@@ -34,8 +47,8 @@ void minerMidstate(const uint8_t block1[64], uint32_t state[8]);
 
 // The per-nonce software double hash: resume from the midstate over the second
 // 64-byte block, then hash that digest again.
-void minerSha256dFromMidstate(const uint32_t midstate[8], const uint8_t block2[64],
-                              uint8_t out[32]);
+void minerSha256dFromMidstate(const uint32_t midstate[8],
+                              const uint8_t block2[64], uint8_t out[32]);
 
 // Expand compact nbits ("1a44b9f2") into a 32-byte target laid out
 // little-endian, i.e. the byte order the double-SHA output comes back in.
