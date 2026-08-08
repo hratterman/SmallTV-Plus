@@ -1,0 +1,452 @@
+// MinerCore.cpp — stratum connection + job pipeline + hash workers.
+//
+// Ported from BitMaker-hub/NerdMiner_v2 src/mining.cpp (MIT, (c) 2023 Bitmaker).
+// The shape is the same — one task owns the pool socket and prepares work,
+// worker tasks grind nonce ranges — but the plumbing here is allocation-free (a
+// single current-job slot plus fixed rings instead of std::list/shared_ptr),
+// since this firmware shares its heap with the web UI, the display, and three
+// other feature modes. The job math itself lives in MinerJob.cpp, which is
+// checked against real block data by tools/miner_selftest.
+#include "config.h"
+#if WITH_MINER
+
+#include "MinerCore.h"
+#include "MinerJob.h"
+#include "Stratum.h"
+#include "NerdSha256.h"
+
+#include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
+#include <esp_task_wdt.h>
+
+// ---- tuning ---------------------------------------------------------------
+#define MINER_WORKERS        2        // one per core
+#define MINER_NONCE_CHUNK    4096     // nonces per work grab (~25 ms of grinding)
+#define MINER_SUGGEST_DIFF   0.00015  // mining.suggest_difficulty, as NerdMiner
+#define MINER_KEEPALIVE_MS   30000UL  // idle chatter so the pool holds the socket
+#define MINER_NOJOB_MS       600000UL // no mining.notify this long -> reconnect
+#define MINER_PENDING        16       // in-flight share submissions tracked
+#define MINER_SOLUTIONS      8        // solved-nonce ring
+
+// The task watchdog watches the core-0 idle task (5 s timeout), so a worker that
+// never blocks would panic the chip. One tick (1 ms at CONFIG_FREERTOS_HZ=1000)
+// handed back twice a second keeps idle fed for ~0.2% of throughput.
+#define MINER_YIELD_EVERY_MS 500UL
+
+// ---------------------------------------------------------------------------
+// Shared state. s_lock guards everything below except the volatile counters,
+// which have exactly one writer each (aligned 32-bit accesses are atomic).
+// ---------------------------------------------------------------------------
+static SemaphoreHandle_t s_lock = nullptr;
+
+// The one job the workers are grinding. seq is bumped on every mining.notify;
+// workers compare it to spot both "new work" and "abandon the current chunk".
+static MinerWork      s_work;
+static volatile uint32_t s_workSeq;   // 0 = no work
+static double         s_poolDiff;
+static uint32_t       s_nonceCursor;  // next unhanded nonce range
+
+struct Solution {
+  uint32_t seq;
+  uint32_t nonce;
+  double   diff;
+  uint8_t  hash[32];
+};
+static Solution s_sol[MINER_SOLUTIONS];
+static uint8_t  s_solHead, s_solTail;
+
+// Per-worker hash counters: one writer each, summed by the stats tick.
+static volatile uint32_t s_hashCount[MINER_WORKERS];
+
+// Config snapshot the stratum task works from; epoch is bumped by applyConfig.
+static struct {
+  volatile uint32_t epoch;
+  bool     configured;
+  String   host;
+  uint16_t port;
+  String   user;          // address, or address.worker
+} s_cfg;
+
+static MinerStats s_stats;
+static bool       s_tasksStarted = false;
+
+static inline void lockTake() { xSemaphoreTake(s_lock, portMAX_DELAY); }
+static inline void lockGive() { xSemaphoreGive(s_lock); }
+
+static void clearJob() {
+  lockTake();
+  s_workSeq = 0;
+  s_solHead = s_solTail = 0;
+  lockGive();
+}
+
+// ---------------------------------------------------------------------------
+// Hash worker
+// ---------------------------------------------------------------------------
+static void minerWorkerTask(void* arg) {
+  const uint32_t idx = (uint32_t)(uintptr_t)arg;
+
+  MinerWork work;
+  double    poolDiff = 0;
+  uint32_t  localSeq = 0;
+  uint8_t   hash[32];
+  uint32_t  lastYield = millis();
+
+  esp_task_wdt_add(NULL);
+  Serial.printf("[miner] worker %u on core %d\n", (unsigned)idx, xPortGetCoreID());
+
+  for (;;) {
+    uint32_t nonceStart = 0;
+    bool haveWork = false;
+
+    lockTake();
+    if (s_workSeq) {
+      if (localSeq != s_workSeq) {
+        work = s_work;              // ~250 B, only on a job change
+        localSeq = s_workSeq;
+      }
+      poolDiff = s_poolDiff;
+      nonceStart = s_nonceCursor;
+      s_nonceCursor += MINER_NONCE_CHUNK;
+      haveWork = true;
+    }
+    lockGive();
+
+    if (!haveWork) {
+      esp_task_wdt_reset();
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    uint32_t done = MINER_NONCE_CHUNK;
+    for (uint32_t i = 0; i < MINER_NONCE_CHUNK; i++) {
+      const uint32_t nonce = nonceStart + i;
+      memcpy(work.header + 76, &nonce, 4);
+
+      // All but ~1/65536 nonces bail out inside here without finishing.
+      if (nerd_sha256d_baked(work.midstate, work.header + 64, work.bake, hash)) {
+        double d = minerDiffFromHash(hash);
+        if (d >= poolDiff) {
+          lockTake();
+          uint8_t next = (uint8_t)((s_solHead + 1) % MINER_SOLUTIONS);
+          if (next != s_solTail) {        // ring full -> drop (pool is behind)
+            s_sol[s_solHead].seq   = localSeq;
+            s_sol[s_solHead].nonce = nonce;
+            s_sol[s_solHead].diff  = d;
+            memcpy(s_sol[s_solHead].hash, hash, 32);
+            s_solHead = next;
+          }
+          lockGive();
+        }
+      }
+
+      // Abandon the chunk promptly when the pool sends new work.
+      if ((i & 0xFF) == 0xFF && s_workSeq != localSeq) { done = i + 1; break; }
+    }
+
+    s_hashCount[idx] += done;
+    esp_task_wdt_reset();
+
+    // Hand the core back briefly so the idle task can feed the watchdog.
+    uint32_t now = millis();
+    if (now - lastYield >= MINER_YIELD_EVERY_MS) {
+      lastYield = now;
+      vTaskDelay(1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stratum task
+// ---------------------------------------------------------------------------
+struct PendingShare {
+  unsigned long id;
+  double        diff;
+  bool          used;
+};
+
+// Publish freshly built work to the hash workers.
+static void publishWork(const MinerWork& w, double poolDiff) {
+  lockTake();
+  s_work = w;
+  s_poolDiff = poolDiff;
+  s_workSeq++;                 // hands the new job to the workers
+  s_nonceCursor = 0;
+  s_solHead = s_solTail = 0;   // solutions for the old job are unsubmittable
+  lockGive();
+}
+
+static void stratumTask(void*) {
+  WiFiClient client;
+  StratumSub sub;
+  StratumJob job;
+  PendingShare pending[MINER_PENDING] = {};
+
+  bool     subscribed = false;
+  uint32_t myEpoch = 0;
+  String   host, user;
+  uint16_t port = 0;
+  bool     configured = false;
+
+  double   poolDiff = MINER_SUGGEST_DIFF;
+  uint32_t extranonce2Ctr = 0;
+  String   extranonce2;
+
+  uint32_t lastTxMs = millis(), lastJobMs = millis();
+  uint32_t lastRateMs = millis(), startedMs = millis();
+  uint64_t lastTotal = 0;
+  uint32_t backoffMs = 2000;
+
+  client.setTimeout(5);   // seconds on ESP32; bounds a truncated line
+
+  for (;;) {
+    // --- pick up a config change ---
+    if (myEpoch != s_cfg.epoch) {
+      lockTake();
+      myEpoch    = s_cfg.epoch;
+      configured = s_cfg.configured;
+      host       = s_cfg.host;
+      port       = s_cfg.port;
+      user       = s_cfg.user;
+      lockGive();
+      client.stop();
+      subscribed = false;
+      clearJob();
+      backoffMs = 2000;
+    }
+
+    if (!configured || WiFi.status() != WL_CONNECTED) {
+      if (subscribed) { client.stop(); subscribed = false; clearJob(); }
+      lockTake();
+      s_stats.state = configured ? MINER_CONNECTING : MINER_IDLE;
+      s_stats.configured = configured;
+      lockGive();
+      vTaskDelay(2000 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    // --- connect + handshake ---
+    if (!client.connected()) {
+      subscribed = false;
+      clearJob();
+      lockTake(); s_stats.state = MINER_CONNECTING; lockGive();
+
+      Serial.printf("[miner] connecting to %s:%u\n", host.c_str(), (unsigned)port);
+      if (!client.connect(host.c_str(), port)) {
+        Serial.println("[miner] connect failed");
+        vTaskDelay(backoffMs / portTICK_PERIOD_MS);
+        if (backoffMs < 60000) backoffMs *= 2;
+        continue;
+      }
+      client.setNoDelay(true);
+
+      if (!stratumSubscribe(client, sub)) {
+        Serial.println("[miner] subscribe failed");
+        client.stop();
+        vTaskDelay(backoffMs / portTICK_PERIOD_MS);
+        if (backoffMs < 60000) backoffMs *= 2;
+        continue;
+      }
+      stratumAuthorize(client, user.c_str(), "x");
+      stratumSuggestDifficulty(client, MINER_SUGGEST_DIFF);
+
+      subscribed = true;
+      backoffMs = 2000;
+      lastTxMs = lastJobMs = millis();
+      for (auto& p : pending) p.used = false;
+      lockTake(); s_stats.state = MINER_SUBSCRIBED; lockGive();
+      Serial.printf("[miner] subscribed, extranonce1=%s size=%d\n",
+                    sub.extranonce1.c_str(), sub.extranonce2Size);
+    }
+
+    // --- drain pool messages ---
+    while (client.connected() && client.available()) {
+      String line = client.readStringUntil('\n');
+      line.trim();
+      if (!line.length()) continue;
+
+      switch (stratumParseMethod(line)) {
+        case STRATUM_NOTIFY: {
+          if (!stratumParseNotify(line, job)) {
+            Serial.println("[miner] malformed notify, reconnecting");
+            client.stop();
+            break;
+          }
+          // A fresh extranonce2 per job so the 32-bit nonce range isn't the
+          // only search dimension.
+          char e2[24];
+          int chars = sub.extranonce2Size * 2;
+          if (chars > 16) chars = 16;
+          snprintf(e2, sizeof(e2), "%0*lx", chars, (unsigned long)++extranonce2Ctr);
+          extranonce2 = e2;
+
+          MinerWork w;
+          if (minerBuildWork(job.version.c_str(), job.prevHash.c_str(),
+                             job.coinb1.c_str(), sub.extranonce1.c_str(),
+                             extranonce2.c_str(), job.coinb2.c_str(),
+                             job.merkle, job.merkleCount,
+                             job.ntime.c_str(), job.nbits.c_str(), w)) {
+            publishWork(w, poolDiff);
+            lastJobMs = millis();
+            lockTake();
+            s_stats.templates++;
+            s_stats.state = MINER_MINING;
+            lockGive();
+          } else {
+            Serial.println("[miner] could not build work from this job");
+          }
+          break;
+        }
+        case STRATUM_SET_DIFFICULTY:
+          if (stratumParseSetDifficulty(line, poolDiff)) {
+            Serial.printf("[miner] pool difficulty %.6f\n", poolDiff);
+            lockTake();
+            s_stats.poolDiff = poolDiff;
+            s_poolDiff = poolDiff;        // applies to the job in flight too
+            lockGive();
+          }
+          break;
+        case STRATUM_SUCCESS: {
+          unsigned long id = stratumExtractId(line);
+          for (auto& p : pending)
+            if (p.used && p.id == id) {
+              p.used = false;
+              lockTake(); s_stats.accepted++; lockGive();
+              Serial.printf("[miner] share accepted (diff %.6f)\n", p.diff);
+              break;
+            }
+          break;
+        }
+        case STRATUM_PARSE_ERROR: {
+          unsigned long id = stratumExtractId(line);
+          for (auto& p : pending)
+            if (p.used && p.id == id) {
+              p.used = false;
+              lockTake(); s_stats.rejected++; lockGive();
+              Serial.println("[miner] share rejected");
+              break;
+            }
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    // --- submit solved nonces ---
+    for (;;) {
+      Solution sol;
+      bool popped = false, fresh = false;
+      lockTake();
+      if (s_solTail != s_solHead) {
+        sol = s_sol[s_solTail];
+        s_solTail = (uint8_t)((s_solTail + 1) % MINER_SOLUTIONS);
+        popped = true;
+        fresh = (sol.seq == s_workSeq);  // stale job -> nothing to submit against
+      }
+      lockGive();
+      if (!popped) break;
+      if (!fresh) continue;
+      if (!client.connected()) break;
+
+      unsigned long id = 0;
+      if (stratumSubmit(client, user.c_str(), job, extranonce2, sol.nonce, id)) {
+        lastTxMs = millis();
+        lockTake();
+        s_stats.shares++;
+        if (sol.diff > s_stats.bestDiff) s_stats.bestDiff = sol.diff;
+        bool isBlock = minerHashMeetsTarget(sol.hash, s_work.targetLE);
+        lockGive();
+        if (isBlock) Serial.println("[miner] *** hash meets the NETWORK target ***");
+        for (auto& p : pending)
+          if (!p.used) { p.used = true; p.id = id; p.diff = sol.diff; break; }
+      }
+    }
+
+    // --- keepalive / stall detection ---
+    uint32_t now = millis();
+    if (now - lastTxMs > MINER_KEEPALIVE_MS) {
+      lastTxMs = now;
+      stratumSuggestDifficulty(client, MINER_SUGGEST_DIFF);
+    }
+    if (now - lastJobMs > MINER_NOJOB_MS) {
+      Serial.println("[miner] no job for 10 min, reconnecting");
+      client.stop();
+      subscribed = false;
+      clearJob();
+    }
+
+    // --- 1 Hz stats ---
+    if (now - lastRateMs >= 1000) {
+      uint64_t total = 0;
+      for (uint8_t i = 0; i < MINER_WORKERS; i++) total += s_hashCount[i];
+      uint32_t rate = (uint32_t)(((total - lastTotal) * 1000ULL) / (now - lastRateMs));
+      lastTotal = total;
+      lastRateMs = now;
+      lockTake();
+      s_stats.totalHashes = total;
+      s_stats.hashrate = rate;
+      s_stats.uptimeSec = (now - startedMs) / 1000;
+      lockGive();
+    }
+
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+static void storeConfig(const Settings& s) {
+  String user = s.miner.btcAddress;
+  if (s.miner.workerName.length()) user += "." + s.miner.workerName;
+
+  lockTake();
+  s_cfg.configured = s.miner.enabled && s.miner.btcAddress.length() > 0;
+  s_cfg.host = s.miner.poolHost;
+  s_cfg.port = s.miner.poolPort;
+  s_cfg.user = user;
+  s_cfg.epoch++;
+  s_stats.configured = s_cfg.configured;
+  strlcpy(s_stats.poolHost, s.miner.poolHost.c_str(), sizeof(s_stats.poolHost));
+  lockGive();
+}
+
+// Tasks are created once, the first time mining is configured, and then idle
+// harmlessly if it is later switched off (they hold ~16 KB of stacks).
+static void ensureTasks() {
+  if (s_tasksStarted) return;
+  s_tasksStarted = true;
+
+  // Workers sit at priority 1 — the same as the Arduino loop task, which sleeps
+  // 5 ms per iteration, so they get the cores' leftovers while the display and
+  // web server still schedule within a tick. WiFi/lwIP run far above both.
+  xTaskCreatePinnedToCore(stratumTask, "miner-net", 8192, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(minerWorkerTask, "miner-w0", 4096, (void*)0, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(minerWorkerTask, "miner-w1", 4096, (void*)1, 1, nullptr, 1);
+}
+
+void minerCoreBegin(const Settings& s) {
+  if (!s_lock) s_lock = xSemaphoreCreateMutex();
+  memset(&s_stats, 0, sizeof(s_stats));
+  s_stats.state = MINER_IDLE;
+  storeConfig(s);
+  if (s_cfg.configured) ensureTasks();
+}
+
+void minerCoreApplyConfig(const Settings& s) {
+  if (!s_lock) return;
+  storeConfig(s);
+  if (s_cfg.configured) ensureTasks();
+}
+
+void minerCoreSnapshot(MinerStats& out) {
+  if (!s_lock) { memset(&out, 0, sizeof(out)); return; }
+  lockTake();
+  out = s_stats;
+  lockGive();
+}
+
+#endif  // WITH_MINER
