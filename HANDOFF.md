@@ -15,11 +15,15 @@ This repo is my fork of giovi321/smalltv-mod, open firmware for a GeekMagic-styl
 - Pin map: already correct in src/board_esp32.h; the repo README also links NMMiner's NM-TV custom firmware guide documenting this board
 - This board's variant support was confirmed working by a community tester (repo issue #1)
 
-## Build and flash workflow
+## Build and flash workflow (remote session)
 
-- Build: `pio run -e smalltv_esp32`
-- Output: `.pio/build/smalltv_esp32/firmware.bin`
-- I flash it myself through the cube's web UI (Update tab, manual OTA upload). You never flash; you hand me a built firmware.bin and I report what happens.
+Development happens in a remote Claude Code session; we don't share a filesystem, so delivery is via git, not a handed-over file.
+
+- Reference codebase: clone https://github.com/BitMaker-hub/NerdMiner_v2 as a sibling of this checkout (`../NerdMiner_v2`). Reference material only — never commit it.
+- Build: `pio run -e smalltv_esp32` (install PlatformIO in the session first). Output: `.pio/build/smalltv_esp32/firmware.bin`.
+- Verify that build compiles locally before every push — every push costs a CI cycle.
+- OTA size check: the app image must fit the 0x180000 (1.5 MB) OTA slot in partitions/smalltv_4mb_ota.csv. v2.8.2 already uses ~90% (~1.42 MB), leaving roughly 130-150 KB for the miner; check the reported Flash usage after every build.
+- Delivery: push to the working branch. The repo's GitHub Actions `build` workflow (which also runs on pushes to `claude/**` branches) builds all targets and uploads the `smalltv-mod-firmware` artifact; I download `smalltv-mod-firmware-esp32.bin` from it and flash it myself through the cube's web UI (Update tab, manual OTA upload). I report what happens.
 - Serial debugging is available if I plug in USB: `pio device monitor` at 115200. Ask me for serial output when display behavior isn't enough to debug.
 - Recovery exists (USB esptool + backups), so a bad build is recoverable. Don't be reckless anyway; a build that kills wifi or the web UI costs me a cable ritual I'd rather not repeat.
 
