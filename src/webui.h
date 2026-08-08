@@ -268,10 +268,10 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <input id="minerWorker" type="text" placeholder="smalltv">
    <label>Hash engine</label>
    <select id="minerEngine">
-    <option value="sw">Software (both cores)</option>
     <option value="hybrid">Hybrid (hardware SHA + software)</option>
+    <option value="sw">Software only (both cores)</option>
    </select>
-   <small class="hint">Software runs the optimized double-hash on both cores; it is the verified default. Hybrid puts core&nbsp;0 on the ESP32's SHA peripheral and leaves core&nbsp;1 on software, so the Status tab shows both engines' hashrates side by side and you can see which is actually faster on this chip. The peripheral is checked against the software result before its first share, and falls back automatically if they disagree. Switching takes effect within a second, no reboot.</small>
+   <small class="hint">Hybrid puts core&nbsp;0 on the ESP32's SHA peripheral and leaves core&nbsp;1 on software; measured on this board that is roughly <b>350&nbsp;KH/s vs 50&nbsp;KH/s</b>, so it is the default. Only one core can hold the peripheral at a time, so this is the fastest arrangement available. The Status tab reports each core separately if you want to re-measure. The peripheral is checked against the software result before its first share and falls back automatically if they disagree. Switching takes effect within a second, no reboot.</small>
    <small class="hint">Solo lottery mining against a stratum pool (default <code>solo.ckpool.org:3333</code>): jobs come from the pool, and in the astronomically unlikely event of a found block it pays out to this address. Mining runs in the background whenever enabled and an address is set, even while another mode is on screen. It uses otherwise-idle CPU; display and web UI keep priority.</small>
   </div>
  </section>

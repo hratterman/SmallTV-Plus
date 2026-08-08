@@ -196,13 +196,22 @@
 //            cached per job + 16-bit early exit). Verified against real block
 //            data by tools/miner_selftest.
 //   hybrid — worker 0 drives the ESP32's hardware SHA peripheral while worker 1
-//            stays on software, so one run measures both on the same chip. The
-//            classic ESP32's engine cannot be seeded with a midstate, so it
-//            hashes both header blocks per nonce; whether that beats software
-//            is a measurement. Defaults off until measured on hardware.
+//            stays on software. Only one worker can hold the engine, so this is
+//            the fastest available arrangement.
+//
+// Measured on the NM-TV-154 (ESP32-D0WD-V3 @ 240 MHz): hardware ~350 KH/s,
+// software ~50 KH/s for both cores together — a 7x gap, so hybrid is the
+// default. Software stays available as the fallback the hardware path
+// self-checks against, and is the only path on chips without the peripheral.
+//
+// For context on where the headroom is: the engine compresses a 64-byte block
+// in ~72 cycles and a nonce costs 3 compressions (the classic ESP32's engine
+// cannot be seeded with a midstate), so the ceiling is ~1.1 MH/s — which is
+// where the stock NMMiner firmware's 1043 KH/s came from. Everything between
+// that and what we measure is overhead in the register-driving loop.
 #define MINER_ENGINE_SW      0
 #define MINER_ENGINE_HYBRID  1
-#define DEFAULT_MINER_ENGINE MINER_ENGINE_SW
+#define DEFAULT_MINER_ENGINE MINER_ENGINE_HYBRID
 
 // ---------------------------------------------------------------------------
 // Defaults (used on first boot / factory reset)
