@@ -132,21 +132,26 @@ static inline __attribute__((always_inline)) void hwWait() {
 // kLoadWait      — cycles to spin after a digest load     (0 = poll DPORT)
 template <bool kFewWrites, bool kSkipFinalWait,
           uint32_t kBlockWait = 0, uint32_t kLoadWait = 0, bool kBounded = false,
-          bool kFastProbe = false>
+          bool kFastProbe = false, bool kOverlap = false>
 static inline __attribute__((always_inline)) bool hwDoubleHashT(const uint8_t* swapped128, uint32_t nonce,
                                 uint8_t hash[32], bool earlyExit) {
   hwFillFirstBlock(swapped128);
   sha_ll_start_block(SHA2_256);
 
+  // Block 2's fill, hidden inside block 1's compression when overlapping.
+  if (kOverlap) hwFillSecondBlock(swapped128 + 64, nonce);
   hwWait<kBlockWait, kBounded>();
-  hwFillSecondBlock(swapped128 + 64, nonce);
+  if (!kOverlap) hwFillSecondBlock(swapped128 + 64, nonce);
   sha_ll_continue_block(SHA2_256);
 
+  // The double block only touches words 8 and 15, which the digest load (words
+  // 0..7) never disturbs — so it can also be written during the compression.
+  if (kOverlap) hwFillDoubleBlockFew();
   hwWait<kBlockWait, kBounded>();
   sha_ll_load(SHA2_256);
 
   hwWait<kLoadWait, kBounded>();
-  if (kFewWrites) hwFillDoubleBlockFew(); else hwFillDoubleBlock();
+  if (!kOverlap) { if (kFewWrites) hwFillDoubleBlockFew(); else hwFillDoubleBlock(); }
   sha_ll_start_block(SHA2_256);
 
   hwWait<kBlockWait, kBounded>();
@@ -201,10 +206,10 @@ void minerHwSha256dRaw(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[3
 // one and not another, and so the IRAM copy really executes from IRAM. They all
 // pay the same one call per nonce, which keeps the comparison fair (and makes
 // the absolute numbers a shade pessimistic against production).
-#define HW_VARIANT(fn, few, skipwait, bwait, lwait, probe)                      \
+#define HW_VARIANT(fn, few, skipwait, bwait, lwait, probe, overlap)             \
   __attribute__((noinline)) static bool fn(                                     \
       const uint8_t* s, uint32_t n, uint8_t* h, bool early) {                   \
-    return hwDoubleHashT<few, skipwait, bwait, lwait, true, probe>(s, n, h, early); \
+    return hwDoubleHashT<few, skipwait, bwait, lwait, true, probe, overlap>(s, n, h, early); \
   }
 
 // Round 2. The first pass moved the block wait and the load wait together, so
@@ -213,13 +218,24 @@ void minerHwSha256dRaw(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[3
 // the block time while 40 undershoots the load. So these hold the load wait at
 // a poll and vary only the block spin, then do the reverse.
 //
-//          name              few    skipwait  blockWait  loadWait  fastProbe
-HW_VARIANT(hwVarBase,         false, false,    0,    0,   false)  // original, for continuity
-HW_VARIANT(hwVarWinner,       true,  true,     0,    0,   false)  // current production, 356
-HW_VARIANT(hwVarBlk100,       true,  true,     100,  0,   false)  // spin block, poll load
-HW_VARIANT(hwVarBlk85,        true,  true,     85,   0,   false)
-HW_VARIANT(hwVarBlk72,        true,  true,     72,   0,   false)
-HW_VARIANT(hwVarProbe,        true,  true,     0,    0,   true)   // cheap early-exit probe
+// Round 3. The cycle profile changed the target: 16 register writes cost 123
+// cycles against 91 for the compression they feed, so the fills dominate, not
+// the waits. The overlap variants move each fill inside the previous
+// compression, which only works if the engine latches TEXT at start — the
+// digest check decides that.
+//
+// A safe spin is also included: 95 cycles is above the measured 91, whereas the
+// 72 that won last round is below it and only survives because the writes that
+// follow cover the difference. That is timing-marginal, so it is measured
+// against a by-construction-safe value rather than adopted on one reading.
+//
+//          name            few    skipwait  blockWait  loadWait  probe  overlap
+HW_VARIANT(hwVarProd,       true,  true,     0,   0,    false, false)  // current production
+HW_VARIANT(hwVarSpin95,     true,  true,     95,  0,    false, false)  // spin >= measured block
+HW_VARIANT(hwVarSpin72,     true,  true,     72,  0,    false, false)  // last round's winner
+HW_VARIANT(hwVarOver,       true,  true,     0,   0,    false, true)   // overlapped fills
+HW_VARIANT(hwVarOverSpin,   true,  true,     95,  0,    false, true)   // overlap + safe spin
+HW_VARIANT(hwVarOverProbe,  true,  true,     95,  0,    true,  true)   // + cheap probe
 
 typedef bool (*HwVariantFn)(const uint8_t*, uint32_t, uint8_t*, bool);
 
@@ -305,12 +321,12 @@ static void benchTask(void* arg) {
   BenchCtx* ctx = (BenchCtx*)arg;
 
   struct { const char* name; HwVariantFn fn; } kVariants[] = {
-    {"original loop",          hwVarBase},
-    {"production (few+nowait)",hwVarWinner},
-    {"+ block spin 100",       hwVarBlk100},
-    {"+ block spin 85",        hwVarBlk85},
-    {"+ block spin 72",        hwVarBlk72},
-    {"+ fast digest probe",    hwVarProbe},
+    {"production",            hwVarProd},
+    {"+ safe spin 95",        hwVarSpin95},
+    {"+ spin 72 (marginal)",  hwVarSpin72},
+    {"+ overlapped fills",    hwVarOver},
+    {"+ overlap + spin 95",   hwVarOverSpin},
+    {"+ overlap+spin+probe",  hwVarOverProbe},
   };
   const int count = (int)(sizeof(kVariants) / sizeof(kVariants[0]));
   const uint32_t kIters = 10000;
@@ -366,14 +382,19 @@ static void benchTask(void* arg) {
       if (memcmp(want, got, 32) != 0) { correct = false; break; }
     }
 
-    uint32_t t0 = micros();
     uint8_t sink[32];
-    for (uint32_t k = 0; k < kIters; k++)
-      fn(swapped, 0x10000000 + k, sink, true);
-    uint32_t dt = micros() - t0;
+    uint32_t best = 0;
+    for (int rep = 0; rep < 3; rep++) {
+      uint32_t t0 = micros();
+      for (uint32_t k = 0; k < kIters; k++)
+        fn(swapped, 0x10000000 + k, sink, true);
+      uint32_t dt = micros() - t0;
+      uint32_t khs = dt ? (uint32_t)((uint64_t)kIters * 1000ULL / dt) : 0;
+      if (khs > best) best = khs;
+    }
 
     ctx->out[n].name    = kVariants[i].name;
-    ctx->out[n].khs     = dt ? (uint32_t)((uint64_t)kIters * 1000ULL / dt) : 0;
+    ctx->out[n].khs     = best;
     ctx->out[n].correct = correct;
     Serial.printf("[miner] bench %-22s %6lu KH/s  %s\n", ctx->out[n].name,
                   (unsigned long)ctx->out[n].khs, correct ? "ok" : "WRONG DIGEST");
