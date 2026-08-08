@@ -96,7 +96,7 @@ static void clearJob() {
 // kept in full alongside what software expected, because the difference between
 // the two identifies the fault where a count alone cannot.
 static void hwBadDigest(uint32_t nonce, const uint8_t* got, const uint8_t* want,
-                        const uint8_t* mid) {
+                        const uint8_t* mid, const uint8_t* reread) {
   lockTake();
   s_stats.badDigests++;
   if (!s_stats.badSampled) {
@@ -105,6 +105,7 @@ static void hwBadDigest(uint32_t nonce, const uint8_t* got, const uint8_t* want,
     memcpy(s_stats.badGot, got, 32);
     memcpy(s_stats.badWant, want, 32);
     memcpy(s_stats.badMid, mid, 32);
+    memcpy(s_stats.badReread, reread, 32);
   }
   lockGive();
   Serial.printf("[miner] hw digest mismatch at nonce %08lx\n", (unsigned long)nonce);
@@ -234,7 +235,14 @@ static void minerWorkerTask(void* arg) {
             // the second load and TEXT still holds the first hash's digest.
             uint8_t inter[32];
             minerSha256(work.header, 80, inter);
-            hwBadDigest(nonce, hash, check, inter);
+            // And ask the engine again. Nothing has touched it since, so its
+            // registers still hold this nonce's answer: if the second read
+            // gives what software expected, the engine computed correctly and
+            // the *read* was at fault, which is the one thing the bytes alone
+            // cannot distinguish.
+            uint8_t again[32];
+            minerHwRereadDigest(again);
+            hwBadDigest(nonce, hash, check, inter, again);
             solved = false;
           }
         }

@@ -154,6 +154,8 @@ static void handleStatus() {
       b["want"] = hex;
       for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badMid[i]);
       b["mid"] = hex;
+      for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badReread[i]);
+      b["reread"] = hex;
     }
     m["bestDiff"]  = ms.bestDiff;
     m["poolDiff"]  = ms.poolDiff;

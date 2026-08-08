@@ -46,4 +46,11 @@ void minerHwPrime(const uint8_t* swapped128);
 // Same, but always reads back the digest — used by the startup self-check.
 void minerHwSha256dRaw(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[32]);
 
+// Re-read the digest registers the engine last produced, waiting for idle and
+// taking all eight words with no early exit. Valid only immediately after a
+// hash, before the engine is touched again. This is the test that separates a
+// bad *read* from a bad *computation*: if a mismatching digest re-reads as the
+// value software expected, the engine was right and the first read was not.
+void minerHwRereadDigest(uint8_t hash[32]);
+
 #endif  // MINER_HAS_SHA_HW

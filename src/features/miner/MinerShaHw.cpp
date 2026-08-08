@@ -180,6 +180,11 @@ void minerHwSwapHeader(const uint8_t* header128, uint8_t* swappedOut128) {
   for (int i = 0; i < 32; i++) out[i] = __builtin_bswap32(in[i]);
 }
 
+void minerHwRereadDigest(uint8_t hash[32]) {
+  hwWaitIdle();
+  hwReadDigest(hash, false);
+}
+
 void minerHwLock()   { esp_sha_lock_engine(SHA2_256); }
 void minerHwUnlock() { esp_sha_unlock_engine(SHA2_256); }
 

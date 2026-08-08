@@ -706,10 +706,11 @@ function loadStatus(){j('/api/status').then(function(s){
     (m.lastError?kv('Pool said','<span style="color:var(--red)">'+esc(m.lastError)+'</span>'):'')+
     (m.state==='auth-failed'?kv('','<span style="color:var(--red)">The pool refused this address, so submitting is stopped. Check the BTC address and worker name in the Miner tab.</span>'):'')+
     kv('Shares','accepted '+m.accepted+' / sent '+m.shares+(m.rejected?' / <span style="color:var(--red)">rejected '+m.rejected+'</span>':''))+
-    (m.badDigests?kv('Bad digests','<span style="color:var(--red)">'+m.badDigests+' wrong results from the hardware SHA engine, caught and discarded</span>'):'')+
+    (m.badDigests?kv('Bad digests',m.badDigests+' <span class="muted">caught by the software recheck and discarded &mdash; not an error you need to act on</span>'):'')+
     (m.badSample?kv('&nbsp;&nbsp;got','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.got)+'</code>')+
                  kv('&nbsp;&nbsp;want','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.want)+'</code>')+
                  kv('&nbsp;&nbsp;1st hash','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.mid)+'</code>')+
+                 kv('&nbsp;&nbsp;re-read','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.reread)+'</code>')+
                  kv('&nbsp;&nbsp;nonce','<code>'+esc(('0000000'+(m.badSample.nonce>>>0).toString(16)).slice(-8))+'</code>'):'')+
     kv('Best share',fmtDiff(m.bestDiff))+kv('Pool difficulty',fmtDiff(m.poolDiff))+
     kv('Jobs',m.jobs)+kv('Total hashes',fmtHash(m.hashes).replace('/s',''))+
