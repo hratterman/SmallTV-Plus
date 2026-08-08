@@ -95,7 +95,8 @@ static void clearJob() {
 // Record a digest the SHA peripheral got wrong. The first one of the run is
 // kept in full alongside what software expected, because the difference between
 // the two identifies the fault where a count alone cannot.
-static void hwBadDigest(uint32_t nonce, const uint8_t* got, const uint8_t* want) {
+static void hwBadDigest(uint32_t nonce, const uint8_t* got, const uint8_t* want,
+                        const uint8_t* mid) {
   lockTake();
   s_stats.badDigests++;
   if (!s_stats.badSampled) {
@@ -103,6 +104,7 @@ static void hwBadDigest(uint32_t nonce, const uint8_t* got, const uint8_t* want)
     s_stats.badNonce = nonce;
     memcpy(s_stats.badGot, got, 32);
     memcpy(s_stats.badWant, want, 32);
+    memcpy(s_stats.badMid, mid, 32);
   }
   lockGive();
   Serial.printf("[miner] hw digest mismatch at nonce %08lx\n", (unsigned long)nonce);
@@ -227,7 +229,12 @@ static void minerWorkerTask(void* arg) {
           memcpy(work.header + 76, &nonce, 4);
           minerSha256dFromMidstate(work.midstate, work.header + 64, check);
           if (memcmp(check, hash, 32) != 0) {
-            hwBadDigest(nonce, hash, check);
+            // Also keep the intermediate. If the engine's answer turns out to
+            // be this rather than the double hash, the read is landing before
+            // the second load and TEXT still holds the first hash's digest.
+            uint8_t inter[32];
+            minerSha256(work.header, 80, inter);
+            hwBadDigest(nonce, hash, check, inter);
             solved = false;
           }
         }

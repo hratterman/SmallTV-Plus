@@ -51,6 +51,7 @@ struct MinerStats {
   uint32_t badNonce;
   uint8_t  badGot[32];     // what the engine returned
   uint8_t  badWant[32];    // what software says it should have been
+  uint8_t  badMid[32];     // the *first* of the two hashes, in software
   uint64_t totalHashes;    // lifetime hashes this run
   uint32_t hashrate;       // H/s, updated ~1 Hz
   uint32_t uptimeSec;      // seconds since the engine started

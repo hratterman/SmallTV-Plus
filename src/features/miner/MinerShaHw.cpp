@@ -118,6 +118,16 @@ static inline __attribute__((always_inline)) bool hwReadDigest(void* out, bool e
     DPORT_INTERRUPT_RESTORE();
     return false;
   }
+  // Word 7 is read first, which makes it the word most exposed to a read that
+  // lands before the digest does — and the device produced exactly that: a
+  // mismatching digest whose word 7 was 0x00000000, which does not merely pass
+  // the test above, it passes it every time. So confirm the word before
+  // trusting it. This sits on the 1-in-65536 path, so the per-nonce cost is nil.
+  last = DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 7 * 4);
+  if (earlyExit && (last & 0xFFFF) != 0) {
+    DPORT_INTERRUPT_RESTORE();
+    return false;
+  }
   uint32_t* p = (uint32_t*)out;
   p[7] = __builtin_bswap32(last);
   p[0] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 0 * 4));
