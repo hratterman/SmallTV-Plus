@@ -21,7 +21,8 @@ class MinerMode : public DisplayMode {
   void wake(const Settings& s) override { needFull_ = true; }  // repaint only
 
  private:
-  void render(const Settings& s);
+  void render(const Settings& s, bool full);
+  void renderChrome(const Settings& s);   // header, panels, row labels
 
   bool     needFull_ = true;   // repaint static parts (labels, header) too
   uint32_t lastDraw_ = 0;      // 1 s value-refresh cadence

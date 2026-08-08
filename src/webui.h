@@ -72,6 +72,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   <div class="card"><h2>Device</h2><div id="statusBox" class="muted">Loading...</div></div>
   <div class="card"><h2>Tickers</h2><div id="tickBox" class="muted">-</div>
    <button class="btn sec" style="margin-top:10px" onclick="refreshNow()">Refresh data now</button></div>
+  <div class="card" id="minerCard" style="display:none"><h2>Miner</h2><div id="minerBox" class="muted">-</div></div>
  </section>
 
  <!-- WIFI -->
@@ -599,7 +600,30 @@ function loadStatus(){j('/api/status').then(function(s){
   h+='<div class="kv"><b style="color:'+c+'">'+t.symbol+'</b><span>'+
    (t.valid?(t.price+'  '+pc):(t.error?'error':'...'))+'</span></div>';});
  $('tickBox').innerHTML=h||'<span class="muted">No tickers configured</span>';
+ var mc=$('minerCard');
+ if(mc&&s.miner){mc.style.display='block';
+  var m=s.miner;
+  $('minerBox').innerHTML=!m.configured
+   ?'<span class="muted">Not configured — set a BTC address in the Miner tab.</span>'
+   :kv('State',m.state)+kv('Pool',m.pool||'-')+kv('Hashrate',fmtHash(m.hashrate))+
+    kv('Shares','accepted '+m.accepted+' / sent '+m.shares+(m.rejected?' / rejected '+m.rejected:''))+
+    kv('Best share',fmtDiff(m.bestDiff))+kv('Pool difficulty',fmtDiff(m.poolDiff))+
+    kv('Jobs',m.jobs)+kv('Total hashes',fmtHash(m.hashes).replace('/s',''))+
+    kv('Mining for',fmtUp(m.uptime));
+ }
 })}
+function fmtHash(h){h=h||0;
+ if(h>=1e9)return (h/1e9).toFixed(2)+' GH/s';
+ if(h>=1e6)return (h/1e6).toFixed(2)+' MH/s';
+ if(h>=1e3)return (h/1e3).toFixed(1)+' KH/s';
+ return h+' H/s'}
+function fmtDiff(d){d=d||0;
+ if(d>=1e12)return (d/1e12).toFixed(2)+'T';
+ if(d>=1e9)return (d/1e9).toFixed(2)+'G';
+ if(d>=1e6)return (d/1e6).toFixed(2)+'M';
+ if(d>=1e3)return (d/1e3).toFixed(2)+'K';
+ if(d>=1)return d.toFixed(2);
+ return d.toFixed(5)}
 function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+'</b></div>'}
 function fmtUp(s){var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
  return (d?d+'d ':'')+(h?h+'h ':'')+m+'m'}

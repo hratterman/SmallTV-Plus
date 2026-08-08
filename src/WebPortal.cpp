@@ -9,6 +9,9 @@
 #include "StockClient.h"
 #include "UsageClient.h"
 #include "Clock.h"
+#if WITH_MINER
+#include "MinerCore.h"
+#endif
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
 extern void appInvalidate();
@@ -101,6 +104,28 @@ static void handleStatus() {
         t["basis"] = onRange ? "range" : "day";     // which basis that was
       }
     }
+  }
+#endif
+
+#if WITH_MINER
+  {
+    MinerStats ms;
+    minerCoreSnapshot(ms);
+    JsonObject m = o["miner"].to<JsonObject>();
+    m["configured"] = ms.configured;
+    m["state"]      = (ms.state == MINER_MINING)     ? "mining"
+                    : (ms.state == MINER_SUBSCRIBED) ? "subscribed"
+                    : (ms.state == MINER_CONNECTING) ? "connecting" : "idle";
+    m["pool"]      = ms.poolHost;
+    m["hashrate"]  = ms.hashrate;          // H/s, ~1 Hz average
+    m["hashes"]    = ms.totalHashes;
+    m["jobs"]      = ms.templates;
+    m["shares"]    = ms.shares;
+    m["accepted"]  = ms.accepted;
+    m["rejected"]  = ms.rejected;
+    m["bestDiff"]  = ms.bestDiff;
+    m["poolDiff"]  = ms.poolDiff;
+    m["uptime"]    = ms.uptimeSec;
   }
 #endif
   sendJson(doc);
