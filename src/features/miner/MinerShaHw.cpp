@@ -138,6 +138,10 @@ static inline __attribute__((always_inline)) bool hwDoubleHashT(const uint8_t* s
   hwFillFirstBlock(swapped128);
   sha_ll_start_block(SHA2_256);
 
+  // Overlapping a fill with the previous compression corrupts the digest on this
+  // chip — measured, wrong digest on every overlap variant — so the engine reads
+  // TEXT progressively rather than latching it at start_block. The fills are
+  // therefore strictly serial, which is what sets the ~447 KH/s floor.
   // Block 2's fill, hidden inside block 1's compression when overlapping.
   if (kOverlap) hwFillSecondBlock(swapped128 + 64, nonce);
   hwWait<kBlockWait, kBounded>();
@@ -160,12 +164,19 @@ static inline __attribute__((always_inline)) bool hwDoubleHashT(const uint8_t* s
   return hwReadDigestSwapped<kFastProbe>(hash, earlyExit);
 }
 
-// The production loop: the fastest variant that stays digest-correct. Measured
-// on the NM-TV-154 at 356 KH/s against 323 for the original, checked over 64
-// nonces against the software implementation.
+// The production loop: fewer writes, no final wait, and a fixed 95-cycle spin in
+// place of polling the busy register after each compression. 347 KH/s against
+// 313 for the polling version, measured on the NM-TV-154.
+//
+// 95 is chosen to sit above the measured 92-cycle compression, not below it. A
+// 72-cycle spin measured faster still (388) and passed its digest check, but it
+// waits less than the compression takes and only survives on the few cycles of
+// loop overhead around it — a margin of well under ten cycles, on a check of 64
+// nonces. Getting that wrong costs silently missed shares, so it is not worth
+// 12% here.
 static inline __attribute__((always_inline)) bool hwDoubleHash(const uint8_t* swapped128, uint32_t nonce,
                                 uint8_t hash[32], bool earlyExit) {
-  return hwDoubleHashT<true, true>(swapped128, nonce, hash, earlyExit);
+  return hwDoubleHashT<true, true, 95, 0>(swapped128, nonce, hash, earlyExit);
 }
 
 // The two-write double block assumes TEXT[9..14] are still zero from the
