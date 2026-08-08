@@ -77,6 +77,7 @@ static volatile bool s_hwFaulted = false;   // self-check failed -> software onl
 
 static MinerStats s_stats;
 static bool       s_tasksStarted = false;
+static TaskHandle_t s_workerTask[MINER_WORKERS] = {};
 
 static inline void lockTake() { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static inline void lockGive() { xSemaphoreGive(s_lock); }
@@ -520,8 +521,8 @@ static void ensureTasks() {
   // 5 ms per iteration, so they get the cores' leftovers while the display and
   // web server still schedule within a tick. WiFi/lwIP run far above both.
   xTaskCreatePinnedToCore(stratumTask, "miner-net", 8192, nullptr, 2, nullptr, 0);
-  xTaskCreatePinnedToCore(minerWorkerTask, "miner-w0", 4096, (void*)0, 1, nullptr, 0);
-  xTaskCreatePinnedToCore(minerWorkerTask, "miner-w1", 4096, (void*)1, 1, nullptr, 1);
+  xTaskCreatePinnedToCore(minerWorkerTask, "miner-w0", 4096, (void*)0, 1, &s_workerTask[0], 0);
+  xTaskCreatePinnedToCore(minerWorkerTask, "miner-w1", 4096, (void*)1, 1, &s_workerTask[1], 1);
 }
 
 void minerCoreBegin(const Settings& s) {
@@ -536,6 +537,18 @@ void minerCoreApplyConfig(const Settings& s) {
   if (!s_lock) return;
   storeConfig(s);
   if (s_cfg.configured) ensureTasks();
+}
+
+// The benchmark needs both cores to itself: with the workers running it
+// time-slices against the core-1 software worker and reports roughly half the
+// real rate, which is how the first version of it managed to rank IRAM the
+// opposite way round from production.
+void minerCoreSuspendWorkers() {
+  for (auto t : s_workerTask) if (t) vTaskSuspend(t);
+}
+
+void minerCoreResumeWorkers() {
+  for (auto t : s_workerTask) if (t) vTaskResume(t);
 }
 
 void minerCoreSnapshot(MinerStats& out) {

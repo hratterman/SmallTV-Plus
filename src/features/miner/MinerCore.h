@@ -53,4 +53,8 @@ void minerCoreBegin(const Settings& s);
 void minerCoreApplyConfig(const Settings& s);   // pool/address changed -> reconnect
 void minerCoreSnapshot(MinerStats& out);
 
+// Pause/resume the hash workers so a benchmark can have the cores to itself.
+void minerCoreSuspendWorkers();
+void minerCoreResumeWorkers();
+
 #endif  // WITH_MINER
