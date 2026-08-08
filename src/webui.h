@@ -271,6 +271,9 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="hybrid">Hybrid (hardware SHA + software)</option>
     <option value="sw">Software only (both cores)</option>
    </select>
+   <div style="margin-top:14px"><button class="btn sec" onclick="minerBench()" id="benchBtn">Benchmark hash engines</button></div>
+   <div id="benchOut" class="muted" style="margin-top:10px"></div>
+   <small class="hint">The benchmark times every candidate hardware driving loop back to back on this chip and checks each one's digest against the software implementation, so a variant that is fast because it is broken shows up as wrong rather than silently mining garbage. Takes about a second; mining pauses while it runs.</small>
    <small class="hint">Hybrid puts core&nbsp;0 on the ESP32's SHA peripheral and leaves core&nbsp;1 on software; measured on this board that is roughly <b>350&nbsp;KH/s vs 50&nbsp;KH/s</b>, so it is the default. Only one core can hold the peripheral at a time, so this is the fastest arrangement available. The Status tab reports each core separately if you want to re-measure. The peripheral is checked against the software result before its first share and falls back automatically if they disagree. Switching takes effect within a second, no reboot.</small>
    <small class="hint">Solo lottery mining against a stratum pool (default <code>solo.ckpool.org:3333</code>): jobs come from the pool, and in the astronomically unlikely event of a found block it pays out to this address. Mining runs in the background whenever enabled and an address is set, even while another mode is on screen. It uses otherwise-idle CPU; display and web UI keep priority.</small>
   </div>
@@ -623,6 +626,16 @@ function loadStatus(){j('/api/status').then(function(s){
     kv('Mining for',fmtUp(m.uptime));
  }
 })}
+function minerBench(){var b=$('benchBtn');if(!b)return;b.disabled=true;
+ $('benchOut').innerHTML='Running on the device...';
+ j('/api/minerbench',{method:'POST'}).then(function(r){b.disabled=false;
+  if(!r.ok){$('benchOut').textContent='Not available: '+(r.error||'unknown');return}
+  var best=0;(r.variants||[]).forEach(function(v){if(v.correct&&v.khs>best)best=v.khs});
+  $('benchOut').innerHTML=(r.variants||[]).map(function(v){
+   var tag=v.correct?(v.khs===best?' <b style="color:var(--acc)">fastest</b>':'')
+                    :' <b style="color:var(--red)">wrong digest</b>';
+   return '<div class="kv"><span>'+esc(v.name)+tag+'</span><b>'+fmtHash(v.khs*1000)+'</b></div>'}).join('');
+ }).catch(function(){b.disabled=false;$('benchOut').textContent='Benchmark failed'})}
 function fmtHash(h){h=h||0;
  if(h>=1e9)return (h/1e9).toFixed(2)+' GH/s';
  if(h>=1e6)return (h/1e6).toFixed(2)+' MH/s';

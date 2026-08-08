@@ -42,4 +42,25 @@ bool minerHwSha256d(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[32])
 // Same, but always reads back the digest — used by the startup self-check.
 void minerHwSha256dRaw(const uint8_t* swapped128, uint32_t nonce, uint8_t hash[32]);
 
+// ---------------------------------------------------------------------------
+// On-device benchmark.
+//
+// Reflashing to test one variant at a time is a ~10 minute round trip, which is
+// no way to close a 3x gap. This times every candidate driving loop back to back
+// on the real chip in well under a second, and checks each one's digest against
+// the software implementation first — so a variant that is fast because it is
+// wrong reports correct=false instead of quietly mining garbage.
+//
+// It runs on a fixed header (mainnet block 125552), so results are comparable
+// across runs and do not need the miner to be connected to a pool.
+struct MinerHwBench {
+  const char* name;
+  uint32_t    khs;      // measured, this variant alone
+  bool        correct;  // digest matched the software reference
+};
+
+// Fills up to maxOut entries, returns how many were written. Takes the SHA
+// engine for the duration (the mining worker simply waits).
+int minerHwBenchmark(MinerHwBench* out, int maxOut);
+
 #endif  // MINER_HAS_SHA_HW

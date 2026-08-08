@@ -11,6 +11,7 @@
 #include "Clock.h"
 #if WITH_MINER
 #include "MinerCore.h"
+#include "MinerShaHw.h"
 #endif
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
@@ -278,6 +279,30 @@ static void handleUsagePush() {
               ok ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
+// Time every candidate hardware driving loop on the real chip and report both
+// speed and whether each still produces the correct digest. Blocks for well
+// under a second; the mining worker just waits for the SHA engine.
+static void handleMinerBench() {
+  JsonDocument doc;
+  JsonObject o = doc.to<JsonObject>();
+#if WITH_MINER && MINER_HAS_SHA_HW
+  MinerHwBench res[8];
+  int n = minerHwBenchmark(res, 8);
+  JsonArray arr = o["variants"].to<JsonArray>();
+  for (int i = 0; i < n; i++) {
+    JsonObject e = arr.add<JsonObject>();
+    e["name"]    = res[i].name;
+    e["khs"]     = res[i].khs;
+    e["correct"] = res[i].correct;
+  }
+  o["ok"] = true;
+#else
+  o["ok"] = false;
+  o["error"] = "no hardware SHA engine on this build";
+#endif
+  sendJson(doc);
+}
+
 // ---- OTA ------------------------------------------------------------------
 static void handleUpdateDone() {
   bool ok = !Update.hasError();
@@ -336,6 +361,7 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/checkupdate", HTTP_GET, handleCheckUpdate);
   server.on("/api/selfupdate", HTTP_POST, handleSelfUpdate);
   server.on("/api/usage", HTTP_POST, handleUsagePush);   // daemon pushes usage here
+  server.on("/api/minerbench", HTTP_POST, handleMinerBench);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
 
   // Common captive-portal probe endpoints
