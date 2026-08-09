@@ -379,6 +379,30 @@ void AmbientSettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
+// Captive portal slice
+// ===========================================================================
+void CaptiveSettings::setDefaults() {
+  autoAccept = true;
+  probeUrl   = "";
+  formUrl    = "";
+  formBody   = "";
+}
+
+void CaptiveSettings::toJson(JsonObject o) const {
+  o["autoAccept"] = autoAccept;
+  o["probeUrl"]   = probeUrl;
+  o["formUrl"]    = formUrl;
+  o["formBody"]   = formBody;
+}
+
+void CaptiveSettings::fromJson(JsonObjectConst o) {
+  if (o["autoAccept"].is<bool>())      autoAccept = o["autoAccept"];
+  if (o["probeUrl"].is<const char*>()) { probeUrl = o["probeUrl"].as<String>(); probeUrl.trim(); }
+  if (o["formUrl"].is<const char*>())  { formUrl = o["formUrl"].as<String>(); formUrl.trim(); }
+  if (o["formBody"].is<const char*>()) { formBody = o["formBody"].as<String>(); formBody.trim(); }
+}
+
+// ===========================================================================
 // Touch slice
 // ===========================================================================
 void TouchSettings::setDefaults() {
@@ -455,6 +479,7 @@ void Settings::setDefaults() {
   miner.setDefaults();
   spotify.setDefaults();
   ambient.setDefaults();
+  captive.setDefaults();
   touch.setDefaults();
   clock.setDefaults();
 }
@@ -567,6 +592,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.miner.toJson(root["miner"].to<JsonObject>());
   s.spotify.toJson(root["spotify"].to<JsonObject>(), includeSecrets);
   s.ambient.toJson(root["ambient"].to<JsonObject>());
+  s.captive.toJson(root["captive"].to<JsonObject>());
   s.touch.toJson(root["touch"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
 }
@@ -644,6 +670,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
   if (root["spotify"].is<JsonObjectConst>()) s.spotify.fromJson(root["spotify"].as<JsonObjectConst>());
   if (root["ambient"].is<JsonObjectConst>()) s.ambient.fromJson(root["ambient"].as<JsonObjectConst>());
+  if (root["captive"].is<JsonObjectConst>()) s.captive.fromJson(root["captive"].as<JsonObjectConst>());
   if (root["touch"].is<JsonObjectConst>()) s.touch.fromJson(root["touch"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());
 }

@@ -10,6 +10,9 @@
 #include "UsageClient.h"
 #include "Clock.h"
 #include "Notify.h"
+#if WITH_CAPTIVE
+#include "Captive.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -71,6 +74,7 @@ static void handleGetConfig() {
   // No light sensor on the ESP32 boards, so the auto-brightness tick was a
   // control that saved a setting nothing ever read. The page drops it.
   feat["ldr"]     = (bool)HAS_LDR;
+  feat["captive"] = (bool)WITH_CAPTIVE;
   feat["clock"]   = (bool)WITH_CLOCK;
   feat["spotify"] = (bool)WITH_SPOTIFY;
   feat["ambient"] = (bool)WITH_AMBIENT;
@@ -112,6 +116,23 @@ static void handleStatus() {
   o["night"]     = clockNightActive();   // dimming now
   o["nightHeld"] = clockNightHeld();      // in the window but waiting for a fresh NTP sync
   o["clockFresh"] = clockTrusted();       // last NTP sync within the trust window
+
+#if WITH_CAPTIVE
+  // "Connected" only ever meant "associated". On a network that hands out an IP
+  // and then blocks everything until you click a button, that reads as a
+  // working device with every feature broken and nothing saying why.
+  {
+    const CaptiveState cs = captiveStateNow();
+    JsonObject p = o["portal"].to<JsonObject>();
+    p["online"]   = (cs == CAP_ONLINE);
+    p["state"]    = (cs == CAP_ONLINE) ? "online"
+                  : (cs == CAP_PORTAL) ? "portal"
+                  : (cs == CAP_NO_NET) ? "no-route" : "unknown";
+    p["detail"]   = captiveDetail();
+    p["url"]      = captivePortalUrl();
+    p["attempts"] = captiveAttempts();
+  }
+#endif
 
   // A dark screen has five possible causes — manual level, the night schedule,
   // night mining, a double-tap blank, or an inverted backlight — and from the
@@ -446,6 +467,12 @@ void webPortalBegin(Settings& settings) {
 #if HAS_TOUCH
   server.on("/api/touch", HTTP_GET, handleTouchDiag);
   server.on("/api/touch/detect", HTTP_POST, handleTouchDetect);
+#endif
+#if WITH_CAPTIVE
+  server.on("/api/portal", HTTP_POST, []() {
+    captiveForceTry();
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
 #endif
   server.on("/notify", HTTP_POST, handleNotify);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);

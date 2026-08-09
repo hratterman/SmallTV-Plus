@@ -10,14 +10,17 @@ static uint32_t    g_lastReconnect = 0;
 static const Settings* g_cfg = nullptr;  // for runtime failover between saved networks
 static int8_t      g_curNet = -1;        // settings index of the joined network
 static uint32_t    g_downSince = 0;      // 0 = connected; else millis() the drop began
+static bool        g_apAlongside = false;  // setup AP raised while the station is up
 
-static void startAP(const Settings& s) {
-  g_mode = NET_AP;
+// Bring the AP up without tearing the station down. `alongside` picks AP_STA
+// and leaves g_mode as NET_STA, so everything that asks "am I in setup mode?"
+// still gets the right answer.
+static void startAPCommon(const Settings& s, bool alongside) {
   // An empty name is not "use the default", it is "let the IDF pick one", and
   // what it picks is ESP_xxxxxx.
   const String ssid = s.apSsid.length() ? s.apSsid : String(DEFAULT_AP_SSID);
 
-  WiFi.mode(WIFI_AP);
+  WiFi.mode(alongside ? WIFI_AP_STA : WIFI_AP);
   // softAP() before softAPConfig(). WiFi.mode(WIFI_AP) already brings the
   // interface up under the IDF's own defaults, and configuring the address
   // first can leave it there with the name unapplied — which is how a device
@@ -39,6 +42,23 @@ static void startAP(const Settings& s) {
   // Captive portal: answer every DNS query with our own IP.
   g_dns.setErrorReplyCode(DNSReplyCode::NoError);
   g_dns.start(53, "*", apIP);
+}
+
+static void startAP(const Settings& s) {
+  g_mode = NET_AP;
+  g_apAlongside = false;
+  startAPCommon(s, false);
+}
+
+// A network that associates us and then blocks or isolates us leaves the device
+// with no route out *and* no way in — the web UI is on an address nothing can
+// reach. Raising our own AP alongside the station restores the second half, so
+// there is always somewhere to go and change the settings.
+void netStartApAlongside() {
+  if (g_apAlongside || g_mode != NET_STA || !g_cfg) return;
+  g_apAlongside = true;
+  Serial.println("[net] raising the setup AP alongside the station");
+  startAPCommon(*g_cfg, true);
 }
 
 void netBegin(const Settings& s, void (*onProgress)(const char*)) {
@@ -139,6 +159,7 @@ void netLoop() {
     g_dns.processNextRequest();
     return;
   }
+  if (g_apAlongside) g_dns.processNextRequest();   // captive DNS for our own AP
   // STA: keep mDNS alive, nudge reconnect if we dropped. After a long outage
   // rotate through the other saved networks. Never scan here — it would block
   // the display loop and the web server; WiFi.begin is fire-and-forget and its
@@ -163,6 +184,7 @@ void netLoop() {
 
 NetMode netMode()      { return g_mode; }
 bool    netConnected() { return g_mode == NET_STA && WiFi.status() == WL_CONNECTED; }
+bool    netConnectedSta() { return WiFi.status() == WL_CONNECTED; }
 
 String netIP() {
   return (g_mode == NET_AP) ? WiFi.softAPIP().toString()

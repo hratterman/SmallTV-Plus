@@ -19,6 +19,9 @@
 #include "Mode.h"
 #include "Clock.h"
 #include "Notify.h"
+#if WITH_CAPTIVE
+#include "Captive.h"
+#endif
 
 #if WITH_TICKER
 #include "TickerMode.h"
@@ -376,6 +379,10 @@ void setup() {
     delay(1200);
   }
 
+#if WITH_CAPTIVE
+  captiveBegin(g_settings);
+#endif
+
   Serial.println("[boot] web");
   webPortalBegin(g_settings);
 
@@ -426,6 +433,16 @@ void loop() {
     delay(5);
     return;  // setup mode: AP info stays on screen
   }
+
+#if WITH_CAPTIVE
+  // Associated is not online. Probe for a real route out and, behind a portal,
+  // try to accept it. Self-paced: a few seconds after boot, then every 30 s
+  // while stuck and every 5 minutes once through.
+  captiveService(g_settings);
+  // Nowhere to reach us and nowhere for us to go: put our own AP back up so
+  // there is still a way to change the settings.
+  if (captiveStuck()) netStartApAlongside();
+#endif
 
   // --- STA mode: the active feature fetches + renders itself ---
 

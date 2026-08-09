@@ -274,6 +274,26 @@
 #define DEFAULT_MINER_ENGINE MINER_ENGINE_HYBRID
 
 // ---------------------------------------------------------------------------
+// Captive portal handling. Associating is not the same as being online, and on
+// a hotel or conference network the difference is every feature silently
+// failing while the screen shows a network name and an IP.
+// ---------------------------------------------------------------------------
+#ifndef WITH_CAPTIVE
+#define WITH_CAPTIVE 1
+#endif
+
+// Plain HTTP on purpose: a portal cannot intercept HTTPS without the client
+// noticing, so over TLS it just hangs, which looks the same as a dead network.
+// Over HTTP it has to answer, and its answer is the detection.
+#define CAPTIVE_PROBE_URL     "http://connectivitycheck.gstatic.com/generate_204"
+#define CAPTIVE_TIMEOUT_MS    6000
+#define CAPTIVE_RETRY_MS      30000UL    // while stuck behind a portal
+#define CAPTIVE_OK_RECHECK_MS 300000UL   // confirm the route is still there
+#define CAPTIVE_MAX_ATTEMPTS  3          // accept tries before giving up
+#define CAPTIVE_MAX_PAGE      6144       // bytes of portal HTML to read
+#define CAPTIVE_MAX_FIELDS    24         // form inputs to carry across
+
+// ---------------------------------------------------------------------------
 // Defaults (used on first boot / factory reset)
 // ---------------------------------------------------------------------------
 #define DEFAULT_AP_SSID      "SmallTV-Setup"

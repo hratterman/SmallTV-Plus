@@ -165,6 +165,21 @@ struct AmbientSettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Captive portal slice ---------------------------------------------------
+struct CaptiveSettings {
+  bool   autoAccept;   // try to submit the portal's form by ourselves
+  String probeUrl;     // empty = CAPTIVE_PROBE_URL
+  // Manual override for a portal whose form is built in JavaScript, which no
+  // amount of HTML parsing will find. Copy the request your own browser sent
+  // (devtools -> Network -> the accept request) into these two fields.
+  String formUrl;
+  String formBody;     // urlencoded; empty means submit formUrl as a GET
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Capacitive touch slice (device-wide input) ----------------------------
 struct TouchSettings {
   bool    enabled;
@@ -215,6 +230,7 @@ struct Settings {
   MinerSettings   miner;
   SpotifySettings spotify;
   AmbientSettings ambient;
+  CaptiveSettings captive;
   TouchSettings   touch;
   ClockSettings  clock;
 

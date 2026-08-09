@@ -13,6 +13,13 @@ void netLoop();           // pump DNS (AP) / mDNS (STA) / reconnect
 
 NetMode  netMode();
 bool     netConnected();  // STA associated with an IP
+// Same, but true even while the setup AP is also up (AP_STA). netMode() reports
+// AP in that case, and the captive probe still needs to know the station works.
+bool     netConnectedSta();
+
+// Raise the setup AP alongside the station, so the device stays reachable on a
+// network that has associated us but isolates or blocks us. Idempotent.
+void     netStartApAlongside();
 String   netIP();         // current IP (STA or AP)
 String   netSSID();       // joined SSID (STA) or AP SSID
 int      netRSSI();       // STA signal, 0 in AP mode

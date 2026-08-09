@@ -96,7 +96,22 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <label>AP name</label><input id="apSsid" type="text">
    <label>AP password <span class="muted">(blank = open, else min 8 chars)</span></label>
    <input id="apPass" type="text" placeholder="(unchanged)">
-   <small class="hint">The AP appears when no WiFi is configured or the connection fails.</small>
+   <small class="hint">The AP appears when no WiFi is configured or the connection fails. It also comes back up alongside the connection if the device gets stuck behind a captive portal, so there is always a way to reach these settings.</small>
+  </div>
+  <div class="card" id="portalCard"><h2>Captive portal</h2>
+   <div class="muted" id="portalNow" style="margin-bottom:10px">Route out: -</div>
+   <div class="chk"><input id="captiveAuto" type="checkbox"><label>Try to accept the portal automatically</label></div>
+   <div style="margin-top:10px"><button class="btn sec" onclick="portalTry()">Probe and accept now</button></div>
+   <small class="hint">Hotel and conference networks hand out an IP and then block everything until you click <i>Connect</i> in a browser. The device checks for a real route out and, when it finds a portal, fetches its page and submits the first form &mdash; which is what that button does. Nothing here is needed on a normal network.</small>
+   <details style="margin-top:12px"><summary class="muted">Portal needs a hand</summary>
+    <small class="hint">Some portals build their form in JavaScript, and there is nothing in the HTML for the device to submit. Open the portal on a laptop, accept it with devtools&rsquo; Network tab recording, right-click the accept request &rarr; Copy &rarr; Copy as cURL, and take the URL and the <code>--data</code> body from it.</small>
+    <label>Form URL</label><input id="captiveFormUrl" type="url" placeholder="http://portal.example/accept">
+    <label>Form body <span class="muted">(url-encoded; blank sends a GET)</span></label>
+    <input id="captiveFormBody" type="text" placeholder="agree=on&amp;session=...">
+    <label>Probe URL <span class="muted">(blank = the default 204 check)</span></label>
+    <input id="captiveProbe" type="url" placeholder="http://connectivitycheck.gstatic.com/generate_204">
+    <small class="hint">The device submits the form <i>itself</i>, so hidden fields carry its own address rather than your laptop&rsquo;s &mdash; that is what authorises the cube rather than re-authorising the laptop. Plain <code>http://</code> only: a portal cannot intercept HTTPS, so it just hangs instead of answering.</small>
+   </details>
   </div>
  </section>
 
@@ -533,6 +548,11 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('spotifyClientId',sp.clientId); sv('spotifyPollSec',sp.pollSec||10);
  var scs=$('spotifyClientSecret'); if(scs)scs.placeholder=sp.secretSet?'(unchanged)':'paste the client secret';
  var srt=$('spotifyRefreshToken'); if(srt)srt.placeholder=sp.tokenSet?'(unchanged)':'paste the refresh token';
+ // captive portal slice
+ var cp=c.captive||{};
+ sc('captiveAuto',cp.autoAccept!==false);
+ sv('captiveFormUrl',cp.formUrl); sv('captiveFormBody',cp.formBody); sv('captiveProbe',cp.probeUrl);
+ if((c.features||{}).captive===false){var pc=$('portalCard'); if(pc)pc.remove();}
  // touch slice
  var tc=c.touch||{};
  if($('touchGpio')){var g=$('touchGpio');g.innerHTML='<option value="-1">Not set</option>'+
@@ -648,6 +668,9 @@ function collect(){
  if($('spotify')) o.spotify={enabled:gc('spotifyEnabled'),autoShow:gc('spotifyAutoShow'),
   clientId:gv('spotifyClientId').trim(), clientSecret:gv('spotifyClientSecret').trim(),
   refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
+ if($('captiveAuto')) o.captive={autoAccept:gc('captiveAuto'),
+  formUrl:gv('captiveFormUrl').trim(), formBody:gv('captiveFormBody').trim(),
+  probeUrl:gv('captiveProbe').trim()};
  if($('touch')) o.touch={enabled:gc('touchEnabled'),
   gpio:parseInt(gv('touchGpio')), threshold:parseInt(gv('touchThreshold'))||20};
  if($('miner')) o.miner={enabled:gc('minerEnabled'),
@@ -714,6 +737,14 @@ function scan(){$('scanList').innerHTML='<div class="muted">Scanning...</div>';
   $('scanList').innerHTML=h||'<div class="muted">No networks found</div>';})}
 
 // status
+function portalTry(){toast('Probing...');
+ fetch('/api/portal',{method:'POST'}).then(function(){
+  // The probe and any accept attempt take a few seconds; poll rather than
+  // reporting a result the device has not reached yet.
+  setTimeout(loadStatus,4000); setTimeout(loadStatus,10000);
+  toast('Probing — watch the line above');
+ }).catch(function(){toast('Could not reach the device')});}
+
 function loadStatus(){j('/api/status').then(function(s){
  $('dot').className='dot'+(s.connected?' ok':'');
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
@@ -721,6 +752,13 @@ function loadStatus(){j('/api/status').then(function(s){
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
  // What the backlight is actually set to and which rule chose it. A black
  // screen is otherwise indistinguishable from a dead one.
+ // Associated is not online, and until the portal probe existed there was
+ // nothing anywhere that said so.
+ var pn=$('portalNow'); if(pn&&s.portal){var P=s.portal;
+  pn.innerHTML='Route out: '+(P.online?'<b style="color:var(--acc)">yes</b>'
+   :'<b style="color:var(--red)">no</b> &mdash; '+esc(P.detail||P.state))
+   +(P.url&&!P.online?'<br><span class="muted">portal at '+esc(P.url)+'</span>':'')
+   +(P.attempts?'<br><span class="muted">'+P.attempts+' accept attempt(s)</span>':'');}
  var bn=$('brNow'); if(bn&&s.screen){var W={manual:'the slider above',night:'the night schedule',
    nightMining:'night mining',blanked:'a double-tap on the lid',auto:'the light sensor'};
   bn.textContent='Screen: '+s.screen.level+'% — set by '+(W[s.screen.why]||s.screen.why)+

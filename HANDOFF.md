@@ -63,6 +63,12 @@ around it.
 - **Zero warnings.** Project sources build clean at `-Wall -Wextra` on all five
   targets, enforced from `platformio.ini`. Two real bugs were sitting in that
   noise. Keep it at zero or the next one hides too.
+- **Test the pure part off-device.** Two animations and one parser shipped
+  broken this session because the arithmetic was never run anywhere. Anything
+  that is string-in/string-out or number-in/number-out belongs in a header a
+  host harness can include: `tools/miner_selftest` (job maths),
+  `tools/captive_selftest` (portal form parsing). Both run in under a second
+  and neither needs the cube.
 - **Say why, not just what.** `/api/status` reports the resolved backlight level
   *and the rule that chose it*, the worst loop time since last read, and the
   album-art failure stage. Every one of those exists because a symptom was
