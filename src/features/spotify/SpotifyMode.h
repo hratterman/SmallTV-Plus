@@ -24,7 +24,8 @@ class SpotifyMode : public DisplayMode {
   void begin(const Settings& s) override;
   void service(const Settings& s) override;
   void invalidate(const Settings& s) override;
-  void wake(const Settings& s) override { needFull_ = true; }
+  // Another mode has drawn over the screen, so the cover is gone with it.
+  void wake(const Settings& s) override { needFull_ = true; artOnGlass_ = false; }
   void onContextAction(Settings& s) override;   // long-press: poll now
 
  private:
@@ -41,7 +42,11 @@ class SpotifyMode : public DisplayMode {
   bool     drawnValid_   = false;
   bool     drawnError_   = false;
   bool     drawnLinked_  = false;
-  bool     artFailed_ = false;   // last cover attempt did not land
+  // The cover currently on the glass, and whether it is still intact. Any other
+  // mode drawing invalidates it, which is exactly what wake() means.
+  char     drawnArt_[SPOTIFY_ART_LEN] = {0};
+  bool     artOnGlass_ = false;
+  bool     artFailed_  = false;   // last cover attempt did not land
   int      barW_    = -1;   // filled pixels currently drawn
   int      elapsed_ = -1;   // seconds currently shown
 };

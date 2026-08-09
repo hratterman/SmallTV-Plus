@@ -227,7 +227,14 @@ static bool fetchNowPlaying() {
   DeserializationError err =
       deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
   http.end();
-  if (err) { setError("player: bad JSON"); return false; }
+  if (err) {
+    // "bad JSON" covered a truncated stream and an exhausted heap alike, and
+    // those want opposite fixes. ArduinoJson already knows which.
+    char m[48];
+    snprintf(m, sizeof(m), "player: %s", err.c_str());
+    setError(m);
+    return false;
+  }
 
   lockTake();
   s_data.playing    = doc["is_playing"] | false;

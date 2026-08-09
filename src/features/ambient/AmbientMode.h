@@ -73,7 +73,7 @@ class AmbientMode : public DisplayMode {
   // why the old bursts looked like a handful of darting specks: there was no
   // room between "barely moves" and "gone in three frames".
   struct Spark {
-    int16_t  x, y;         // 8.8 position
+    int32_t  x, y;         // 8.8 position — 32-bit: 240<<8 does not fit int16_t
     int16_t  vx, vy;       // 8.8 velocity, px per frame
     int16_t  px, py;       // last drawn pixel (whole pixels), -1 = not drawn
     uint8_t  life, age;    // frames remaining, frames lived

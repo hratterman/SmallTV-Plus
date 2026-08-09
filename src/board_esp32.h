@@ -13,7 +13,7 @@
 #define TFT_DC      2
 #define TFT_RST    -1   // reset line not connected on this panel -> GFX_NOT_DEFINED
 #define TFT_CS     15
-#define TFT_BL     19   // backlight (PWM, active-low per vendor guide)
+#define TFT_BL     19   // backlight (PWM, active-HIGH — measured, see below)
 
 // Separate panel power rail, switched by a GPIO. The vendor's init code drives it
 // LOW to power the display; Gfx.cpp asserts it before touching the panel.
@@ -23,8 +23,18 @@
 // Panel colour order: verified RGB on hardware (issue #1), like the other boards.
 #define TFT_BGR     0
 
-// Backlight is active-low (vendor guide: TFT_BACKLIGHT_ON LOW). Runtime-overridable.
-#define TFT_BL_DEFAULT_INVERTED true
+// Backlight polarity: active-HIGH on this board, measured on hardware. The
+// vendor guide says TFT_BACKLIGHT_ON LOW and this default followed it, but on a
+// real NM-TV-154 that setting drives the panel backwards — 100% brightness
+// writes duty 255, which inverts to 0 and switches the backlight off, while a
+// night level of 0 lights it fully.
+//
+// It went unnoticed for a long time because a config saved before the default
+// existed carried the tick unset; a factory reset is what surfaces it, and the
+// symptom then reads as a bricked screen rather than a wrong setting, since the
+// device is dark and the only way back is a web UI you have no reason to trust
+// is still up. Runtime-overridable either way in the Screen card.
+#define TFT_BL_DEFAULT_INVERTED false
 
 // No ambient-light sensor documented on this board -> auto-brightness compiled out.
 #define HAS_LDR     0

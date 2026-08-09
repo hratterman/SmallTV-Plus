@@ -288,8 +288,8 @@ void AmbientMode::stepSparks() {
       const float a = spin + (float)made * (6.2832f / AMB_BURST);
       // +/- 12% on the radius keeps the ring from looking like a stencil.
       const int32_t sp = speed * (int32_t)(88 + xr(&rng_) % 25) / 100;
-      p.x = (int16_t)(bx << 8);
-      p.y = (int16_t)(by << 8);
+      p.x = (int32_t)bx << 8;
+      p.y = (int32_t)by << 8;
       p.vx = (int16_t)(cosf(a) * sp);
       p.vy = (int16_t)(sinf(a) * sp);
       p.px = p.py = -1;
@@ -307,8 +307,8 @@ void AmbientMode::stepSparks() {
     if (p.px >= 0)
       gfx->fillRect(p.px, p.py, AMB_SPARK_PX, AMB_SPARK_PX, C_BLACK);
 
-    p.x = (int16_t)(p.x + p.vx);
-    p.y = (int16_t)(p.y + p.vy);
+    p.x += p.vx;
+    p.y += p.vy;
     p.vy = (int16_t)(p.vy + 14);                    // gravity, 8.8
     p.vx = (int16_t)(p.vx - (p.vx >> 5));           // a little air drag
     p.vy = (int16_t)(p.vy - (p.vy >> 5));

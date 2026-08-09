@@ -12,15 +12,32 @@ SpotifyMode g_spotifyMode;
 #define C_PANEL 0x18E3
 
 // The cover takes the top of the screen and everything else stacks under it.
+// The 58 px left under a 152 px cover has to carry a title of up to two lines,
+// the artist, the two time labels and the bar; the old spacing did not add up,
+// so the artist sat underneath the progress bar. Laid out explicitly now, with
+// the arithmetic checked at compile time below.
 static const int ART_X = (TFT_WIDTH - SPOTIFY_ART_PX) / 2;
-static const int ART_Y = 30;
+static const int ART_Y = 26;
 
-// Progress bar geometry, shared by the full paint and the incremental update.
+static const int TITLE_Y  = 184;   // 1 row at size 2, or 2 rows at size 1
+static const int ARTIST_Y = 207;
 static const int BAR_X = 18;
-static const int BAR_Y = 222;
 static const int BAR_W = TFT_WIDTH - 36;
 static const int BAR_H = 6;
-static const int TIME_Y = BAR_Y - 11;
+static const int TIME_Y = 219;
+static const int BAR_Y  = 231;
+
+// Longest title that still fits one line at size 2 — drawTitle wraps at
+// (TFT_WIDTH - 16) / (6 * size) characters, and a wrapped size-2 title is what
+// used to run into the artist line.
+static const int TITLE_FIT_2 = (TFT_WIDTH - 16) / 12;
+
+static_assert(ART_Y + SPOTIFY_ART_PX <= TITLE_Y, "cover overlaps the title");
+static_assert(TITLE_Y + 16 <= ARTIST_Y, "a size-2 title overlaps the artist");
+static_assert(TITLE_Y + 12 + 8 <= ARTIST_Y, "a two-row size-1 title overlaps the artist");
+static_assert(ARTIST_Y + 8 <= TIME_Y, "artist overlaps the time labels");
+static_assert(TIME_Y + 8 <= BAR_Y, "time labels overlap the bar");
+static_assert(BAR_Y + BAR_H <= TFT_HEIGHT, "bar runs off the bottom");
 
 void SpotifyMode::begin(const Settings& s) {
   spotifyInit(s);
@@ -31,7 +48,8 @@ void SpotifyMode::invalidate(const Settings& s) {
   spotifyInit(s);
   spotifyForceRefresh();
   needFull_ = true;
-  drawnTrack_[0] = drawnArtist_[0] = 0;
+  drawnTrack_[0] = drawnArtist_[0] = drawnArt_[0] = 0;
+  artOnGlass_ = false;
   barW_ = elapsed_ = -1;
 }
 
@@ -76,7 +94,30 @@ void SpotifyMode::renderAll(const Settings& s) {
   if (!gfx) return;
   const SpotifyData& d = spotifyGet();
 
-  gfx->fillScreen(C_BLACK);
+  // The cover is the one thing on this screen that costs a network round trip,
+  // so it is worth not destroying. When the same cover is already on the glass,
+  // clear around the art box instead of over it and leave the picture alone.
+  //
+  // The two obvious versions of this are both wrong. Clearing the whole screen
+  // and only re-fetching on a URL change leaves a black square on every repaint
+  // of the same track. Clearing the whole screen and always re-fetching turns
+  // every repaint into a blocking download on the render thread. Preserving the
+  // box gives the first version's cost and the second version's correctness.
+  const bool showingTrack = s.spotify.refreshToken.length() && !d.error &&
+                            d.valid && d.playing;
+  const bool keepArt = showingTrack && artOnGlass_ && d.artUrl[0] &&
+                       strcmp(d.artUrl, drawnArt_) == 0;
+  if (keepArt) {
+    gfx->fillRect(0, 0, TFT_WIDTH, ART_Y, C_BLACK);                       // above
+    gfx->fillRect(0, ART_Y, ART_X, SPOTIFY_ART_PX, C_BLACK);              // left
+    gfx->fillRect(ART_X + SPOTIFY_ART_PX, ART_Y,
+                  TFT_WIDTH - ART_X - SPOTIFY_ART_PX, SPOTIFY_ART_PX, C_BLACK);
+    gfx->fillRect(0, ART_Y + SPOTIFY_ART_PX, TFT_WIDTH,
+                  TFT_HEIGHT - ART_Y - SPOTIFY_ART_PX, C_BLACK);           // below
+  } else {
+    gfx->fillScreen(C_BLACK);
+    artOnGlass_ = false;
+  }
 
   gfx->fillCircle(22, 16, 7, C_SPOT);
   gfx->setTextSize(1);
@@ -105,36 +146,37 @@ void SpotifyMode::renderAll(const Settings& s) {
   }
 
   // Cover first: it is the slow part, and drawing it before the text means the
-  // screen is never blank while the download runs.
-  //
-  // Unconditionally — this function has just cleared the screen and there is no
-  // framebuffer to restore the cover from, so it has to be painted again every
-  // time. It used to be skipped when the URL matched the one last fetched,
-  // which meant any repaint of the same track left a black square where the
-  // cover had been: a second track from the same album, a pause, a carousel
-  // wake. The cover appeared once and then vanished on the next repaint.
-  if (d.artUrl[0]) {
-    artFailed_ = !albumArtDraw(d.artUrl, ART_X, ART_Y);
-  } else {
-    artFailed_ = true;
-  }
-  if (artFailed_) {
-    // A cover that would not load leaves a plate rather than a hole, so the
-    // layout below it does not move about between tracks — and the plate says
-    // why, because "no art" on its own has never once been enough to act on.
-    gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
-    gfx->fillCircle(TFT_WIDTH / 2, ART_Y + SPOTIFY_ART_PX / 2, 16, C_SPOT);
-    const char* why = d.artUrl[0] ? albumArtStatus() : "poll sent no cover url";
-    gfxDrawCentered(why, ART_Y + SPOTIFY_ART_PX - 24, 1, C_DIM);
-    char n[24];
-    snprintf(n, sizeof(n), "%u covers offered", (unsigned)spotifyArtCandidates());
-    gfxDrawCentered(n, ART_Y + SPOTIFY_ART_PX - 14, 1, C_DIM);
+  // screen is never blank while the download runs. Skipped entirely when the
+  // right cover is already sitting in the box untouched.
+  if (!keepArt) {
+    if (d.artUrl[0]) {
+      artFailed_ = !albumArtDraw(d.artUrl, ART_X, ART_Y);
+      strlcpy(drawnArt_, d.artUrl, sizeof(drawnArt_));
+      artOnGlass_ = !artFailed_;
+    } else {
+      artFailed_ = true;
+      drawnArt_[0] = 0;
+    }
+    if (artFailed_) {
+      // A cover that would not load leaves a plate rather than a hole, so the
+      // layout below it does not move about between tracks — and the plate says
+      // why, because "no art" on its own has never once been enough to act on.
+      gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
+      gfx->fillCircle(TFT_WIDTH / 2, ART_Y + SPOTIFY_ART_PX / 2, 16, C_SPOT);
+      const char* why = d.artUrl[0] ? albumArtStatus() : "poll sent no cover url";
+      gfxDrawCentered(why, ART_Y + SPOTIFY_ART_PX - 24, 1, C_DIM);
+      char n[24];
+      snprintf(n, sizeof(n), "%u covers offered", (unsigned)spotifyArtCandidates());
+      gfxDrawCentered(n, ART_Y + SPOTIFY_ART_PX - 14, 1, C_DIM);
+    }
   }
 
-  const int textY = ART_Y + SPOTIFY_ART_PX + 8;
-  const uint8_t tsz = (strlen(d.track) > 26) ? 1 : 2;
-  drawTitle(gfx, d.track, textY, tsz);
-  gfxDrawCentered(d.artist, textY + (tsz == 1 ? 22 : 30), 1, C_DIM);
+  // Size 2 only when the whole title fits one line at that size; the old test
+  // allowed 26 characters against an 18-character line, so anything between the
+  // two wrapped into the artist.
+  const uint8_t tsz = (strlen(d.track) > (size_t)TITLE_FIT_2) ? 1 : 2;
+  drawTitle(gfx, d.track, TITLE_Y, tsz);
+  gfxDrawCentered(d.artist, ARTIST_Y, 1, C_DIM);
 
   // Bar track and total duration are static for this song; only the fill and
   // the elapsed label move from here on.

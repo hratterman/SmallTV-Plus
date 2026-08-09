@@ -91,16 +91,40 @@ UINT artOut(JDEC* jd, void* bitmap, JRECT* rect) {
 }  // namespace
 
 static char s_status[40] = "not tried";
+static uint32_t s_retryAt = 0;     // millis() before which a retry is pointless
 
 const char* albumArtStatus() { return s_status; }
+
+// A TLS session costs tens of kilobytes and this device is also running the
+// miner, the web server and the Spotify poll. Starting a handshake that cannot
+// complete does not just fail — it takes the heap the *poll* needed with it,
+// which is how one failed cover turned into "player: bad JSON" and stayed
+// there. Refuse below the threshold instead of trying anyway.
+#define ART_MIN_HEAP 60000
 
 bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   if (!url || !url[0]) { strlcpy(s_status, "no art url", sizeof(s_status)); return false; }
 
+  // Every repaint used to retry a failed cover immediately, so one failure
+  // became a fetch storm: each attempt burned a socket and a TLS arena, which
+  // made the next attempt likelier to fail, which caused another repaint. The
+  // screen went from working art to permanently broken in a few seconds. Fail
+  // fast until the backoff expires.
+  if (s_retryAt && (int32_t)(millis() - s_retryAt) < 0) return false;
+
+  const uint32_t heap = ESP.getFreeHeap();
+  if (heap < ART_MIN_HEAP) {
+    snprintf(s_status, sizeof(s_status), "heap %u, need %u", (unsigned)heap,
+             (unsigned)ART_MIN_HEAP);
+    s_retryAt = millis() + 15000;
+    return false;
+  }
+
   // The poll task can be mid-handshake on core 0 right now, and two TLS
   // sessions at once do not fit in this heap. Wait for it rather than fail.
-  if (!spotifyNetLock(9000)) {
+  if (!spotifyNetLock(2500)) {
     strlcpy(s_status, "busy: poll holds the radio", sizeof(s_status));
+    s_retryAt = millis() + 15000;
     return false;
   }
   struct NetRelease { ~NetRelease() { spotifyNetUnlock(); } } netRelease;
@@ -115,6 +139,7 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) {
     strlcpy(s_status, "begin failed (TLS/heap)", sizeof(s_status));
+    s_retryAt = millis() + 15000;
     return false;
   }
 
@@ -122,6 +147,7 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   if (code != HTTP_CODE_OK) {
     snprintf(s_status, sizeof(s_status), "HTTP %d", code);
     http.end();
+    s_retryAt = millis() + 15000;
     return false;
   }
 
@@ -136,6 +162,7 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   if (!work) {
     strlcpy(s_status, "no heap for the decoder", sizeof(s_status));
     http.end();
+    s_retryAt = millis() + 15000;
     return false;
   }
 
@@ -161,6 +188,9 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
 
   free(work);
   http.end();
+  // 15 s is long enough that a spiral cannot form and short enough that a
+  // transient failure fixes itself within one track.
+  s_retryAt = ok ? 0 : millis() + 15000;
   return ok;
 }
 
