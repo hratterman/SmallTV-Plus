@@ -19,22 +19,18 @@ SpotifyMode g_spotifyMode;
 static const int ART_X = (TFT_WIDTH - SPOTIFY_ART_PX) / 2;
 static const int ART_Y = 26;
 
-static const int TITLE_Y  = 184;   // 1 row at size 2, or 2 rows at size 1
-static const int ARTIST_Y = 207;
+static const int TITLE_Y  = 186;   // one line, size 2, scrolled if it overruns
+static const int ARTIST_Y = 208;   // one line, size 1, same
+static const int TEXT_X   = 6;     // side margin the scrolling bands live in
+static const int TEXT_W   = TFT_WIDTH - 2 * TEXT_X;
 static const int BAR_X = 18;
 static const int BAR_W = TFT_WIDTH - 36;
 static const int BAR_H = 6;
 static const int TIME_Y = 219;
 static const int BAR_Y  = 231;
 
-// Longest title that still fits one line at size 2 — drawTitle wraps at
-// (TFT_WIDTH - 16) / (6 * size) characters, and a wrapped size-2 title is what
-// used to run into the artist line.
-static const int TITLE_FIT_2 = (TFT_WIDTH - 16) / 12;
-
 static_assert(ART_Y + SPOTIFY_ART_PX <= TITLE_Y, "cover overlaps the title");
-static_assert(TITLE_Y + 16 <= ARTIST_Y, "a size-2 title overlaps the artist");
-static_assert(TITLE_Y + 12 + 8 <= ARTIST_Y, "a two-row size-1 title overlaps the artist");
+static_assert(TITLE_Y + 16 <= ARTIST_Y, "the title band overlaps the artist");
 static_assert(ARTIST_Y + 8 <= TIME_Y, "artist overlaps the time labels");
 static_assert(TIME_Y + 8 <= BAR_Y, "time labels overlap the bar");
 static_assert(BAR_Y + BAR_H <= TFT_HEIGHT, "bar runs off the bottom");
@@ -62,32 +58,11 @@ static void fmtTime(uint32_t ms, char* out, size_t n) {
   snprintf(out, n, "%lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
 }
 
-// Two lines of track title, wrapped on a word where possible.
-static void drawTitle(Arduino_GFX* gfx, const char* text, int y, uint8_t size) {
-  const int perLine = (TFT_WIDTH - 16) / (6 * size);
-  char line[40];
-  const char* p = text;
-  for (int row = 0; row < 2 && *p; row++) {
-    while (*p == ' ') p++;
-    if (!*p) break;
-    int take = 0, lastSpace = -1;
-    while (p[take] && take < perLine) {
-      if (p[take] == ' ') lastSpace = take;
-      take++;
-    }
-    if (p[take] && lastSpace > 0) take = lastSpace;
-    if (take > (int)sizeof(line) - 1) take = sizeof(line) - 1;
-    memcpy(line, p, take);
-    line[take] = 0;
-    // A second row that still has text left gets an ellipsis rather than a cut.
-    if (row == 1 && p[take]) {
-      int L = strlen(line);
-      if (L > 3) strcpy(line + L - 3, "...");
-    }
-    gfxDrawCentered(line, y + row * (8 * size + 4), size, C_WHITE);
-    p += take;
-  }
-}
+// The two scrolling bands. A title that does not fit used to wrap to a second
+// line and then end in an ellipsis, which silently drops the rest of the name;
+// these scroll instead, so everything is eventually readable.
+static const GfxMarquee kTitleBand  = {TEXT_X, TITLE_Y,  TEXT_W, 2, C_WHITE, C_BLACK};
+static const GfxMarquee kArtistBand = {TEXT_X, ARTIST_Y, TEXT_W, 1, C_DIM,   C_BLACK};
 
 void SpotifyMode::renderAll(const Settings& s) {
   Arduino_GFX* gfx = gfxDev();
@@ -171,12 +146,8 @@ void SpotifyMode::renderAll(const Settings& s) {
     }
   }
 
-  // Size 2 only when the whole title fits one line at that size; the old test
-  // allowed 26 characters against an 18-character line, so anything between the
-  // two wrapped into the artist.
-  const uint8_t tsz = (strlen(d.track) > (size_t)TITLE_FIT_2) ? 1 : 2;
-  drawTitle(gfx, d.track, TITLE_Y, tsz);
-  gfxDrawCentered(d.artist, ARTIST_Y, 1, C_DIM);
+  scrolling_ = gfxMarqueeDraw(kTitleBand, d.track, millis());
+  scrolling_ |= gfxMarqueeDraw(kArtistBand, d.artist, millis());
 
   // Bar track and total duration are static for this song; only the fill and
   // the elapsed label move from here on.
@@ -271,6 +242,15 @@ void SpotifyMode::service(const Settings& s) {
   if (d.playing && (now - lastTick_) >= 500) {
     lastTick_ = now;
     renderProgress(s);
+  }
+
+  // Advance the scrolling bands. Only when something actually overruns, and
+  // only on their own cadence: at 25 fps two short bands cost a few KB a second
+  // over the bus, and nothing at all when both titles fit.
+  if (d.playing && scrolling_ && (now - scrollTick_) >= 40) {
+    scrollTick_ = now;
+    gfxMarqueeDraw(kTitleBand, d.track, now);
+    gfxMarqueeDraw(kArtistBand, d.artist, now);
   }
 }
 

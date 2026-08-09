@@ -30,6 +30,25 @@ int     gfxTextW(const char* s, uint8_t size);
 void    gfxDrawCentered(const char* s, int y, uint8_t size, uint16_t color);
 uint8_t gfxFitSize(const char* s, int maxW, uint8_t maxSize);
 
+// ---- Marquee --------------------------------------------------------------
+// A band of text that sits still when it fits and scrolls when it doesn't,
+// the way a car radio or Spotify handles a title too long for the panel.
+// Shrinking the font or cutting the end off with an ellipsis both lose the
+// information; scrolling is the only option that keeps all of it.
+struct GfxMarquee {
+  int16_t  x, y, w;    // the band; height is 8 * size
+  uint8_t  size;
+  uint16_t fg, bg;
+};
+
+// Draws one frame. `phaseMs` is a free-running clock — pass millis() and the
+// text advances on its own. Returns true when the text is long enough to be
+// scrolling, so the caller knows this band needs to keep being redrawn.
+bool gfxMarqueeDraw(const GfxMarquee& m, const char* s, uint32_t phaseMs);
+
+// True if `s` would scroll in a band `w` wide, without drawing anything.
+bool gfxMarqueeScrolls(const char* s, int w, uint8_t size);
+
 // ---- Shared boot / status / diagnostic screens ----------------------------
 void gfxBoot(const char* line1, const char* line2);
 void gfxApInfo(const char* ssid, const char* pass, const char* ip);

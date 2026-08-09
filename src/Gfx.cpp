@@ -1,4 +1,5 @@
 #include "Gfx.h"
+#include "GfxMarqueeStep.h"
 #include "Platform.h"
 #include <Arduino_GFX_Library.h>
 #include <SPI.h>
@@ -103,6 +104,52 @@ void gfxDrawCentered(const char* s, int y, uint8_t size, uint16_t color) {
   gfx->setTextColor(color);
   gfx->setCursor(x, y);
   gfx->print(s);
+}
+
+// ---- Marquee --------------------------------------------------------------
+// The phase arithmetic lives in GfxMarqueeStep.h so it can be checked on a
+// host; what is left here is the drawing.
+bool gfxMarqueeScrolls(const char* s, int w, uint8_t size) {
+  return s && gfxTextW(s, size) > w;
+}
+
+bool gfxMarqueeDraw(const GfxMarquee& m, const char* s, uint32_t phaseMs) {
+  if (!gfx || !s) return false;
+  const int h = 8 * m.size;
+  const int textW = gfxTextW(s, m.size);
+
+  gfx->setTextSize(m.size);
+  // Opaque text: every glyph paints its own background, so consecutive frames
+  // overwrite each other cleanly. Clearing the whole band first would flicker,
+  // there being no framebuffer to compose in.
+  gfx->setTextColor(m.fg, m.bg);
+
+  if (textW <= m.w) {                       // fits: centre it and stay put
+    gfx->fillRect(m.x, m.y, m.w, h, m.bg);
+    gfx->setCursor(m.x + (m.w - textW) / 2, m.y);
+    gfx->print(s);
+    return false;
+  }
+
+  const GfxMarqueeStep step = gfxMarqueeStepAt(textW, m.w, phaseMs);
+  const int off = step.off, total = step.total;
+
+  // Clip to the band so a glyph hanging off either end cannot scribble on the
+  // cover above or the progress bar below.
+  gfx->setTextBound(m.x, m.y, m.w, h);
+  gfx->setCursor(m.x - off, m.y);
+  gfx->print(s);
+  gfx->setCursor(m.x - off + total, m.y);   // the repeat, for a seamless wrap
+  gfx->print(s);
+
+  // The gap is the one span with no glyph to paint its own background.
+  int gx0 = m.x - off + textW, gx1 = gx0 + MARQUEE_GAP_PX;
+  if (gx0 < m.x) gx0 = m.x;
+  if (gx1 > m.x + m.w) gx1 = m.x + m.w;
+  if (gx1 > gx0) gfx->fillRect(gx0, m.y, gx1 - gx0, h, m.bg);
+
+  gfx->setTextBound(0, 0, TFT_WIDTH, TFT_HEIGHT);
+  return true;
 }
 
 // Largest size (<= maxSize) whose rendered width fits within maxW.

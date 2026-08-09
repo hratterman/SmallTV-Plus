@@ -34,6 +34,8 @@ class SpotifyMode : public DisplayMode {
 
   bool     needFull_ = true;
   uint32_t lastTick_ = 0;
+  uint32_t scrollTick_ = 0;
+  bool     scrolling_ = false;   // a band is long enough to need ticking
 
   // What is currently on the glass, so a repaint only happens on a real change.
   char     drawnTrack_[SPOTIFY_TRACK_LEN]   = {0};
