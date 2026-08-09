@@ -176,6 +176,18 @@ static uint32_t g_nightWakeUntil = 0;
 // during. Gates the background polling that would otherwise stall a frame.
 static bool g_holdingScreen = false;
 
+// Longest single pass through loop(), in ms, since it was last read. Anything
+// animating shows a stall as a freeze, and this says whether one happened and
+// how big without needing a serial cable to find out.
+static uint32_t g_loopMaxMs = 0;
+static uint32_t g_loopStart = 0;
+
+uint32_t appLoopMaxMs() {
+  const uint32_t v = g_loopMaxMs;
+  g_loopMaxMs = 0;               // read-and-reset: each poll reports its own window
+  return v;
+}
+
 static bool nightMiningActive(const Settings& s) {
   if (!s.clock.nightMining || !clockNightActive()) return false;
   if (g_nightWakeUntil) {
@@ -392,6 +404,14 @@ void setup() {
 }
 
 void loop() {
+  {
+    const uint32_t now = millis();
+    if (g_loopStart) {
+      const uint32_t took = now - g_loopStart;
+      if (took > g_loopMaxMs) g_loopMaxMs = took;
+    }
+    g_loopStart = now;
+  }
   netLoop();
   webPortalLoop();
 
@@ -435,11 +455,9 @@ void loop() {
   }
 
 #if WITH_SPOTIFY
-  // Poll regardless of what is showing: auto-takeover depends on noticing that
-  // playback started while a different mode has the screen. The exception is a
-  // mode holding the screen — a game — because this poll blocks for a few
-  // hundred milliseconds over TLS and that is a very visible freeze at 40 fps.
-  if (!g_holdingScreen) spotifyService(g_settings);
+  // A no-op now: the poll lives on its own task so it can neither block a frame
+  // nor need permission from whatever is on screen.
+  spotifyService(g_settings);
 #endif
 
   // A pushed banner owns the screen while it lasts, then the mode repaints.

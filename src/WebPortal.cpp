@@ -26,6 +26,7 @@
 extern void appInvalidate();
 extern const char* appResetReason();   // last reset reason (diagnostics)
 extern void appApplyBrightness();   // main.cpp: re-resolve effective brightness now
+extern uint32_t appLoopMaxMs();     // worst loop pass since the last read
 
 static WebServerClass server(80);
 static Settings*        S = nullptr;
@@ -96,6 +97,9 @@ static void handleStatus() {
   o["maxblk"] = platformMaxFreeBlock();     // largest contiguous block (TLS handshake needs one)
   o["contstk"] = platformFreeContStack();   // primary stack headroom (ESP8266)
   o["uptime"] = millis() / 1000;
+  // Worst loop pass since this was last read. A few ms is normal; anything
+  // near a hundred is a stall someone will have seen on screen.
+  o["loopMax"] = appLoopMaxMs();
   o["reset"] = appResetReason();
   o["synced"] = clockSynced();
   { String ts = clockTimeStr(); if (ts.length()) o["time"] = ts; }
