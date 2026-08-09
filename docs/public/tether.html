@@ -1,4 +1,26 @@
 <!doctype html>
+<!--
+  SmallTV tether — a static page. Drop it anywhere and serve it over HTTPS.
+
+  Four things silently break it, all of which leave the page looking normal
+  while the connect button does nothing:
+
+    1. A Content-Security-Policy whose script-src omits 'unsafe-inline'. The
+       script is inline. Exempt this path, add a nonce, or move the script to a
+       sibling .js file — it has no dependencies and does not care where it lives.
+    2. A Permissions-Policy header that disables `serial`. Use serial=(self), or
+       leave `serial` out of the header entirely; the default already allows it.
+    3. Being embedded in an <iframe> without allow="serial". Link to it as its
+       own page instead.
+    4. A build pipeline that rewrites inline scripts. Serve it byte-for-byte.
+
+  To verify a deployment without any hardware: open it in Chrome or Edge and
+  press Connect. If the browser's own device picker appears — empty is fine —
+  the hosting is correct.
+
+  Web Serial is Chrome/Edge/Opera on desktop only. Safari and Firefox have not
+  implemented it, and the page says so rather than offering a dead button.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
