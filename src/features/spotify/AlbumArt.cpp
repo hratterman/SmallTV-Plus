@@ -25,7 +25,29 @@ struct ArtCtx {
   int32_t  remaining;    // bytes the server said are left, -1 if chunked
   int16_t  ox, oy;       // where the top-left of the image lands on screen
   uint32_t deadline;
+  // First bytes off the wire. A decoder error says the file was not acceptable
+  // but not whether it was even a JPEG, and those want completely different
+  // fixes — ff d8 is a JPEG the ROM decoder will not take (progressive, most
+  // likely), 89 50 is a PNG, 52 49 is a WebP the CDN substituted.
+  uint8_t  magic[2];
+  uint8_t  magicLen;
 };
+
+// The ROM decoder returns a bare number. These are TJpgDec's JRESULT values,
+// as words, because "err 8" is not something anyone can act on.
+const char* artJdErr(int r) {
+  switch (r) {
+    case 1:  return "interrupted";
+    case 2:  return "input stream ended";
+    case 3:  return "decoder pool too small";
+    case 4:  return "input buffer too small";
+    case 5:  return "bad parameter";
+    case 6:  return "damaged data";
+    case 7:  return "unsupported format";
+    case 8:  return "not baseline JPEG";
+    default: return "unknown";
+  }
+}
 
 // TJpgDec pulls input through here. buff == nullptr means "skip these bytes",
 // which for a socket is a read into nowhere rather than a seek.
@@ -56,6 +78,12 @@ UINT artIn(JDEC* jd, BYTE* buff, UINT nbyte) {
       got = c->stream->readBytes(sink, want > (int)sizeof(sink) ? (int)sizeof(sink) : want);
     }
     if (got <= 0) break;
+    // The freshly read bytes are buff[done .. done+got); each call appends to
+    // the stream, so taking them in order gives the file's first bytes wherever
+    // the call boundaries happen to fall.
+    if (buff)
+      for (int k = 0; k < got && c->magicLen < 2; k++)
+        c->magic[c->magicLen++] = buff[done + k];
     done += got;
     if (c->remaining > 0) c->remaining -= got;
   }
@@ -157,6 +185,11 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
     return false;
   }
 
+  // Say what we can actually decode. A CDN doing content negotiation will
+  // otherwise happily hand back WebP, which the ROM decoder cannot read and
+  // which looks from here like a corrupt JPEG.
+  http.addHeader("Accept", "image/jpeg");
+
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
     snprintf(s_status, sizeof(s_status), "HTTP %d, blk %uk", code,
@@ -172,6 +205,8 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   ctx.ox = x;
   ctx.oy = y;
   ctx.deadline = millis() + 8000;
+  ctx.magicLen = 0;
+  ctx.magic[0] = ctx.magic[1] = 0;
 
   void* work = malloc(ART_WORK_SZ);
   if (!work) {
@@ -185,7 +220,8 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   bool ok = false;
   const JRESULT pr = jd_prepare(&jd, artIn, work, ART_WORK_SZ, &ctx);
   if (pr != JDR_OK) {
-    snprintf(s_status, sizeof(s_status), "jd_prepare err %d", (int)pr);
+    snprintf(s_status, sizeof(s_status), "%s (%02x%02x)", artJdErr((int)pr),
+             ctx.magic[0], ctx.magic[1]);
   } else {
     const AlbumArtFit fit = albumArtFit((int)jd.width);
     // Centre whatever size that lands on, so a cover a couple of pixels under
@@ -198,7 +234,7 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
     ok = (dr == JDR_OK);
     if (ok) snprintf(s_status, sizeof(s_status), "ok %dx%d /%d",
                      (int)jd.width, (int)jd.height, 1 << fit.scale);
-    else    snprintf(s_status, sizeof(s_status), "jd_decomp err %d", (int)dr);
+    else    snprintf(s_status, sizeof(s_status), "decode: %s", artJdErr((int)dr));
   }
 
   free(work);

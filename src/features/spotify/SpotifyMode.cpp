@@ -20,7 +20,9 @@ static void workText(const Settings& s, const SpotifyData& d,
   if (s.work.hideExplicit && d.explicitTrack) {
     // The cover, the artist and the progress all stay — enough to know what is
     // playing without the title announcing itself across an open-plan office.
-    strlcpy(title, "(explicit track)", titleN);
+    // Deliberately says nothing about *why* it is hidden: a label reading
+    // "explicit" is itself the announcement the setting exists to avoid.
+    strlcpy(title, "track name hidden", titleN);
   }
   workMaskWords(title, s.work.blocklist.c_str());
   workMaskWords(artist, s.work.blocklist.c_str());
