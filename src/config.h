@@ -69,6 +69,7 @@
 //   5 = clock (SNTP wall time, big digits)
 //   6 = spotify now-playing (ESP32 targets only)
 //   7 = ambient patterns (no network, nothing to report)
+//   8 = flappy bird, played with the lid pad
 // ---------------------------------------------------------------------------
 #define MODE_STOCKS    0
 #define MODE_USAGE     1
@@ -78,6 +79,7 @@
 #define MODE_CLOCK     5
 #define MODE_SPOTIFY   6
 #define MODE_AMBIENT   7
+#define MODE_FLAPPY    8
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -115,6 +117,15 @@
 // network path at all, so this is on everywhere the display is.
 #ifndef WITH_AMBIENT
 #define WITH_AMBIENT 1
+#endif
+
+// The game needs the pad, so it only exists where there is one to press.
+#ifndef WITH_GAME
+#if defined(SMALLTV_ESP32)
+#define WITH_GAME 1
+#else
+#define WITH_GAME 0
+#endif
 #endif
 // Miner is classic-ESP32 only: the mining core runs FreeRTOS worker tasks
 // pinned across both cores and (optionally) the ESP32 SHA peripheral. The

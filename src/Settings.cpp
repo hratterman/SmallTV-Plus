@@ -398,6 +398,7 @@ void Settings::setDefaults() {
   carouselTicker = carouselUsage = carouselRadar = carouselMiner = carouselClock = true;
   carouselSpotify = true;
   carouselAmbient = false;   // opt-in: it is decoration, not information
+  carouselFlappy  = false;   // and a game should never just appear
   httpTimeout = DEFAULT_HTTP_TIMEOUT;
 
   brightness = DEFAULT_BRIGHTNESS;
@@ -491,6 +492,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   root["carouselClock"]     = s.carouselClock;
   root["carouselSpotify"]   = s.carouselSpotify;
   root["carouselAmbient"]   = s.carouselAmbient;
+  root["carouselFlappy"]    = s.carouselFlappy;
   root["httpTimeout"]       = s.httpTimeout;
   root["brightness"]        = s.brightness;
   root["autoBrightness"]    = s.autoBrightness;
@@ -568,6 +570,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["carouselClock"].is<bool>())   s.carouselClock = root["carouselClock"];
   if (root["carouselSpotify"].is<bool>()) s.carouselSpotify = root["carouselSpotify"];
   if (root["carouselAmbient"].is<bool>()) s.carouselAmbient = root["carouselAmbient"];
+  if (root["carouselFlappy"].is<bool>())  s.carouselFlappy = root["carouselFlappy"];
 
   if (root["httpTimeout"].is<int>())        s.httpTimeout = constrain((int)root["httpTimeout"], 1000, 20000);
   if (root["brightness"].is<int>())         s.brightness = constrain((int)root["brightness"], 0, 100);

@@ -29,4 +29,16 @@ class DisplayMode {
   // mutable so a mode can adjust its own slice, but changes are runtime-only —
   // nothing here writes flash, so a reboot returns to the saved configuration.
   virtual void onContextAction(Settings& s) {}
+
+  // A tap normally steps to the next mode. A mode that answers true here takes
+  // the tap for itself instead — needed by anything interactive, where the pad
+  // is the control rather than the navigation. Such a mode should offer a way
+  // back out; the convention is that its long-press calls appNextMode().
+  virtual bool wantsTap() const { return false; }
+  virtual void onTap(Settings& s) {}
+
+  // True while the mode should not be rotated away from mid-activity. The
+  // carousel checks this before its dwell timer, so a game in progress or an
+  // animation part-way through keeps the screen.
+  virtual bool holdsScreen() const { return false; }
 };

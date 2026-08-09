@@ -42,6 +42,9 @@
 #if WITH_AMBIENT
 #include "AmbientMode.h"
 #endif
+#if WITH_GAME
+#include "FlappyMode.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -71,6 +74,9 @@ static DisplayMode* kModes[] = {
 #if WITH_AMBIENT
   &g_ambientMode,
 #endif
+#if WITH_GAME
+  &g_flappyMode,
+#endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
 
@@ -97,6 +103,7 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
     case MODE_CLOCK:  return s.carouselClock;
     case MODE_SPOTIFY: return s.carouselSpotify;
     case MODE_AMBIENT: return s.carouselAmbient;
+    case MODE_FLAPPY:  return s.carouselFlappy;
     default:          return true;
   }
 }
@@ -141,6 +148,12 @@ static DisplayMode* activeMode(const Settings& s) {
   if (s.mode == MODE_CAROUSEL && kModeCount > 0) {
     if (g_carSwitch == 0) g_carSwitch = millis();
     if (!carouselHas(s, kModes[g_carIdx])) carouselNext(s);   // settings changed
+    // A mode in the middle of something keeps the screen; the dwell timer
+    // restarts so it gets a full turn once it lets go.
+    if (kModes[g_carIdx]->holdsScreen()) {
+      g_carSwitch = millis();
+      return kModes[g_carIdx];
+    }
     if (millis() - g_carSwitch >= (uint32_t)s.carouselSec * 1000UL) {
       g_carSwitch = millis();
       carouselNext(s);
@@ -220,6 +233,33 @@ void appInvalidate() {
 #endif
 }
 
+// Step to the next *included* mode: the same ticks that govern the carousel, so
+// unticking a feature removes it from the tap cycle too. Stepping starts from
+// whatever is on the glass right now rather than from the last tap, so the first
+// tap after a carousel switch goes where you expect.
+//
+// Exposed because a mode that captures the tap still needs a way to hand the
+// screen back — its long-press calls this.
+void appNextMode() {
+#if HAS_TOUCH
+  if (!kModeCount) return;
+  size_t from = (g_modeOverride < 0) ? 0 : (size_t)g_modeOverride;
+  const DisplayMode* cur = activeMode(g_settings);
+  for (size_t i = 0; i < kModeCount; i++)
+    if (kModes[i] == cur) { from = i; break; }
+  for (size_t hop = 1; hop <= kModeCount; hop++) {
+    const size_t cand = (from + hop) % kModeCount;
+    if (!carouselHas(g_settings, kModes[cand])) continue;
+    g_modeOverride = (int8_t)cand;
+    kModes[cand]->wake(g_settings);
+    return;
+  }
+  // Nothing ticked at all: don't leave the tap dead, just step anyway.
+  g_modeOverride = (int8_t)((from + 1) % kModeCount);
+  kModes[g_modeOverride]->wake(g_settings);
+#endif
+}
+
 #if HAS_TOUCH
 // One grammar, every mode. Tap moves through the modes, double-tap blanks the
 // screen, and long-press is handed to whichever mode is showing.
@@ -236,29 +276,13 @@ static void appHandleTouch(TouchEvent ev) {
       }
       if (g_displayOff) { g_displayOff = false; appApplyBrightness(); break; }
       if (notifyActive()) { notifyDismiss(); break; }   // tap clears a banner
-      // Step to the next *included* mode: the same ticks that govern the
-      // carousel, so unticking a feature removes it from the tap cycle too.
-      // Stepping starts from whatever is on the glass right now, not from the
-      // last tap, so the first tap after a carousel switch goes where you expect.
-      if (kModeCount) {
-        size_t from = (g_modeOverride < 0) ? 0 : (size_t)g_modeOverride;
-        const DisplayMode* cur = activeMode(g_settings);
-        for (size_t i = 0; i < kModeCount; i++)
-          if (kModes[i] == cur) { from = i; break; }
-        bool stepped = false;
-        for (size_t hop = 1; hop <= kModeCount && !stepped; hop++) {
-          const size_t cand = (from + hop) % kModeCount;
-          if (!carouselHas(g_settings, kModes[cand])) continue;
-          g_modeOverride = (int8_t)cand;
-          kModes[cand]->wake(g_settings);
-          stepped = true;
-        }
-        // Nothing ticked at all: don't leave the tap dead, just step anyway.
-        if (!stepped) {
-          g_modeOverride = (int8_t)((from + 1) % kModeCount);
-          kModes[g_modeOverride]->wake(g_settings);
-        }
+      {
+        // An interactive mode takes the tap for itself — the pad is its control,
+        // not navigation — and offers its long-press as the way back out.
+        DisplayMode* cur = activeMode(g_settings);
+        if (cur && cur->wantsTap()) { cur->onTap(g_settings); break; }
       }
+      appNextMode();
       break;
 
     case TOUCH_DOUBLE:
