@@ -41,10 +41,7 @@ class SpotifyMode : public DisplayMode {
   bool     drawnValid_   = false;
   bool     drawnError_   = false;
   bool     drawnLinked_  = false;
-  // The cover currently on the glass. Art is only re-fetched when the URL
-  // changes, so a paused track or a repaint costs no network at all.
-  char     drawnArt_[SPOTIFY_ART_LEN] = {0};
-  bool     artFailed_ = false;
+  bool     artFailed_ = false;   // last cover attempt did not land
   int      barW_    = -1;   // filled pixels currently drawn
   int      elapsed_ = -1;   // seconds currently shown
 };

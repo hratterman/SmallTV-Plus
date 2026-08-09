@@ -46,6 +46,11 @@ bool spotifyIsPlaying(const Settings& s);
 // instead of jumping once per poll interval.
 uint32_t spotifyProgressNow();
 
+// Cover entries the last poll saw in the payload, before any were rejected for
+// size or length. Reported so an empty artUrl can be told apart from a cover
+// that failed to download.
+uint8_t spotifyArtCandidates();
+
 // One TLS session at a time. The poll runs on its own task and the album art
 // fetch runs on the render task; concurrent handshakes do not fit in the heap.
 bool spotifyNetLock(uint32_t waitMs);

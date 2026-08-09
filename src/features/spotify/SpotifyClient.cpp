@@ -36,6 +36,13 @@ static struct {
   String   clientId, clientSecret, refreshToken;
 } s_cfg;
 
+// How many cover entries the last poll found in the payload. Zero here and an
+// empty artUrl mean the response carried no images at all, which is a very
+// different problem from a cover that would not download — and the two are
+// indistinguishable on the screen without this.
+static volatile uint8_t s_artCandidates = 0;
+uint8_t spotifyArtCandidates() { return s_artCandidates; }
+
 // Guards the radio, not the data: only one TLS handshake may be in flight, so
 // the art fetch on the render task cannot collide with a poll on core 0.
 static SemaphoreHandle_t s_net = nullptr;
@@ -181,7 +188,8 @@ static bool fetchNowPlaying() {
     s_data.valid = true;
     s_data.error = false;
     s_data.playing = false;
-    s_data.track[0] = s_data.artist[0] = 0;
+    s_data.track[0] = s_data.artist[0] = s_data.artUrl[0] = 0;
+    s_artCandidates = 0;
     s_data.lastOkMs = millis();
     return true;
   }
@@ -249,8 +257,10 @@ static bool fetchNowPlaying() {
   {
     int bestErr = 1 << 30;
     int bestW = 0;
+    uint8_t seen = 0;
     JsonArrayConst images = doc["item"]["album"]["images"].as<JsonArrayConst>();
     for (JsonObjectConst im : images) {
+      seen++;
       const char* u = im["url"] | "";
       const int w = im["width"] | 0;
       if (!u[0] || w <= 0 || strlen(u) >= SPOTIFY_ART_LEN) continue;
@@ -262,6 +272,7 @@ static bool fetchNowPlaying() {
         s_data.artPx = (uint16_t)w;
       }
     }
+    s_artCandidates = seen;
   }
 
   s_data.valid = true;

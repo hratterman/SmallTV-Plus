@@ -200,6 +200,7 @@ static void handleStatus() {
     JsonObject a = o["art"].to<JsonObject>();
     a["url"]    = sd.artUrl;          // "" means the poll found no cover
     a["status"] = albumArtStatus();
+    a["candidates"] = spotifyArtCandidates();   // covers the payload offered
   }
 #endif
   sendJson(doc);

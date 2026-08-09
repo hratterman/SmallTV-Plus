@@ -32,7 +32,6 @@ void SpotifyMode::invalidate(const Settings& s) {
   spotifyForceRefresh();
   needFull_ = true;
   drawnTrack_[0] = drawnArtist_[0] = 0;
-  drawnArt_[0] = 0;
   barW_ = elapsed_ = -1;
 }
 
@@ -107,20 +106,29 @@ void SpotifyMode::renderAll(const Settings& s) {
 
   // Cover first: it is the slow part, and drawing it before the text means the
   // screen is never blank while the download runs.
+  //
+  // Unconditionally — this function has just cleared the screen and there is no
+  // framebuffer to restore the cover from, so it has to be painted again every
+  // time. It used to be skipped when the URL matched the one last fetched,
+  // which meant any repaint of the same track left a black square where the
+  // cover had been: a second track from the same album, a pause, a carousel
+  // wake. The cover appeared once and then vanished on the next repaint.
   if (d.artUrl[0]) {
-    if (strcmp(d.artUrl, drawnArt_) != 0 || artFailed_) {
-      artFailed_ = !albumArtDraw(d.artUrl, ART_X, ART_Y);
-      strlcpy(drawnArt_, d.artUrl, sizeof(drawnArt_));
-    }
-    if (artFailed_) {
-      // A cover that would not load leaves a plate rather than a hole, so the
-      // layout below it does not move about between tracks.
-      gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
-      gfx->fillCircle(TFT_WIDTH / 2, ART_Y + SPOTIFY_ART_PX / 2, 18, C_SPOT);
-    }
+    artFailed_ = !albumArtDraw(d.artUrl, ART_X, ART_Y);
   } else {
-    drawnArt_[0] = 0;
+    artFailed_ = true;
+  }
+  if (artFailed_) {
+    // A cover that would not load leaves a plate rather than a hole, so the
+    // layout below it does not move about between tracks — and the plate says
+    // why, because "no art" on its own has never once been enough to act on.
     gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
+    gfx->fillCircle(TFT_WIDTH / 2, ART_Y + SPOTIFY_ART_PX / 2, 16, C_SPOT);
+    const char* why = d.artUrl[0] ? albumArtStatus() : "poll sent no cover url";
+    gfxDrawCentered(why, ART_Y + SPOTIFY_ART_PX - 24, 1, C_DIM);
+    char n[24];
+    snprintf(n, sizeof(n), "%u covers offered", (unsigned)spotifyArtCandidates());
+    gfxDrawCentered(n, ART_Y + SPOTIFY_ART_PX - 14, 1, C_DIM);
   }
 
   const int textY = ART_Y + SPOTIFY_ART_PX + 8;
