@@ -13,15 +13,29 @@ static uint32_t    g_downSince = 0;      // 0 = connected; else millis() the dro
 
 static void startAP(const Settings& s) {
   g_mode = NET_AP;
+  // An empty name is not "use the default", it is "let the IDF pick one", and
+  // what it picks is ESP_xxxxxx.
+  const String ssid = s.apSsid.length() ? s.apSsid : String(DEFAULT_AP_SSID);
+
   WiFi.mode(WIFI_AP);
+  // softAP() before softAPConfig(). WiFi.mode(WIFI_AP) already brings the
+  // interface up under the IDF's own defaults, and configuring the address
+  // first can leave it there with the name unapplied — which is how a device
+  // ends up broadcasting ESP_xxxxxx.
+  const bool ok = (s.apPass.length() >= 8)
+                      ? WiFi.softAP(ssid.c_str(), s.apPass.c_str())
+                      : WiFi.softAP(ssid.c_str());   // open: WPA2 needs >=8 chars
   IPAddress apIP(192, 168, 4, 1);
   WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-  if (s.apPass.length() >= 8) {
-    WiFi.softAP(s.apSsid.c_str(), s.apPass.c_str());
-  } else {
-    WiFi.softAP(s.apSsid.c_str());           // open AP (WPA2 needs >=8 chars)
-  }
-  g_apSsid = s.apSsid;
+
+  // Report the name the radio is actually broadcasting, not the one we asked
+  // for. The screen is the only instruction the user gets, and a screen naming
+  // a network that is not on the air makes a working device look dead — which
+  // is exactly what it did.
+  g_apSsid = WiFi.softAPSSID();
+  if (!g_apSsid.length()) g_apSsid = ssid;
+  Serial.printf("[net] AP \"%s\"%s\n", g_apSsid.c_str(),
+                ok && g_apSsid == ssid ? "" : "  (NOT the requested name)");
   // Captive portal: answer every DNS query with our own IP.
   g_dns.setErrorReplyCode(DNSReplyCode::NoError);
   g_dns.start(53, "*", apIP);
