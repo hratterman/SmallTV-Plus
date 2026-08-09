@@ -455,6 +455,35 @@ void factoryReset(Settings& s) {
 }
 
 // ---------------------------------------------------------------------------
+// Mode <-> token, one table serving both directions. This used to be a pair of
+// ternary ladders, one in each function, and adding a mode meant remembering
+// both: miss the read side and the web UI offers a mode the device silently
+// refuses, falling back to the default with no error anywhere. Ambient and
+// flappy shipped exactly that way. One line per mode now, in one place.
+static const struct { uint8_t mode; const char* tok; } kModeTokens[] = {
+    {MODE_STOCKS,   "stocks"},
+    {MODE_USAGE,    "usage"},
+    {MODE_RADAR,    "radar"},
+    {MODE_CAROUSEL, "carousel"},
+    {MODE_MINER,    "miner"},
+    {MODE_CLOCK,    "clock"},
+    {MODE_SPOTIFY,  "spotify"},
+    {MODE_AMBIENT,  "ambient"},
+    {MODE_FLAPPY,   "flappy"},
+};
+
+static const char* modeToken(uint8_t m) {
+  for (const auto& e : kModeTokens)
+    if (e.mode == m) return e.tok;
+  return "stocks";
+}
+
+static uint8_t modeFromToken(const String& t) {
+  for (const auto& e : kModeTokens)
+    if (t.equalsIgnoreCase(e.tok)) return e.mode;
+  return MODE_STOCKS;
+}
+
 void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   root["hostname"]   = s.hostname;
 
@@ -478,12 +507,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   }
 
   // Mode + shared HTTP/display
-  root["mode"]              = (s.mode == MODE_RADAR)    ? "radar"
-                            : (s.mode == MODE_USAGE)    ? "usage"
-                            : (s.mode == MODE_MINER)    ? "miner"
-                            : (s.mode == MODE_CLOCK)    ? "clock"
-                            : (s.mode == MODE_SPOTIFY)  ? "spotify"
-                            : (s.mode == MODE_CAROUSEL) ? "carousel" : "stocks";
+  root["mode"]              = modeToken(s.mode);
   root["carouselSec"]       = s.carouselSec;
   root["carouselTicker"]    = s.carouselTicker;
   root["carouselUsage"]     = s.carouselUsage;
@@ -554,13 +578,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["apPass"].is<const char*>()) s.apPass = root["apPass"].as<String>();
 
   if (root["mode"].is<const char*>()) {
-    String m = root["mode"].as<String>();
-    s.mode = m.equalsIgnoreCase("radar")    ? MODE_RADAR
-           : m.equalsIgnoreCase("usage")    ? MODE_USAGE
-           : m.equalsIgnoreCase("miner")    ? MODE_MINER
-           : m.equalsIgnoreCase("clock")    ? MODE_CLOCK
-           : m.equalsIgnoreCase("spotify")  ? MODE_SPOTIFY
-           : m.equalsIgnoreCase("carousel") ? MODE_CAROUSEL : MODE_STOCKS;
+    s.mode = modeFromToken(root["mode"].as<String>());
   }
   if (root["carouselSec"].is<int>())      s.carouselSec = constrain((int)root["carouselSec"], 5, 3600);
   if (root["carouselTicker"].is<bool>())  s.carouselTicker = root["carouselTicker"];
