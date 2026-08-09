@@ -10,6 +10,7 @@
 #include "UsageClient.h"
 #include "Clock.h"
 #include "Notify.h"
+#include "NetFetch.h"
 #if WITH_CAPTIVE
 #include "Captive.h"
 #endif
@@ -229,6 +230,7 @@ static void handleStatus() {
     sp["playing"] = sd.playing;
     sp["track"]   = sd.track;
     sp["error"]   = sd.error ? sd.errorMsg : "";
+    sp["route"]   = netFetchTethered() ? "tether" : "wifi";
 
     JsonObject a = o["art"].to<JsonObject>();
     a["url"]    = sd.artUrl;          // "" means the poll found no cover

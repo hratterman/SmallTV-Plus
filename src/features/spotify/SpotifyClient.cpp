@@ -6,6 +6,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include "NetFetch.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -93,54 +94,6 @@ void spotifyInit(const Settings& s) {
   }
 }
 
-// ArduinoJson reads the response through this rather than off the socket
-// directly.
-//
-// The stock path hands http.getStream() to deserializeJson, which leaves the
-// waiting to Stream::readBytes and its timeout. That timeout gives up the
-// moment a TLS record is late, and the parser then sees end-of-input on a
-// response that was merely slow — reported as IncompleteInput, which reads like
-// a corrupt payload rather than a read that stopped early. It gets worse with
-// latency (a phone hotspot) and with anything competing for the core (the miner
-// worker shares core 0 with this task), which is exactly when it showed up.
-//
-// The album art path never had this problem because it already waits on its own
-// clock and lets lwIP refill. Same idea here: only stop when the deadline
-// passes or the socket is genuinely finished.
-class PatientReader {
- public:
-  PatientReader(WiFiClient* s, uint32_t budgetMs)
-      : s_(s), deadline_(millis() + budgetMs) {}
-
-  int read() {
-    uint8_t c;
-    return readBytes((char*)&c, 1) == 1 ? c : -1;
-  }
-
-  size_t readBytes(char* buf, size_t len) {
-    size_t got = 0;
-    while (got < len) {
-      const int avail = s_->available();
-      if (avail > 0) {
-        const size_t want = (size_t)avail < (len - got) ? (size_t)avail : (len - got);
-        const int r = s_->read((uint8_t*)buf + got, want);
-        if (r <= 0) break;
-        got += (size_t)r;
-        continue;
-      }
-      // Nothing buffered: the connection being closed is the only real end.
-      if (!s_->connected()) break;
-      if ((int32_t)(millis() - deadline_) >= 0) break;
-      delay(2);
-    }
-    return got;
-  }
-
- private:
-  WiFiClient* s_;
-  uint32_t    deadline_;
-};
-
 static void setError(const char* msg) {
   lockTake();
   s_data.error = true;
@@ -177,34 +130,25 @@ static String base64(const String& in) {
 // expire on their own, so this is the only long-lived secret the device holds.
 static bool refreshAccessToken(const String& clientId, const String& clientSecret,
                                const String& refreshToken) {
-  WiFiClientSecure client;
-  client.setInsecure();          // same posture as the GitHub self-updater
-  client.setTimeout(s_httpTimeout / 1000 + 1);
+  const String headers =
+      "Content-Type: application/x-www-form-urlencoded\n"
+      "Authorization: Basic " + base64(clientId + ":" + clientSecret);
+  const String body = "grant_type=refresh_token&refresh_token=" + refreshToken;
 
-  HTTPClient http;
-  if (!http.begin(client, "https://accounts.spotify.com/api/token")) {
-    setError("token: connect failed");
-    return false;
-  }
-  http.setTimeout(s_httpTimeout);
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  http.addHeader("Authorization",
-                 "Basic " + base64(clientId + ":" + clientSecret));
-
-  String body = "grant_type=refresh_token&refresh_token=" + refreshToken;
-  int code = http.POST(body);
-  if (code != 200) {
+  String raw;
+  const NetFetchResult res = netFetchToString(
+      "https://accounts.spotify.com/api/token", /*post=*/true, headers.c_str(),
+      (const uint8_t*)body.c_str(), (uint16_t)body.length(),
+      raw, 4096, s_httpTimeout);
+  if (!res.ok) {
     char m[48];
-    snprintf(m, sizeof(m), "token: HTTP %d", code);
+    snprintf(m, sizeof(m), "token: %.38s", res.error);
     setError(m);
-    http.end();
     return false;
   }
 
   JsonDocument doc;
-  PatientReader reader(http.getStreamPtr(), s_httpTimeout);
-  DeserializationError err = deserializeJson(doc, reader);
-  http.end();
+  DeserializationError err = deserializeJson(doc, raw);
   if (err) {
     char m[48];
     snprintf(m, sizeof(m), "token: %s", err.c_str());
@@ -222,23 +166,20 @@ static bool refreshAccessToken(const String& clientId, const String& clientSecre
 }
 
 static bool fetchNowPlaying() {
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(s_httpTimeout / 1000 + 1);
+  const String headers = "Authorization: Bearer " + s_accessToken;
 
-  HTTPClient http;
-  if (!http.begin(client, "https://api.spotify.com/v1/me/player/currently-playing")) {
-    setError("player: connect failed");
-    return false;
-  }
-  http.setTimeout(s_httpTimeout);
-  http.addHeader("Authorization", "Bearer " + s_accessToken);
-
-  int code = http.GET();
+  // Buffered rather than streamed. The filter still keeps the *parsed* document
+  // small; this is only the raw text, and holding it briefly is what lets one
+  // code path serve both the socket and the cable. 12 KB covers a track with a
+  // long artist list and a full market array.
+  String raw;
+  const NetFetchResult res = netFetchToString(
+      "https://api.spotify.com/v1/me/player/currently-playing",
+      /*post=*/false, headers.c_str(), nullptr, 0, raw, 12288, s_httpTimeout);
+  const int code = res.status;
 
   // 204 is Spotify's "nothing is playing" — a normal state, not a failure.
   if (code == 204) {
-    http.end();
     s_data.valid = true;
     s_data.error = false;
     s_data.playing = false;
@@ -249,16 +190,14 @@ static bool fetchNowPlaying() {
     return true;
   }
   if (code == 401) {          // access token died early; force a refresh next tick
-    http.end();
     s_tokenExpiresAt = 0;
     setError("player: token rejected");
     return false;
   }
-  if (code != 200) {
+  if (!res.ok) {
     char m[48];
-    snprintf(m, sizeof(m), "player: HTTP %d", code);
+    snprintf(m, sizeof(m), "player: %.37s", res.error);
     setError(m);
-    http.end();
     return false;
   }
 
@@ -279,13 +218,9 @@ static bool fetchNowPlaying() {
   img["url"] = true;
   img["width"] = true;
 
-  // The filter keeps the parsed document small, but the whole body still has to
-  // be read off the socket, and that is the part that was stopping early.
   JsonDocument doc;
-  PatientReader reader(http.getStreamPtr(), s_httpTimeout);
   DeserializationError err =
-      deserializeJson(doc, reader, DeserializationOption::Filter(filter));
-  http.end();
+      deserializeJson(doc, raw, DeserializationOption::Filter(filter));
   if (err) {
     // "bad JSON" covered a truncated stream and an exhausted heap alike, and
     // those want opposite fixes. ArduinoJson already knows which.

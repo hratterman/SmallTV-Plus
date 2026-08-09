@@ -1,4 +1,7 @@
 #include "Net.h"
+#if WITH_TETHER
+#include "Tether.h"
+#endif
 #include "Platform.h"
 #include <DNSServer.h>
 
@@ -170,7 +173,19 @@ void netLoop() {
     return;
   }
   if (!g_downSince) g_downSince = millis();
-  if (millis() - g_lastReconnect > 10000) {
+
+#if WITH_TETHER
+  // A tethered cube has a working connection already, so hammering an
+  // unreachable access point every ten seconds buys nothing and costs plenty:
+  // it floods the log the tether page is showing, and each attempt takes the
+  // radio for a moment. Keep trying, but at a pace that suits "in case WiFi
+  // comes back" rather than "this is our only hope".
+  const uint32_t retryEvery = tetherActive() ? 60000UL : 10000UL;
+#else
+  const uint32_t retryEvery = 10000UL;
+#endif
+
+  if (millis() - g_lastReconnect > retryEvery) {
     g_lastReconnect = millis();
     if (g_cfg && g_cfg->wifiCount > 1 && millis() - g_downSince > 45000) {
       g_curNet = (int8_t)((g_curNet + 1) % g_cfg->wifiCount);
