@@ -3,25 +3,31 @@
 
 Some networks the cube cannot join on its own: an office with 802.1X, a captive
 portal it cannot click through, a guest network that will not take a device
-without a browser. This script is the way round that. The cube asks, over the
-serial line, for HTTP requests to be performed; this performs them and streams
-the answers back. Nothing about the cube's own WiFi needs to work.
+without a browser. Plug the cube into this computer and run:
 
-    pip install pyserial requests
-    python3 tools/tether.py --port /dev/cu.usbserial-110
+    python3 tether.py
+
+That is the whole procedure. No port to find, no arguments, and on macOS and
+Linux nothing to install — it drives the serial port through the standard
+library. Windows needs `pip install pyserial`, which it will tell you.
+
+It finds the cube by listening: every candidate serial port is opened and
+watched for the announcement the firmware sends every couple of seconds, and
+the one that answers is the cube. Unplug it and the script goes back to
+looking, so moving the cable between machines needs nothing from you.
 
 The wire format is src/SerialFrame.h — SLIP framing with a CRC, so frames and
 the cube's ordinary debug log share the one UART without either corrupting the
-other. Anything that is not a valid frame is printed as log text, which is
-exactly what you want when something goes wrong.
+other. Log lines are printed as they arrive, which is what you want when
+something goes wrong.
 
-Run the framing checks with:
-    python3 tools/tether.py --selftest
-which round-trips this implementation against fixtures produced by the C++ one,
-so the two cannot quietly disagree about endianness or the CRC.
+    python3 tether.py --selftest    check the framing against the C++ side
 """
 
+
 import argparse
+import glob
+import os
 import struct
 import sys
 import time
@@ -161,13 +167,132 @@ def parse_request(payload: bytes):
     return method, url, headers, body
 
 
-# ---------------------------------------------------------------------------
-def serve(port: str, baud: int, verbose: bool):
-    import serial  # pyserial
-    import requests
+class Port:
+    """A serial port, without requiring pyserial where the platform will do.
 
-    ser = serial.Serial(port, baud, timeout=0.05)
-    print(f"tether: listening on {port} at {baud}", file=sys.stderr)
+    macOS and Linux can set a raw 115200 line discipline through termios, which
+    is in the standard library — so the common case is "download one file and
+    run it" rather than "install a package first". Windows has no such API and
+    falls back to pyserial.
+    """
+
+    def __init__(self, path: str, baud: int):
+        self.path = path
+        self._ser = None
+        self._fd = None
+        if os.name == "nt":
+            try:
+                import serial
+            except ImportError:
+                raise SystemExit("tether: Windows needs pyserial — pip install pyserial")
+            self._ser = serial.Serial(path, baud, timeout=0.05)
+            return
+
+        import termios
+        self._fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        attrs = termios.tcgetattr(self._fd)
+        iflag, oflag, cflag, lflag, ispeed, ospeed, cc = attrs
+        speed = getattr(termios, f"B{baud}", None)
+        if speed is None:
+            os.close(self._fd)
+            raise SystemExit(f"tether: this platform cannot do {baud} baud")
+        # Raw: no echo, no translation, no flow control. Anything else would
+        # mangle binary frames.
+        iflag = 0
+        oflag = 0
+        cflag = termios.CS8 | termios.CREAD | termios.CLOCAL
+        lflag = 0
+        cc = list(cc)
+        cc[termios.VMIN] = 0
+        cc[termios.VTIME] = 0
+        termios.tcsetattr(self._fd, termios.TCSANOW,
+                          [iflag, oflag, cflag, lflag, speed, speed, cc])
+
+    def read(self, n: int) -> bytes:
+        if self._ser is not None:
+            return self._ser.read(n)
+        try:
+            return os.read(self._fd, n)
+        except BlockingIOError:
+            return b""
+        except OSError:
+            raise ConnectionError(f"{self.path} went away")
+
+    def write(self, data: bytes):
+        if self._ser is not None:
+            self._ser.write(data)
+            return
+        try:
+            while data:
+                data = data[os.write(self._fd, data):]
+        except OSError:
+            raise ConnectionError(f"{self.path} went away")
+
+    def close(self):
+        try:
+            if self._ser is not None:
+                self._ser.close()
+            elif self._fd is not None:
+                os.close(self._fd)
+        except Exception:                                # noqa: BLE001
+            pass
+
+
+def candidate_ports():
+    """Serial devices worth listening to, most likely first."""
+    if os.name == "nt":
+        try:
+            from serial.tools import list_ports
+            return [p.device for p in list_ports.comports()]
+        except ImportError:
+            return [f"COM{i}" for i in range(1, 33)]
+    # cu.* rather than tty.* on macOS: tty.* blocks on open waiting for carrier.
+    pats = ["/dev/cu.usbserial*", "/dev/cu.usbmodem*", "/dev/cu.wchusbserial*",
+            "/dev/cu.SLAB_USBtoUART*", "/dev/ttyUSB*", "/dev/ttyACM*"]
+    out = []
+    for p in pats:
+        out += sorted(glob.glob(p))
+    # Never grab a Bluetooth or debug console pseudo-port.
+    return [p for p in out if "Bluetooth" not in p and "debug" not in p]
+
+
+def find_cube(baud: int, verbose: bool, listen_s: float = 3.0):
+    """Open each candidate and wait for the firmware's hello. Returns a Port."""
+    ports = candidate_ports()
+    if not ports:
+        return None
+    for path in ports:
+        try:
+            p = Port(path, baud)
+        except (SystemExit, Exception) as e:             # noqa: BLE001
+            if isinstance(e, SystemExit):
+                raise
+            if verbose:
+                print(f"tether: {path}: {e}", file=sys.stderr)
+            continue
+        dec = Decoder()
+        deadline = time.time() + listen_s
+        # The firmware announces itself every 2 s; give it more than one turn.
+        while time.time() < deadline:
+            data = p.read(4096)
+            if not data:
+                time.sleep(0.02)
+                continue
+            for ftype, fid, payload in dec.feed(data):
+                if ftype == HELLO:
+                    who = payload.decode("utf-8", "replace")
+                    print(f"tether: found {who} on {path}", file=sys.stderr)
+                    return p
+        if verbose:
+            print(f"tether: nothing on {path}", file=sys.stderr)
+        p.close()
+    return None
+
+
+# ---------------------------------------------------------------------------
+def serve_port(ser, verbose: bool):
+    from urllib import request as urlreq
+    from urllib import error as urlerr
 
     def log(s):
         print(f"  cube | {s}", file=sys.stderr)
@@ -183,6 +308,7 @@ def serve(port: str, baud: int, verbose: bool):
     while True:
         data = ser.read(4096)
         if not data:
+            time.sleep(0.01)
             continue
         for ftype, fid, payload in dec.feed(data):
             if ftype == HELLO:
@@ -204,20 +330,33 @@ def serve(port: str, baud: int, verbose: bool):
             if verbose:
                 print(f"tether: #{fid} {'POST' if method else 'GET'} {url}",
                       file=sys.stderr)
+            # urllib rather than requests: one less thing to install, and the
+            # streaming is good enough for bodies this size.
             try:
-                r = requests.request(
-                    "POST" if method == METHOD_POST else "GET",
-                    url, headers=headers, data=body or None,
-                    stream=True, timeout=20,
-                )
-                total = int(r.headers.get("content-length") or 0)
-                send(HTTP_STATUS, fid, struct.pack("<HI", r.status_code, total))
-                for chunk in r.iter_content(CHUNK):
-                    if chunk:
+                req = urlreq.Request(
+                    url, data=body or None, headers=headers,
+                    method="POST" if method == METHOD_POST else "GET")
+                with urlreq.urlopen(req, timeout=20) as r:
+                    total = int(r.headers.get("content-length") or 0)
+                    send(HTTP_STATUS, fid, struct.pack("<HI", r.status, total))
+                    while True:
+                        chunk = r.read(CHUNK)
+                        if not chunk:
+                            break
                         send(HTTP_DATA, fid, chunk)
+                    send(HTTP_END, fid)
+                    if verbose:
+                        print(f"tether: #{fid} -> {r.status}", file=sys.stderr)
+            except urlerr.HTTPError as e:
+                # A 404 or a 401 is an answer, not a failure of the tether: pass
+                # the status through so the cube reports what the server said.
+                body_bytes = e.read() or b""
+                send(HTTP_STATUS, fid, struct.pack("<HI", e.code, len(body_bytes)))
+                for i in range(0, len(body_bytes), CHUNK):
+                    send(HTTP_DATA, fid, body_bytes[i:i + CHUNK])
                 send(HTTP_END, fid)
                 if verbose:
-                    print(f"tether: #{fid} -> {r.status_code}", file=sys.stderr)
+                    print(f"tether: #{fid} -> {e.code}", file=sys.stderr)
             except Exception as e:                       # noqa: BLE001
                 # The cube can do nothing about the reason, but it can show it,
                 # and "why is the ticker blank" is otherwise unanswerable.
@@ -307,6 +446,9 @@ def selftest() -> int:
                     f"{t} {i} {len(p)}\n".encode() for t, i, p in want)
                 ck(r3.stdout == expect, "C++ decodes frames python encoded")
 
+    print("\n--- end to end over a pseudo-terminal -----------------------")
+    failures += loopback(ck)
+
     print("\n-------------------------------------------------------------")
     if failures:
         print(f"{failures} check(s) FAILED")
@@ -315,12 +457,176 @@ def selftest() -> int:
     return 0
 
 
+def loopback(ck) -> int:
+    """Drive the whole host path with a pty standing in for the cube.
+
+    This is the half that the framing tests cannot reach: the handshake, the
+    request unpacking, and a real body streaming back in frames. A pty behaves
+    like a serial port closely enough that the code under test is the code that
+    will run, rather than a mock of it.
+    """
+    import http.server
+    import threading
+
+    before = [0]
+
+    class Quiet(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):                                 # noqa: N802
+            body = b"x" * 1500 + bytes(range(256))        # crosses several frames
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):                                # noqa: N802
+            n = int(self.headers.get("content-length") or 0)
+            sent = self.rfile.read(n)
+            echo = b"got:" + sent + b" auth:" + self.headers.get("Authorization", "").encode()
+            self.send_response(201)
+            self.send_header("Content-Length", str(len(echo)))
+            self.end_headers()
+            self.wfile.write(echo)
+
+        def log_message(self, *a):                        # keep the output clean
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Quiet)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+
+    master, slave = os.openpty()
+    slave_path = os.ttyname(slave)
+    os.close(slave)
+
+    port = Port(slave_path, 115200)
+    stop = threading.Event()
+
+    def run():
+        try:
+            serve_port(port, verbose=False)
+        except Exception:                                 # noqa: BLE001
+            pass
+        stop.set()
+
+    threading.Thread(target=run, daemon=True).start()
+
+    dec = Decoder()
+    got = []
+
+    def pump(seconds=4.0):
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            import select
+            r, _, _ = select.select([master], [], [], 0.1)
+            if not r:
+                continue
+            for f in dec.feed(os.read(master, 65536)):
+                got.append(f)
+        return got
+
+    # 1. Handshake: hello in, ack and a clock back.
+    os.write(master, encode(HELLO, 0, b"smalltv-mod 2.8.2"))
+    pump(2.0)
+    ck(any(f[0] == HELLO_ACK for f in got), "hello is acknowledged")
+    times = [f for f in got if f[0] == TIME]
+    ck(bool(times), "the host offers its clock unasked")
+    if times:
+        (epoch,) = struct.unpack("<q", times[0][2])
+        ck(abs(epoch - int(time.time())) < 5, "and the clock is right")
+
+    # 2. A GET, streamed back across several frames.
+    got.clear()
+    req = (bytes([METHOD_GET])
+           + struct.pack("<H", len(base + "/big")) + (base + "/big").encode()
+           + struct.pack("<H", 0) + struct.pack("<H", 0))
+    os.write(master, encode(HTTP_REQ, 77, req))
+    pump(4.0)
+    status = [f for f in got if f[0] == HTTP_STATUS and f[1] == 77]
+    data = [f for f in got if f[0] == HTTP_DATA and f[1] == 77]
+    end = [f for f in got if f[0] == HTTP_END and f[1] == 77]
+    ck(bool(status) and struct.unpack("<HI", status[0][2])[0] == 200, "GET returns 200")
+    ck(len(data) > 1, "a body larger than one frame arrives in several")
+    body = b"".join(f[2] for f in data)
+    ck(body == b"x" * 1500 + bytes(range(256)),
+       "body is byte-identical, including bytes that collide with the framing")
+    ck(bool(end), "and is terminated")
+
+    # 3. A POST with headers and a body — the Spotify token exchange shape.
+    got.clear()
+    hdrs = "Authorization: Basic abc123\nContent-Type: application/x-www-form-urlencoded"
+    payload = b"grant_type=refresh_token"
+    req = (bytes([METHOD_POST])
+           + struct.pack("<H", len(base + "/tok")) + (base + "/tok").encode()
+           + struct.pack("<H", len(hdrs)) + hdrs.encode()
+           + struct.pack("<H", len(payload)) + payload)
+    os.write(master, encode(HTTP_REQ, 78, req))
+    pump(4.0)
+    status = [f for f in got if f[0] == HTTP_STATUS and f[1] == 78]
+    body = b"".join(f[2] for f in got if f[0] == HTTP_DATA and f[1] == 78)
+    ck(bool(status) and struct.unpack("<HI", status[0][2])[0] == 201, "POST status passes through")
+    ck(b"grant_type=refresh_token" in body, "the request body reached the server")
+    ck(b"Basic abc123" in body, "and so did the headers")
+
+    # 4. A URL that cannot be reached: the cube must be told why.
+    got.clear()
+    bad = "http://127.0.0.1:1/nope"
+    req = (bytes([METHOD_GET]) + struct.pack("<H", len(bad)) + bad.encode()
+           + struct.pack("<H", 0) + struct.pack("<H", 0))
+    os.write(master, encode(HTTP_REQ, 79, req))
+    pump(4.0)
+    errs = [f for f in got if f[0] == HTTP_ERR and f[1] == 79]
+    ck(bool(errs), "an unreachable host comes back as an error, not silence")
+
+    srv.shutdown()
+    os.close(master)
+    return 0
+
+
+def run_forever(baud: int, verbose: bool, port: str = None):
+    """Find the cube, serve it, and go back to looking when the cable goes.
+
+    Unplugging is the normal case, not an error: the cube moves between a desk
+    and a bag. Neither end should need restarting for that.
+    """
+    announced = False
+    while True:
+        ser = None
+        if port:
+            try:
+                ser = Port(port, baud)
+                print(f"tether: using {port}", file=sys.stderr)
+            except Exception as e:                       # noqa: BLE001
+                print(f"tether: {port}: {e}", file=sys.stderr)
+        else:
+            ser = find_cube(baud, verbose)
+
+        if ser is None:
+            if not announced:
+                print("tether: waiting for a cube... "
+                      "(plug it in; make sure nothing else holds the port)",
+                      file=sys.stderr)
+                announced = True
+            time.sleep(2)
+            continue
+
+        announced = False
+        try:
+            serve_port(ser, verbose)
+        except ConnectionError as e:
+            print(f"tether: {e}; looking again", file=sys.stderr)
+        except KeyboardInterrupt:
+            ser.close()
+            return
+        finally:
+            ser.close()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", help="serial port, e.g. /dev/cu.usbserial-110")
-    ap.add_argument("--baud", type=int, default=460800,
-                    help="must match the firmware (default 460800)")
+    ap.add_argument("--port", help="skip the search and use this port")
+    ap.add_argument("--baud", type=int, default=115200,
+                    help="must match the firmware (default 115200)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="log every request the cube makes")
     ap.add_argument("--selftest", action="store_true",
@@ -329,12 +635,10 @@ def main() -> int:
 
     if a.selftest:
         return selftest()
-    if not a.port:
-        ap.error("--port is required (or use --selftest)")
     try:
-        serve(a.port, a.baud, a.verbose)
+        run_forever(a.baud, a.verbose, a.port)
     except KeyboardInterrupt:
-        return 0
+        pass
     return 0
 
 

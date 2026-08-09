@@ -22,6 +22,9 @@
 #if WITH_CAPTIVE
 #include "Captive.h"
 #endif
+#if WITH_TETHER
+#include "Tether.h"
+#endif
 
 #if WITH_TICKER
 #include "TickerMode.h"
@@ -382,6 +385,9 @@ void setup() {
 #if WITH_CAPTIVE
   captiveBegin(g_settings);
 #endif
+#if WITH_TETHER
+  tetherBegin();
+#endif
 
   Serial.println("[boot] web");
   webPortalBegin(g_settings);
@@ -418,6 +424,12 @@ void loop() {
   }
   netLoop();
   webPortalLoop();
+#if WITH_TETHER
+  // Before the AP/safe-mode returns below: a cube that cannot join any network
+  // is exactly the one most likely to be tethered, and it still needs the link
+  // pumped to find that out.
+  tetherService();
+#endif
 
   if (webPortalRebootDue()) {
     delay(120);

@@ -69,6 +69,13 @@ around it.
   host harness can include: `tools/miner_selftest` (job maths),
   `tools/captive_selftest` (portal form parsing). Both run in under a second
   and neither needs the cube.
+- **The tether is discovered, not configured.** The cube announces itself on
+  the UART every couple of seconds; `tools/tether.py` opens every candidate
+  serial port and keeps the one that answers, so moving the cable to another
+  machine needs nothing typed on either side. It uses only the standard library
+  on macOS and Linux for the same reason. Keep both properties — the moment it
+  needs a port argument or a pip install, it stops being the thing you reach for
+  at someone else's desk.
 - **Say why, not just what.** `/api/status` reports the resolved backlight level
   *and the rule that chose it*, the worst loop time since last read, and the
   album-art failure stage. Every one of those exists because a symptom was

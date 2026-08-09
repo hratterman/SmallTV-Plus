@@ -274,6 +274,23 @@
 #define DEFAULT_MINER_ENGINE MINER_ENGINE_HYBRID
 
 // ---------------------------------------------------------------------------
+// USB tether: borrow a nearby computer's connection for networks the cube
+// cannot join on its own. Discovered rather than configured — the cube
+// announces itself and uses the cable if something answers.
+// ---------------------------------------------------------------------------
+#ifndef WITH_TETHER
+#if defined(SMALLTV_ESP32)
+#define WITH_TETHER 1
+#else
+#define WITH_TETHER 0
+#endif
+#endif
+
+#define TETHER_HELLO_DOWN_MS  2000    // announcing, nobody listening yet
+#define TETHER_HELLO_UP_MS   10000    // heartbeat once a host has answered
+#define TETHER_IDLE_MS       25000    // silence this long = the cable is gone
+
+// ---------------------------------------------------------------------------
 // Captive portal handling. Associating is not the same as being online, and on
 // a hotel or conference network the difference is every feature silently
 // failing while the screen shows a network name and an IP.

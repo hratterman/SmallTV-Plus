@@ -13,6 +13,9 @@
 #if WITH_CAPTIVE
 #include "Captive.h"
 #endif
+#if WITH_TETHER
+#include "Tether.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -140,6 +143,13 @@ static void handleStatus() {
   // so "the screen went black" is one request to answer instead of a guess.
   {
     o["work"] = S->work.enabled;
+#if WITH_TETHER
+    {
+      JsonObject t = o["tether"].to<JsonObject>();
+      t["active"]  = tetherActive();
+      t["idleSec"] = tetherIdleSec();
+    }
+#endif
     JsonObject sc = o["screen"].to<JsonObject>();
     sc["level"]    = appBrightnessLevel();
     sc["why"]      = appBrightnessWhy();
