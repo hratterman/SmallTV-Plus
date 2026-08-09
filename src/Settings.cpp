@@ -360,27 +360,6 @@ void SpotifySettings::fromJson(JsonObjectConst o) {
 // ===========================================================================
 // Touch slice
 // ===========================================================================
-void StorySettings::setDefaults() {
-  prompt      = "";
-  temperature = DEFAULT_STORY_TEMP;
-  topP        = DEFAULT_STORY_TOPP;
-  maxTokens   = DEFAULT_STORY_TOKENS;
-}
-
-void StorySettings::toJson(JsonObject o) const {
-  o["prompt"]      = prompt;
-  o["temperature"] = temperature;
-  o["topP"]        = topP;
-  o["maxTokens"]   = maxTokens;
-}
-
-void StorySettings::fromJson(JsonObjectConst o) {
-  if (o["prompt"].is<const char*>())  { prompt = o["prompt"].as<String>(); prompt.trim(); }
-  if (o["temperature"].is<float>())   temperature = constrain((float)o["temperature"], 0.0f, 2.0f);
-  if (o["topP"].is<float>())          topP = constrain((float)o["topP"], 0.05f, 1.0f);
-  if (o["maxTokens"].is<int>())       maxTokens = constrain((int)o["maxTokens"], 16, 512);
-}
-
 void TouchSettings::setDefaults() {
   enabled   = true;
   gpio      = DEFAULT_TOUCH_GPIO;
@@ -418,7 +397,6 @@ void Settings::setDefaults() {
   carouselSec = DEFAULT_CAROUSEL_SEC;
   carouselTicker = carouselUsage = carouselRadar = carouselMiner = carouselClock = true;
   carouselSpotify = true;
-  carouselStory   = false;   // opt-in: it takes the screen for a minute at a time
   httpTimeout = DEFAULT_HTTP_TIMEOUT;
 
   brightness = DEFAULT_BRIGHTNESS;
@@ -431,7 +409,6 @@ void Settings::setDefaults() {
   radar.setDefaults();
   miner.setDefaults();
   spotify.setDefaults();
-  story.setDefaults();
   touch.setDefaults();
   clock.setDefaults();
 }
@@ -512,7 +489,6 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   root["carouselMiner"]     = s.carouselMiner;
   root["carouselClock"]     = s.carouselClock;
   root["carouselSpotify"]   = s.carouselSpotify;
-  root["carouselStory"]     = s.carouselStory;
   root["httpTimeout"]       = s.httpTimeout;
   root["brightness"]        = s.brightness;
   root["autoBrightness"]    = s.autoBrightness;
@@ -525,7 +501,6 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.radar.toJson(root["radar"].to<JsonObject>());
   s.miner.toJson(root["miner"].to<JsonObject>());
   s.spotify.toJson(root["spotify"].to<JsonObject>(), includeSecrets);
-  s.story.toJson(root["story"].to<JsonObject>());
   s.touch.toJson(root["touch"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
 }
@@ -590,7 +565,6 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["carouselMiner"].is<bool>())   s.carouselMiner = root["carouselMiner"];
   if (root["carouselClock"].is<bool>())   s.carouselClock = root["carouselClock"];
   if (root["carouselSpotify"].is<bool>()) s.carouselSpotify = root["carouselSpotify"];
-  if (root["carouselStory"].is<bool>())   s.carouselStory = root["carouselStory"];
 
   if (root["httpTimeout"].is<int>())        s.httpTimeout = constrain((int)root["httpTimeout"], 1000, 20000);
   if (root["brightness"].is<int>())         s.brightness = constrain((int)root["brightness"], 0, 100);
@@ -609,7 +583,6 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["radar"].is<JsonObjectConst>()) s.radar.fromJson(root["radar"].as<JsonObjectConst>());
   if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
   if (root["spotify"].is<JsonObjectConst>()) s.spotify.fromJson(root["spotify"].as<JsonObjectConst>());
-  if (root["story"].is<JsonObjectConst>())   s.story.fromJson(root["story"].as<JsonObjectConst>());
   if (root["touch"].is<JsonObjectConst>()) s.touch.fromJson(root["touch"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());
 }

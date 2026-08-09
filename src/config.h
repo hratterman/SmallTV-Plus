@@ -68,7 +68,6 @@
 //   4 = bitcoin solo miner (ESP32 targets only, see WITH_MINER below)
 //   5 = clock (SNTP wall time, big digits)
 //   6 = spotify now-playing (ESP32 targets only)
-//   7 = on-device story writer (ESP32 targets only)
 // ---------------------------------------------------------------------------
 #define MODE_STOCKS    0
 #define MODE_USAGE     1
@@ -77,7 +76,6 @@
 #define MODE_MINER     4
 #define MODE_CLOCK     5
 #define MODE_SPOTIFY   6
-#define MODE_STORY     7
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -110,20 +108,6 @@
 #endif
 
 #define DEFAULT_SPOTIFY_POLL_SEC 10
-
-// On-device language model. Needs a filesystem to stream ~274 KB of weights
-// from and ~100 KB of heap while it runs, so ESP32-only like the miner.
-#ifndef WITH_STORY
-#if defined(SMALLTV_ESP32)
-#define WITH_STORY 1
-#else
-#define WITH_STORY 0
-#endif
-#endif
-
-#define DEFAULT_STORY_TEMP   0.9f   // 0 = always the same story, word for word
-#define DEFAULT_STORY_TOPP   0.9f
-#define DEFAULT_STORY_TOKENS 96     // 0 = as much context as the heap allows
 // Miner is classic-ESP32 only: the mining core runs FreeRTOS worker tasks
 // pinned across both cores and (optionally) the ESP32 SHA peripheral. The
 // ESP8266 has neither, and the single-core C2 has no cycles to spare.

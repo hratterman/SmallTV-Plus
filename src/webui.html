@@ -57,36 +57,11 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="radar">Radar</button>
  <button data-t="clock">Clock</button>
  <button data-t="spotify">Spotify</button>
- <button data-t="story">Story</button>
  <button data-t="miner">Miner</button>
  <button data-t="touch">Touch</button>
  <button data-t="update">Update</button>
 </nav>
 <main>
-
- <!-- STORY -->
- <section id="story" class="tab">
-  <div class="card"><h2>On-device story writer</h2>
-   <small class="hint">A 264,000-parameter language model that runs entirely on the cube &mdash; no network, no API. It was trained on simple children's stories and that is genuinely all it can do: it cannot answer questions, follow instructions, or know anything about the world. At this size that is the ceiling, not a setting. Tap round to the Story screen and it starts writing; hold the pad for a new one.</small>
-   <div id="modelBox" class="kv"><span class="muted">checking&hellip;</span></div>
-   <label>Model file <span class="muted">(built by <code>tools/tinyllm_export.py</code>)</span></label>
-   <input id="modelFile" type="file" accept=".tll">
-   <button onclick="uploadModel()">Upload model</button>
-   <button class="ghost" onclick="deleteModel()">Remove</button>
-   <div id="modelMsg" class="hint"></div>
-   <small class="hint">About 274 KB, stored on the filesystem rather than in the firmware, so replacing it costs no OTA cycle. Weights stream off flash as it writes &mdash; there is nowhere near enough RAM to hold them &mdash; which is why it runs at a few words a second rather than instantly.</small>
-  </div>
-  <div class="card"><h2>Writing</h2>
-   <label>Opening words <span class="muted">(optional)</span></label>
-   <input id="storyPrompt" type="text" placeholder="Once upon a time">
-   <label>Temperature: <span id="stVal"></span> <span class="muted">(0 = the same story every time)</span></label>
-   <input id="storyTemp" type="range" min="0" max="150" oninput="stVal.textContent=(this.value/100).toFixed(2)">
-   <label>Top-p: <span id="spVal"></span></label>
-   <input id="storyTopP" type="range" min="5" max="100" oninput="spVal.textContent=(this.value/100).toFixed(2)">
-   <label>Maximum length (tokens)</label><input id="storyMaxTokens" type="number" min="16" max="512">
-   <small class="hint">Length is capped by memory as well: the attention cache is 1,280 bytes per token and has to come out of the same heap as WiFi, so the device takes the longest context that fits when it starts and reports it on screen. Roughly three words per four tokens.</small>
-  </div>
- </section>
 
  <!-- STATUS -->
  <section id="status" class="tab active">
@@ -136,7 +111,6 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="miner">Bitcoin miner</option>
     <option value="clock">Clock</option>
     <option value="spotify">Spotify now playing</option>
-    <option value="story">Story writer</option>
     <option value="carousel">Carousel (rotate modes)</option>
    </select>
    <div id="carouselRow">
@@ -149,7 +123,6 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
-   <div class="chk"><input id="carouselStory" type="checkbox"><label>Story writer</label></div>
    <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
   </div>
   <div class="card"><h2>Screen</h2>
@@ -457,9 +430,9 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify',story:'story'};
+var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify'};
 var TOUCHGPIOS=[4,0,12,27,33,32];
-var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify',story:'carouselStory'};
+var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
  var sec=$(name); if(sec)sec.remove();
@@ -469,7 +442,7 @@ function hideFeat(name){
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
- var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify','story'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  if(f.touch===false){var tb=document.querySelector('nav button[data-t="touch"]');if(tb)tb.remove();var ts=$('touch');if(ts)ts.remove();}
  var t=c.ticker||{}, u=c.usage||{};
  // shared
@@ -521,13 +494,6 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
  sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
  sv('minerEngine',mn.engine||'sw');
- // story slice
- var so=c.story||{};
- sv('storyPrompt',so.prompt||'');
- var stv=$('storyTemp'); if(stv){stv.value=Math.round((so.temperature==null?0.9:so.temperature)*100);stv.oninput();}
- var spv=$('storyTopP'); if(spv){spv.value=Math.round((so.topP==null?0.9:so.topP)*100);spv.oninput();}
- sv('storyMaxTokens',so.maxTokens||96);
- refreshModel();
  // spotify slice
  var sp=c.spotify||{};
  sc('spotifyEnabled',!!sp.enabled); sc('spotifyAutoShow',sp.autoShow!==false);
@@ -621,10 +587,117 @@ function collect(){
   nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
   nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,nightMining:gc('nightMining'),
   mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
- // story slice
- if($('storyPrompt')){o.story={prompt:gv('storyPrompt'),
-  temperature:parseInt(gv('storyTemp'))/100,topP:parseInt(gv('storyTopP'))/100,
-  maxTokens:parseInt(gv('storyMaxTokens'))||96};}
+ // radar slice
+ var r=c.radar||{};
+ sv('radarLat',r.lat); sv('radarLon',r.lon);
+ sv('rangeKm',r.rangeKm||20);
+ sv('unitsMi',r.unitsMi?'true':'false');
+ sv('radarPollSec',r.pollSec);
+ sv('radarSource',r.source||'direct'); radarSrcChanged();
+ sv('radarWebhookUrl',r.webhookUrl);
+ sc('showLabels',r.showLabels); sc('showVectors',r.showVectors); sc('showRimDots',r.showRimDots);
+ sv('radarUiScale',r.uiScale!=null?r.uiScale:1);
+ sv('radarMinAlt',r.minAltFt!=null?r.minAltFt:0);
+ renderAps(r.airports||[]);
+ // miner slice
+ var mn=c.miner||{};
+ sc('minerEnabled',mn.enabled!==false);
+ sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
+ sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
+ sv('minerEngine',mn.engine||'sw');
+ // spotify slice
+ var sp=c.spotify||{};
+ sc('spotifyEnabled',!!sp.enabled); sc('spotifyAutoShow',sp.autoShow!==false);
+ sv('spotifyClientId',sp.clientId); sv('spotifyPollSec',sp.pollSec||10);
+ var scs=$('spotifyClientSecret'); if(scs)scs.placeholder=sp.secretSet?'(unchanged)':'paste the client secret';
+ var srt=$('spotifyRefreshToken'); if(srt)srt.placeholder=sp.tokenSet?'(unchanged)':'paste the refresh token';
+ // touch slice
+ var tc=c.touch||{};
+ if($('touchGpio')){var g=$('touchGpio');g.innerHTML='<option value="-1">Not set</option>'+
+   TOUCHGPIOS.map(function(n){return '<option value="'+n+'">GPIO '+n+'</option>'}).join('');}
+ sc('touchEnabled',tc.enabled!==false);
+ sv('touchGpio',tc.gpio!=null?tc.gpio:-1);
+ sv('touchThreshold',tc.threshold!=null?tc.threshold:20);
+ var ap=$('apPass'); if(ap)ap.placeholder=c.apPassSet?'(unchanged)':'(open)';
+})}
+
+function esc(s){return (''+(s==null?'':s)).replace(/[<>&"]/g,function(c){return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]})}
+function symHintFor(v){var h=$('symHint');if(!h)return;
+ h.innerHTML=(v==='cash'
+  ?'<b>cash.ch</b>: fetched directly by the device. The symbol is a listing key like <code>147478611-246-333</code>; the finder below turns a cash.ch link, ISIN, or name into one.'
+   +(C.chip==='esp8266'?' <b>On this ESP8266</b>, cash.ch\'s TLS is beyond this chip &mdash; use the <b>GitHub</b> source for the same listing key instead (a scheduled workflow publishes it). The ESP32 boards fetch cash.ch directly.':'')
+  :v==='github'
+  ?'<b>GitHub</b>: reads a listing key\'s quote from a small JSON file the repo\'s <code>quotes</code> workflow publishes (a proxy for cash.ch on chips that can\'t reach it directly). The symbol is the cash.ch listing key, and it must be listed in <code>quotes-config.json</code>.'
+  :v==='webhook'
+  ?'<b>Webhook</b>: the device asks the webhook URL above and passes the symbol through as-is, so use whatever your endpoint understands.'
+  :'<b>Yahoo Finance</b>: fetched directly by the device. Use Yahoo symbols: <code>AAPL</code>, <code>NESN.SW</code> (Swiss stocks end in <code>.SW</code>), <code>BTC-USD</code>, <code>EURUSD=X</code>.')
+  +' Name is optional; if set it overrides the source\'s name. Qty and per-unit cost are optional too: set both and the ticker shows your P/L plus a portfolio summary page.';}
+
+// cash.ch symbol finder: runs in YOUR browser (cash.ch answers cross-origin),
+// the device itself is not involved in the search.
+function cashFind(){var q=gv('cashQ').trim();if(!q){toast('Paste a link, ISIN, or name first');return}
+ var m=q.match(/^https?:\/\/\S*?(\d{5,12})/); if(m)q=m[1];   // a cash.ch link carries the valor in its slug
+ $('cashRes').innerHTML='<div class="muted">Searching cash.ch...</div>';
+ var gq='query{textSearch(publication:CASH,search:"'+q.replace(/["\\]/g,'')+'",sort:Relevance,sortOrder:Descending,limit:10,offset:0){'+
+  'equity{items{...on Equity{listingId mName market mCur mIsin}}} fund{items{...on Fund{listingId mName market mCur mIsin}}} '+
+  'derivative{items{...on Derivative{listingId mName market mCur mIsin}}} bond{items{...on Bond{listingId mName market mCur mIsin}}} '+
+  'index{items{...on Index{listingId mName market mCur}}} diverse{items{...on Diverse{listingId mName market mCur mIsin}}} '+
+  'cryptoCurrency{items{...on CryptoCurrency{listingId mName market mCur}}}}}';
+ fetch('https://www.cash.ch/_/api/graphql/prod?query='+encodeURIComponent(gq))
+ .then(function(r){return r.json()})
+ .then(function(d){var out=[];var b=(d.data&&d.data.textSearch)||{};
+  ['equity','derivative','fund','bond','index','diverse','cryptoCurrency'].forEach(function(k){
+   ((b[k]&&b[k].items)||[]).forEach(function(it){if(it&&it.listingId)out.push(it)});});
+  if(!out.length){$('cashRes').innerHTML='<div class="muted">Nothing found on cash.ch</div>';return}
+  var h='';out.slice(0,10).forEach(function(it){
+   h+='<div class="net" onclick="cashPick(this.dataset.k)" data-k="'+esc(it.listingId)+'"><span>'+esc(it.mName||'?')+
+    ' <span class="muted">'+esc(it.mIsin||'')+'</span></span><span class="muted">'+esc(it.market||'')+' '+esc(it.mCur||'')+'</span></div>';});
+  $('cashRes').innerHTML=h;
+ }).catch(function(){$('cashRes').innerHTML='<div class="muted">cash.ch not reachable from this browser</div>'});}
+function cashPick(k){var rows=document.querySelectorAll('#symTable tr');var tr=null;
+ for(var i=0;i<rows.length;i++){if(!rows[i].querySelector('.s').value.trim()){tr=rows[i];break}}
+ if(!tr){if(rows.length>=8){toast('Max 8');return}addRow({});tr=$('symTable').lastChild}
+ tr.querySelector('.s').value=k;tr.querySelector('.src').value='cash';symHintFor('cash');
+ toast('Added '+k+'. Set a name, then Save.');}
+function radarSrcChanged(){if(!$('radarSource'))return;var d=$('radarSource').value!=='webhook';
+ $('radarWebhookRow').style.display=d?'none':'block';
+ $('radarSrcHint').innerHTML=d
+  ?'The device fetches <b>adsb.fi</b> directly over HTTPS (no key, ~1 req/s). Tight on RAM in busy airspace — use the webhook if it drops.'
+  :'The device requests <code>?lat=..&amp;lon=..&amp;dist=..</code> from your LAN proxy, which pre-filters adsb.fi to a small JSON. Most reliable on the ESP8266.';}
+
+function collect(){
+ var o={mode:gv('mode'),
+  carouselSec:parseInt(gv('carouselSec'))||30,
+  carouselTicker:gc('carouselTicker'), carouselUsage:gc('carouselUsage'), carouselRadar:gc('carouselRadar'),
+  carouselMiner:gc('carouselMiner'), carouselClock:gc('carouselClock'), carouselSpotify:gc('carouselSpotify'),
+  brightness:parseInt(gv('brightness'))||0,
+  rotation:parseInt(gv('rotation')),
+  autoBrightness:gc('autoBrightness'),
+  backlightInverted:gc('backlightInverted'),
+  hostname:gv('hostname'), apSsid:gv('apSsid'), apPass:gv('apPass'),
+  wifi:collectWifi()};
+ // ticker slice (only if compiled in)
+ if($('ticker')){
+  var t={colorInverted:gv('colorInverted')==='true',changeOnRange:gv('changeOnRange')==='true'};
+  T_TEXT.forEach(function(k){t[k]=gv(k)});
+  T_NUM.forEach(function(k){t[k]=parseInt(gv(k))||0});
+  T_BOOL.forEach(function(k){t[k]=gc(k)});
+  t.symbols=[];
+  document.querySelectorAll('#symTable tr').forEach(function(tr){
+   var s=tr.querySelector('.s').value.trim();
+   if(s)t.symbols.push({symbol:s,name:tr.querySelector('.n').value.trim(),source:tr.querySelector('.src').value,
+    qty:parseFloat(tr.querySelector('.q').value)||0,cost:parseFloat(tr.querySelector('.c').value)||0});
+  });
+  o.ticker=t;
+ }
+ // usage slice
+ if($('usage')) o.usage={usageUrl:gv('usageUrl'), pollSec:parseInt(gv('usagePollSec'))||0};
+ // clock slice
+ if($('tz')){var _tzn=gv('tz'); var _tzp=(_tzn in TZMAP)?TZMAP[_tzn]:((C.clock&&C.clock.tz===_tzn&&C.clock.tzPosix)?C.clock.tzPosix:'UTC0');
+  o.clock={tz:_tzn,tzPosix:_tzp,
+  nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
+  nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,nightMining:gc('nightMining'),
+  mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
  // radar slice
  if($('radar')){
   var r={lat:parseFloat(gv('radarLat'))||0, lon:parseFloat(gv('radarLon'))||0,
@@ -787,28 +860,6 @@ function fmtDiff(d){d=d||0;
  if(d>=1e3)return (d/1e3).toFixed(2)+'K';
  if(d>=1)return d.toFixed(2);
  return d.toFixed(5)}
-
-function refreshModel(){var b=$('modelBox'); if(!b)return;
- j('/api/status').then(function(s){var st=s.story||{};
-  b.innerHTML=st.model
-   ?'<span class="muted">Model</span><b>'+(st.size/1024).toFixed(0)+' KB loaded'+
-     (st.context?' &middot; '+st.context+' token context':'')+
-     (st.tps?' &middot; '+st.tps.toFixed(1)+' tok/s':'')+'</b>'
-   :'<span class="muted">Model</span><b style="color:var(--red)">none uploaded</b>';
-  if(st.fsFree!=null)b.innerHTML+='<br><span class="muted">Filesystem free</span><b>'+(st.fsFree/1024).toFixed(0)+' KB</b>';
- }).catch(function(){b.textContent='?'})}
-
-function uploadModel(){var f=$('modelFile'); var m=$('modelMsg');
- if(!f||!f.files.length){m.textContent='Choose a .tll file first.';return}
- m.textContent='Uploading '+(f.files[0].size/1024).toFixed(0)+' KB...';
- var fd=new FormData(); fd.append('model',f.files[0]);
- fetch('/api/model',{method:'POST',body:fd}).then(function(r){return r.json()}).then(function(r){
-  m.textContent=r.ok?'Uploaded. Tap round to the Story screen.':('Failed: '+(r.error||'?'));
-  refreshModel();
- }).catch(function(e){m.textContent='Failed: '+e})}
-
-function deleteModel(){if(!confirm('Remove the story model from the device?'))return;
- fetch('/api/model',{method:'DELETE'}).then(function(){$('modelMsg').textContent='Removed.';refreshModel()})}
 
 function kv(k,v){return '<div class="kv"><span class="muted">'+k+'</span><b>'+v+'</b></div>'}
 function fmtUp(s){var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);

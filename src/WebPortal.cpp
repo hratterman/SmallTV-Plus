@@ -17,9 +17,6 @@
 #include "MinerCore.h"
 #include "MinerShaHw.h"
 #endif
-#if WITH_STORY
-#include "StoryMode.h"
-#endif
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
 extern void appInvalidate();
@@ -66,7 +63,6 @@ static void handleGetConfig() {
   feat["touch"]   = (bool)HAS_TOUCH;
   feat["clock"]   = (bool)WITH_CLOCK;
   feat["spotify"] = (bool)WITH_SPOTIFY;
-  feat["story"]   = (bool)WITH_STORY;
   // Which chip this build runs on (the UI warns about per-chip limitations).
 #if defined(SMALLTV_ESP32C2)
   root["chip"] = "esp32c2";
@@ -173,16 +169,6 @@ static void handleStatus() {
       w["rate"] = ms.workerRate[i];
       w["hw"]   = ms.workerHw[i];
     }
-  }
-#endif
-#if WITH_STORY
-  {
-    JsonObject st = o["story"].to<JsonObject>();
-    st["model"]   = StoryMode::modelPresent();
-    st["size"]    = (uint32_t)StoryMode::modelSize();
-    st["context"] = g_storyMode.contextTokens();   // 0 until a story has run
-    st["tps"]     = g_storyMode.tokensPerSec();
-    st["fsFree"]  = (uint32_t)(LittleFS.totalBytes() - LittleFS.usedBytes());
   }
 #endif
   sendJson(doc);
@@ -393,95 +379,6 @@ static void handleUpdateUpload() {
   yield();
 }
 
-#if WITH_STORY
-// ---- story model upload ---------------------------------------------------
-// The model is ~274 KB and lives on the filesystem rather than in the image:
-// the app slot has ~115 KB spare and the filesystem has 960 KB, and keeping it
-// out of the image means updating the model does not cost an OTA cycle.
-static File s_modelUp;
-static String s_modelErr;
-
-static void handleModelDone() {
-  const bool ok = s_modelErr.length() == 0;
-  JsonDocument res;
-  res["ok"] = ok;
-  if (ok) res["size"] = (uint32_t)StoryMode::modelSize();
-  else    res["error"] = s_modelErr;
-  sendJson(res, ok ? 200 : 400);
-}
-
-static void handleModelUpload() {
-  HTTPUpload& up = server.upload();
-  if (up.status == UPLOAD_FILE_START) {
-    s_modelErr = "";
-    // Written to a temporary name so a failed or half-finished upload cannot
-    // replace a model that currently works.
-    LittleFS.remove("/story.tmp");
-    // Fail now rather than after a minute of uploading into a full filesystem.
-    const size_t freeB = LittleFS.totalBytes() - LittleFS.usedBytes();
-    if (freeB < 320 * 1024) {
-      char why[80];
-      snprintf(why, sizeof(why), "only %u KB free on the filesystem, need ~300 KB",
-               (unsigned)(freeB / 1024));
-      s_modelErr = why;
-      return;
-    }
-    s_modelUp = LittleFS.open("/story.tmp", "w");
-    if (!s_modelUp) s_modelErr = "cannot open the filesystem for writing";
-  } else if (up.status == UPLOAD_FILE_WRITE) {
-    if (s_modelUp && s_modelUp.write(up.buf, up.currentSize) != up.currentSize)
-      s_modelErr = "filesystem full";
-  } else if (up.status == UPLOAD_FILE_END) {
-    if (s_modelUp) {
-      // Close before measuring. size() on a handle still open for writing does
-      // not account for whatever is still buffered, so asking it first reports
-      // a short file and rejects a perfectly good upload.
-      s_modelUp.close();
-
-      size_t n = 0;
-      char magic[4] = {0};
-      File f = LittleFS.open("/story.tmp", "r");
-      if (f) {
-        n = f.size();
-        f.read((uint8_t*)magic, 4);
-        f.close();
-      }
-      // Cheapest sanity check before it replaces anything: the magic and a
-      // plausible length. TinyLlm validates the rest when it loads.
-      if (s_modelErr.length()) {
-        // keep the earlier, more specific error
-      } else if (n < 1024 || memcmp(magic, "TLLM", 4) != 0) {
-        // Say what was actually seen: "not a .tll" is unhelpful when the file
-        // is fine and the device simply failed to store all of it.
-        char why[96];
-        snprintf(why, sizeof(why),
-                 "stored %u of %u bytes, starts %02x%02x%02x%02x (want TLLM)",
-                 (unsigned)n, (unsigned)up.totalSize, magic[0] & 0xFF,
-                 magic[1] & 0xFF, magic[2] & 0xFF, magic[3] & 0xFF);
-        s_modelErr = why;
-      } else {
-        LittleFS.remove("/story.tll");
-        if (!LittleFS.rename("/story.tmp", "/story.tll"))
-          s_modelErr = "could not replace the existing model";
-      }
-    }
-    LittleFS.remove("/story.tmp");
-  } else if (up.status == UPLOAD_FILE_ABORTED) {
-    if (s_modelUp) s_modelUp.close();
-    LittleFS.remove("/story.tmp");
-    s_modelErr = "upload aborted";
-  }
-  yield();
-}
-
-static void handleModelDelete() {
-  LittleFS.remove("/story.tll");
-  JsonDocument res;
-  res["ok"] = true;
-  sendJson(res);
-}
-#endif  // WITH_STORY
-
 // ---- captive portal -------------------------------------------------------
 static void handleNotFound() {
   if (netMode() == NET_AP) {
@@ -520,10 +417,6 @@ void webPortalBegin(Settings& settings) {
 #endif
   server.on("/notify", HTTP_POST, handleNotify);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
-#if WITH_STORY
-  server.on("/api/model", HTTP_POST, handleModelDone, handleModelUpload);
-  server.on("/api/model", HTTP_DELETE, handleModelDelete);
-#endif
 
   // Common captive-portal probe endpoints
   server.on("/generate_204", handleNotFound);
