@@ -139,8 +139,9 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <small class="hint">Ambient is meant to be watched rather than read, so it gets its own dwell instead of the carousel's. The other screens keep the shared one above.</small>
   </div>
   <div class="card"><h2>Screen</h2>
-   <label>Brightness: <span id="brVal"></span>%</label>
+   <label>Brightness: <span id="brVal"></span>% <span class="muted">(0 = screen off)</span></label>
    <input id="brightness" type="range" min="0" max="100" oninput="brVal.textContent=this.value">
+   <div class="muted" id="brNow" style="margin:6px 0 2px">Screen: -</div>
    <div class="chk"><input id="autoBrightness" type="checkbox"><label>Auto-brightness (light sensor on A0)</label></div>
    <label>Orientation</label>
    <select id="rotation"><option value="0">0&deg;</option><option value="1">90&deg;</option>
@@ -443,27 +444,42 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify',ambient:'ambient',flappy:'flappy'};
+// One row per feature: its tab/section id, the <select> value for "active
+// mode", and the carousel key. Everything that needs to name the features —
+// hiding a tab a build dropped, reading the ticks, writing them back — walks
+// this. It used to be three lists that had to agree, which is how the miner,
+// ambient and flappy ticks each shipped saving nothing.
+var FEATURES={
+ ticker :{mode:'stocks' ,car:'carouselTicker'},
+ usage  :{mode:'usage'  ,car:'carouselUsage'},
+ radar  :{mode:'radar'  ,car:'carouselRadar'},
+ miner  :{mode:'miner'  ,car:'carouselMiner'},
+ clock  :{mode:'clock'  ,car:'carouselClock'},
+ spotify:{mode:'spotify',car:'carouselSpotify'},
+ ambient:{mode:'ambient',car:'carouselAmbient'},
+ flappy :{mode:'flappy' ,car:'carouselFlappy'}};
 var TOUCHGPIOS=[4,0,12,27,33,32];
-var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify',ambient:'carouselAmbient',flappy:'carouselFlappy'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
  var sec=$(name); if(sec)sec.remove();
- var o=document.querySelector('#mode option[value="'+MODEOPT[name]+'"]'); if(o)o.remove();
- var c=$(CAROPT[name]); if(c)c.closest('.chk').remove();
+ var o=document.querySelector('#mode option[value="'+FEATURES[name].mode+'"]'); if(o)o.remove();
+ var c=$(FEATURES[name].car); if(c)c.closest('.chk').remove();
 }
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
- var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify','ambient','flappy'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ var f=c.features||{}; Object.keys(FEATURES).forEach(function(k){if(f[k]===false)hideFeat(k)});
  if(f.touch===false){var tb=document.querySelector('nav button[data-t="touch"]');if(tb)tb.remove();var ts=$('touch');if(ts)ts.remove();}
+ // No light sensor on this board: drop the tick rather than offer a setting
+ // nothing reads.
+ if(f.ldr===false){var ab=$('autoBrightness'); if(ab)ab.closest('.chk').remove();}
  var t=c.ticker||{}, u=c.usage||{};
  // shared
  ['apSsid','apPass','hostname'].forEach(function(k){$(k).value=c[k]!=null?c[k]:''});
  renderWifi(c.wifi||(c.staSsid?[{ssid:c.staSsid,passSet:c.staPassSet}]:[]));
  $('brightness').value=c.brightness; $('brVal').textContent=c.brightness;
  $('rotation').value=c.rotation;
- $('autoBrightness').checked=!!c.autoBrightness;
+ sc('autoBrightness',!!c.autoBrightness);
  $('backlightInverted').checked=!!c.backlightInverted;
  // header chip = which chip this firmware was built for
  var chipName={esp8266:'ESP8266',esp32c2:'ESP32-C2',esp32:'ESP32'}[c.chip]||'';
@@ -478,7 +494,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('nightLevel',ck.nightLevel!=null?ck.nightLevel:0); $('nlVal')&&($('nlVal').textContent=(ck.nightLevel!=null?ck.nightLevel:0));
  $('mode').value=c.mode||'stocks'; modeChanged();
  sv('carouselSec',c.carouselSec||30);
- Object.keys(CAROPT).forEach(function(k){sc(CAROPT[k],!!c[CAROPT[k]])});
+ Object.keys(FEATURES).forEach(function(k){sc(FEATURES[k].car,!!c[FEATURES[k].car])});
  // ticker slice
  T_TEXT.forEach(function(k){sv(k,t[k])});
  T_NUM.forEach(function(k){sv(k,t[k])});
@@ -576,7 +592,6 @@ function collect(){
   carouselSec:parseInt(gv('carouselSec'))||30,
   brightness:parseInt(gv('brightness'))||0,
   rotation:parseInt(gv('rotation')),
-  autoBrightness:gc('autoBrightness'),
   backlightInverted:gc('backlightInverted'),
   hostname:gv('hostname'), apSsid:gv('apSsid'), apPass:gv('apPass'),
   wifi:collectWifi()};
@@ -584,7 +599,11 @@ function collect(){
  // out here is how the miner tick went unsent for weeks, and then ambient and
  // flappy after it: the checkbox renders, reads back its saved value, and is
  // simply never posted, so it looks like it works and quietly does nothing.
- Object.keys(CAROPT).forEach(function(k){o[CAROPT[k]]=gc(CAROPT[k])});
+ Object.keys(FEATURES).forEach(function(k){o[FEATURES[k].car]=gc(FEATURES[k].car)});
+ // Only send a control the page is actually showing. On a board with no light
+ // sensor the tick is removed, and gc() would post a confident false over
+ // whatever was stored.
+ if($('autoBrightness')) o.autoBrightness=gc('autoBrightness');
  // ticker slice (only if compiled in)
  if($('ticker')){
   var t={colorInverted:gv('colorInverted')==='true',changeOnRange:gv('changeOnRange')==='true'};
@@ -700,6 +719,12 @@ function loadStatus(){j('/api/status').then(function(s){
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
  var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&C.clock.nightEnabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: NTP runs only when night mode is on':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
+ // What the backlight is actually set to and which rule chose it. A black
+ // screen is otherwise indistinguishable from a dead one.
+ var bn=$('brNow'); if(bn&&s.screen){var W={manual:'the slider above',night:'the night schedule',
+   nightMining:'night mining',blanked:'a double-tap on the lid',auto:'the light sensor'};
+  bn.textContent='Screen: '+s.screen.level+'% — set by '+(W[s.screen.why]||s.screen.why)+
+   (s.screen.inverted?', backlight active-low':'')+(s.screen.level===0?'  · nothing will be visible':'');}
  // Surface the result of a boot-time GitHub update (ESP8266) once on first load,
  // so a failure that happened across the reboot is visible even if the original
  // Update tab was closed. Don't clobber an in-progress check/update message.
@@ -731,11 +756,6 @@ function loadStatus(){j('/api/status').then(function(s){
     (m.state==='auth-failed'?kv('','<span style="color:var(--red)">The pool refused this address, so submitting is stopped. Check the BTC address and worker name in the Miner tab.</span>'):'')+
     kv('Shares','accepted '+m.accepted+' / sent '+m.shares+(m.rejected?' / <span style="color:var(--red)">rejected '+m.rejected+'</span>':''))+
     (m.badDigests?kv('Bad digests',m.badDigests+' <span class="muted">caught by the software recheck and discarded &mdash; not an error you need to act on</span>'):'')+
-    (m.badSample?kv('&nbsp;&nbsp;got','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.got)+'</code>')+
-                 kv('&nbsp;&nbsp;want','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.want)+'</code>')+
-                 kv('&nbsp;&nbsp;1st hash','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.mid)+'</code>')+
-                 kv('&nbsp;&nbsp;re-read','<code style="font-size:11px;word-break:break-all">'+esc(m.badSample.reread)+'</code>')+
-                 kv('&nbsp;&nbsp;nonce','<code>'+esc(('0000000'+(m.badSample.nonce>>>0).toString(16)).slice(-8))+'</code>'):'')+
     kv('Best share',fmtDiff(m.bestDiff))+kv('Pool difficulty',fmtDiff(m.poolDiff))+
     kv('Jobs',m.jobs)+kv('Total hashes',fmtHash(m.hashes).replace('/s',''))+
     kv('Mining for',fmtUp(m.uptime));

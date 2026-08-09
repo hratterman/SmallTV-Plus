@@ -92,21 +92,15 @@ static void clearJob() {
 // Hash worker
 // ---------------------------------------------------------------------------
 #if MINER_HAS_SHA_HW
-// Record a digest the SHA peripheral got wrong. The first one of the run is
-// kept in full alongside what software expected, because the difference between
-// the two identifies the fault where a count alone cannot.
-static void hwBadDigest(uint32_t nonce, const uint8_t* got, const uint8_t* want,
-                        const uint8_t* mid, const uint8_t* reread) {
+// Record a digest the SHA peripheral got wrong. Every candidate is rechecked in
+// software before it can be submitted, so this is a health counter, not an
+// error path: non-zero means the engine is returning garbage and the recheck is
+// catching it. The full got/want/re-read dump that used to live here was
+// scaffolding for one investigation (DPORT reads racing another bus master, see
+// MinerShaHw.cpp) and went when the fault did.
+static void hwBadDigest(uint32_t nonce) {
   lockTake();
   s_stats.badDigests++;
-  if (!s_stats.badSampled) {
-    s_stats.badSampled = true;
-    s_stats.badNonce = nonce;
-    memcpy(s_stats.badGot, got, 32);
-    memcpy(s_stats.badWant, want, 32);
-    memcpy(s_stats.badMid, mid, 32);
-    memcpy(s_stats.badReread, reread, 32);
-  }
   lockGive();
   Serial.printf("[miner] hw digest mismatch at nonce %08lx\n", (unsigned long)nonce);
 }
@@ -230,19 +224,7 @@ static void minerWorkerTask(void* arg) {
           memcpy(work.header + 76, &nonce, 4);
           minerSha256dFromMidstate(work.midstate, work.header + 64, check);
           if (memcmp(check, hash, 32) != 0) {
-            // Also keep the intermediate. If the engine's answer turns out to
-            // be this rather than the double hash, the read is landing before
-            // the second load and TEXT still holds the first hash's digest.
-            uint8_t inter[32];
-            minerSha256(work.header, 80, inter);
-            // And ask the engine again. Nothing has touched it since, so its
-            // registers still hold this nonce's answer: if the second read
-            // gives what software expected, the engine computed correctly and
-            // the *read* was at fault, which is the one thing the bytes alone
-            // cannot distinguish.
-            uint8_t again[32];
-            minerHwRereadDigest(again);
-            hwBadDigest(nonce, hash, check, inter, again);
+            hwBadDigest(nonce);
             solved = false;
           }
         }
@@ -308,7 +290,7 @@ static void publishWork(const MinerWork& w, double poolDiff) {
   lockTake();
   s_work = w;
   s_poolDiff = poolDiff;
-  s_workSeq++;                 // hands the new job to the workers
+  s_workSeq = s_workSeq + 1;   // hands the new job to the workers
   s_nonceCursor = 0;
   s_solHead = s_solTail = 0;   // solutions for the old job are unsubmittable
   lockGive();
@@ -621,7 +603,7 @@ static void storeConfig(const Settings& s) {
   s_cfg.host = s.miner.poolHost;
   s_cfg.port = s.miner.poolPort;
   s_cfg.user = user;
-  s_cfg.epoch++;
+  s_cfg.epoch = s_cfg.epoch + 1;
   s_engineHybrid = (s.miner.engine == MINER_ENGINE_HYBRID);
   s_stats.configured = s_cfg.configured;
   strlcpy(s_stats.poolHost, s.miner.poolHost.c_str(), sizeof(s_stats.poolHost));
@@ -654,12 +636,6 @@ void minerCoreApplyConfig(const Settings& s) {
   if (!s_lock) return;
   storeConfig(s);
   if (s_cfg.configured) ensureTasks();
-}
-
-void minerCoreReportHwFault(const char* why) {
-  Serial.printf("[miner] hardware SHA disabled: %s\n", why ? why : "unspecified");
-  s_hwFaulted = true;
-  if (s_lock) { lockTake(); s_stats.hwFaulted = true; lockGive(); }
 }
 
 void minerCoreSnapshot(MinerStats& out) {

@@ -135,7 +135,6 @@ bool mascotTick() {
 
 const uint8_t*  mascotCells()   { return mascot_anims[s_curAnim].frames[s_curFrame]; }
 const uint16_t* mascotPalette() { return mascot_anims[s_curAnim].palette; }
-const char*     mascotName()    { return mascot_anims[s_curAnim].name; }
 
 const uint8_t*  mascotIdleCells()   { return mascot_anims[0].frames[0]; }
 const uint16_t* mascotIdlePalette() { return mascot_anims[0].palette; }

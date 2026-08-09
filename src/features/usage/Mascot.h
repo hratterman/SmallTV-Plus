@@ -24,7 +24,6 @@ bool mascotTick();                      // advance frames/anim; true if somethin
 // Current frame, for the renderer.
 const uint8_t*  mascotCells();          // 400 cells (20x20) in PROGMEM — read with pgm_read_byte
 const uint16_t* mascotPalette();        // MASCOT_PALETTE_SIZE RGB565 entries (RAM, index directly)
-const char*     mascotName();           // current animation name (debug)
 
 // A fixed calm idle pose, for the small header logo on the stats screen. Lets
 // Display reuse the frame data without re-including (and re-instantiating) it.

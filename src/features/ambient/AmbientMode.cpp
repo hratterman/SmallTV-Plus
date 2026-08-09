@@ -28,9 +28,11 @@ static inline uint32_t xr(uint32_t* s) {
 
 void AmbientMode::begin(const Settings& s) { invalidate(s); }
 
+// Repaint, but stay on the pattern that is running. Resetting to Life here
+// meant every unrelated save — a ticker symbol, a WiFi password — yanked the
+// screen back to the first pattern, since the web portal invalidates every mode.
 void AmbientMode::invalidate(const Settings& s) {
   needFull_ = true;
-  pattern_ = 0;
 }
 
 uint16_t AmbientMode::dwellSec(const Settings& s) const {
@@ -91,7 +93,10 @@ void AmbientMode::startPattern(const Settings& s) {
       rainSpd_[i] = (uint8_t)(2 + xr(&rng_) % 5);
     }
   } else if (pattern_ == PAT_SPARKS) {
-    for (int i = 0; i < AMB_SPARKS; i++) sparks_[i].life = 0;
+    for (int i = 0; i < AMB_SPARKS; i++) {
+      sparks_[i].life = 0;
+      sparks_[i].px = sparks_[i].py = -1;   // nothing on screen to erase yet
+    }
     sparkTimer_ = 0;
   }
   patternSince_ = millis();
@@ -133,10 +138,7 @@ void AmbientMode::stepLife() {
 
   // A board that has stopped moving is not ambient, it is a still image. Reseed
   // rather than leave it, and cap the run so long oscillators still turn over.
-  if (++gen_ > 900 || changes < 6) {
-    pattern_ = PAT_LIFE;
-    needFull_ = true;
-  }
+  if (++gen_ > 900 || changes < 6) needFull_ = true;   // reseed the same pattern
 }
 
 // Classic sum-of-sines field, computed at half resolution and pushed a row at a
@@ -244,29 +246,55 @@ void AmbientMode::stepRain() {
   }
 }
 
-// Fireworks. Particles carry their own previous position so each one erases
-// exactly the pixel it left, which keeps a burst to a couple of hundred pixels.
+// Dim an RGB565 colour toward black by shifting each channel down. Used for the
+// tail of a particle's life, so a shell settles instead of switching off.
+static inline uint16_t dim565(uint16_t c, uint8_t shift) {
+  const uint16_t r = ((c >> 11) & 0x1F) >> shift;
+  const uint16_t g = ((c >> 5) & 0x3F) >> shift;
+  const uint16_t b = (c & 0x1F) >> shift;
+  return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+// Fireworks. Each particle erases exactly the block it left, so a burst costs a
+// few hundred pixels a frame rather than a repaint.
+//
+// The shape is the whole point and the old version got it wrong: velocities
+// came from two independent `rand() % 15` draws, which fills a *square*, not a
+// ring — the corners are 1.4x faster than the axes and the interior is full of
+// near-stationary particles. A real shell is a spherical burst seen flat, so
+// emit on a circle: even angular spread, one speed for the shell with a little
+// jitter, and gravity to pull the ring into a droop.
 void AmbientMode::stepSparks() {
   Arduino_GFX* gfx = gfxDev();
   if (!gfx) return;
 
   if (sparkTimer_) sparkTimer_--;
   if (!sparkTimer_) {
-    sparkTimer_ = (uint16_t)(25 + xr(&rng_) % 40);
-    const int bx = 40 + (int)(xr(&rng_) % (TFT_WIDTH - 80));
-    const int by = 50 + (int)(xr(&rng_) % (TFT_HEIGHT - 120));
-    // One hue per burst reads as a firework; mixed colours read as confetti.
+    sparkTimer_ = (uint16_t)(30 + xr(&rng_) % 45);
+    const int bx = 50 + (int)(xr(&rng_) % (TFT_WIDTH - 100));
+    const int by = 45 + (int)(xr(&rng_) % (TFT_HEIGHT - 130));
+    // One hue per shell reads as a firework; mixed colours read as confetti.
     static const uint16_t kHue[6] = {0xF800, 0xFD20, 0xFFE0, 0x07E0, 0x05FF, 0xF81F};
     const uint16_t col = kHue[xr(&rng_) % 6];
+    // 2.2..3.6 px per frame, in 8.8. Big enough to throw a visible ring in half
+    // a second, small enough that the ring stays a ring while it expands.
+    const int32_t speed = 560 + (int32_t)(xr(&rng_) % 360);
+    const float   spin  = (float)(xr(&rng_) % 628) * 0.01f;   // random ring phase
+    const uint8_t life  = (uint8_t)(30 + xr(&rng_) % 16);
     int made = 0;
-    for (int i = 0; i < AMB_SPARKS && made < 18; i++) {
+    for (int i = 0; i < AMB_SPARKS && made < AMB_BURST; i++) {
       if (sparks_[i].life) continue;
       Spark& p = sparks_[i];
-      p.x = p.px = (int16_t)bx;
-      p.y = p.py = (int16_t)by;
-      p.vx = (int8_t)((int)(xr(&rng_) % 15) - 7);
-      p.vy = (int8_t)((int)(xr(&rng_) % 15) - 9);
-      p.life = (uint8_t)(18 + xr(&rng_) % 14);
+      const float a = spin + (float)made * (6.2832f / AMB_BURST);
+      // +/- 12% on the radius keeps the ring from looking like a stencil.
+      const int32_t sp = speed * (int32_t)(88 + xr(&rng_) % 25) / 100;
+      p.x = (int16_t)(bx << 8);
+      p.y = (int16_t)(by << 8);
+      p.vx = (int16_t)(cosf(a) * sp);
+      p.vy = (int16_t)(sinf(a) * sp);
+      p.px = p.py = -1;
+      p.life = life;
+      p.age = 0;
       p.col = col;
       made++;
     }
@@ -275,20 +303,33 @@ void AmbientMode::stepSparks() {
   for (int i = 0; i < AMB_SPARKS; i++) {
     Spark& p = sparks_[i];
     if (!p.life) continue;
-    if (p.px >= 0 && p.px < TFT_WIDTH && p.py >= 0 && p.py < TFT_HEIGHT)
-      gfx->drawPixel(p.px, p.py, C_BLACK);
-    p.px = p.x; p.py = p.y;
+
+    if (p.px >= 0)
+      gfx->fillRect(p.px, p.py, AMB_SPARK_PX, AMB_SPARK_PX, C_BLACK);
+
     p.x = (int16_t)(p.x + p.vx);
     p.y = (int16_t)(p.y + p.vy);
-    p.vy = (int8_t)(p.vy + 1);            // gravity
-    if (--p.life == 0 || p.x < 0 || p.x >= TFT_WIDTH || p.y < 0 || p.y >= TFT_HEIGHT) {
+    p.vy = (int16_t)(p.vy + 14);                    // gravity, 8.8
+    p.vx = (int16_t)(p.vx - (p.vx >> 5));           // a little air drag
+    p.vy = (int16_t)(p.vy - (p.vy >> 5));
+    p.age++;
+
+    const int ix = p.x >> 8, iy = p.y >> 8;
+    if (--p.life == 0 || ix < 0 || ix > TFT_WIDTH - AMB_SPARK_PX ||
+        iy < 0 || iy > TFT_HEIGHT - AMB_SPARK_PX) {
       p.life = 0;
-      if (p.px >= 0 && p.px < TFT_WIDTH && p.py >= 0 && p.py < TFT_HEIGHT)
-        gfx->drawPixel(p.px, p.py, C_BLACK);
+      p.px = p.py = -1;
       continue;
     }
-    // Fade to dark over the last few frames rather than blinking out.
-    gfx->drawPixel(p.x, p.y, p.life > 6 ? p.col : 0x8410);
+
+    // Bright while it climbs, cooling over the last third: a shell that fades
+    // reads as burning out, one that vanishes reads as a dropped frame.
+    const uint16_t c = p.life > 12 ? p.col
+                     : p.life > 6  ? dim565(p.col, 1)
+                                   : dim565(p.col, 2);
+    gfx->fillRect(ix, iy, AMB_SPARK_PX, AMB_SPARK_PX, c);
+    p.px = (int16_t)ix;
+    p.py = (int16_t)iy;
   }
 }
 

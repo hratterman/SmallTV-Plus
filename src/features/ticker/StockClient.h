@@ -11,7 +11,6 @@ void  stocksForceRefresh();                 // poll ASAP (e.g. after config save
 
 uint8_t          stocksCount();
 const StockData& stockAt(uint8_t i);
-bool             stocksAnyValid();
 
 // Effective change for display. With ticker.changeOnRange it is the move over
 // the charted timeframe (live price vs the first spark point) so the sign

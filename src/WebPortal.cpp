@@ -27,6 +27,8 @@ extern void appInvalidate();
 extern const char* appResetReason();   // last reset reason (diagnostics)
 extern void appApplyBrightness();   // main.cpp: re-resolve effective brightness now
 extern uint32_t appLoopMaxMs();     // worst loop pass since the last read
+extern uint8_t     appBrightnessLevel();  // what is actually on the panel
+extern const char* appBrightnessWhy();    // which rule chose it
 
 static WebServerClass server(80);
 static Settings*        S = nullptr;
@@ -66,6 +68,9 @@ static void handleGetConfig() {
   feat["radar"]  = (bool)WITH_RADAR;
   feat["miner"]  = (bool)WITH_MINER;
   feat["touch"]   = (bool)HAS_TOUCH;
+  // No light sensor on the ESP32 boards, so the auto-brightness tick was a
+  // control that saved a setting nothing ever read. The page drops it.
+  feat["ldr"]     = (bool)HAS_LDR;
   feat["clock"]   = (bool)WITH_CLOCK;
   feat["spotify"] = (bool)WITH_SPOTIFY;
   feat["ambient"] = (bool)WITH_AMBIENT;
@@ -107,6 +112,17 @@ static void handleStatus() {
   o["night"]     = clockNightActive();   // dimming now
   o["nightHeld"] = clockNightHeld();      // in the window but waiting for a fresh NTP sync
   o["clockFresh"] = clockTrusted();       // last NTP sync within the trust window
+
+  // A dark screen has five possible causes — manual level, the night schedule,
+  // night mining, a double-tap blank, or an inverted backlight — and from the
+  // outside they look identical. Say which one is in force and at what level,
+  // so "the screen went black" is one request to answer instead of a guess.
+  {
+    JsonObject sc = o["screen"].to<JsonObject>();
+    sc["level"]    = appBrightnessLevel();
+    sc["why"]      = appBrightnessWhy();
+    sc["inverted"] = S->backlightInverted;
+  }
 
 #if WITH_TICKER
   JsonArray arr = o["tickers"].to<JsonArray>();
@@ -151,22 +167,8 @@ static void handleStatus() {
     // Solutions the software path could not reproduce. Non-zero means the
     // hardware engine is returning bad digests, not that the pool is unhappy.
     m["unverified"] = ms.unverified;
-    // Every candidate the engine raised and got wrong, plus the first one in
-    // full: the difference between got and want names the fault directly.
+    // Candidates the engine got wrong, caught by the software recheck.
     m["badDigests"] = ms.badDigests;
-    if (ms.badSampled) {
-      JsonObject b = m["badSample"].to<JsonObject>();
-      char hex[65];
-      b["nonce"] = ms.badNonce;
-      for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badGot[i]);
-      b["got"] = hex;
-      for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badWant[i]);
-      b["want"] = hex;
-      for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badMid[i]);
-      b["mid"] = hex;
-      for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", ms.badReread[i]);
-      b["reread"] = hex;
-    }
     m["bestDiff"]  = ms.bestDiff;
     m["poolDiff"]  = ms.poolDiff;
     m["uptime"]    = ms.uptimeSec;

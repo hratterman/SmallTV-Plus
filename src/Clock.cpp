@@ -43,13 +43,13 @@ static bool clockWanted(const Settings& s) {
   if (s.clock.nightEnabled) return true;
 #if WITH_CLOCK
   if (s.mode == MODE_CLOCK) return true;
-  if (s.mode == MODE_CAROUSEL && s.carouselClock) return true;
+  if (s.mode == MODE_CAROUSEL && s.carouselHas(MODE_CLOCK)) return true;
 #if HAS_TOUCH
   // With a pad fitted, a tap reaches any ticked mode whatever s.mode says, so
   // gating SNTP on the configured mode meant tapping round to the clock showed
   // a clock that had never been told the time. Selecting any other mode as the
   // default was enough to do it — ambient was just how it got noticed.
-  if (s.carouselClock) return true;
+  if (s.carouselHas(MODE_CLOCK)) return true;
 #endif
 #endif
   return false;
@@ -130,7 +130,9 @@ String clockTimeStr() {
   struct tm t;
   if (!clockNow(t)) return String();
   char b[20];
-  snprintf(b, sizeof(b), "%04d-%02d-%02d %02d:%02d",
-           t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+  snprintf(b, sizeof(b), "%04u-%02u-%02u %02u:%02u",
+           (unsigned)(t.tm_year + 1900) % 10000u, (unsigned)(t.tm_mon + 1) % 13u,
+           (unsigned)t.tm_mday % 32u, (unsigned)t.tm_hour % 24u,
+           (unsigned)t.tm_min % 60u);
   return String(b);
 }

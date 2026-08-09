@@ -282,8 +282,10 @@ static void drawPortfolio(uint8_t pageIndex, uint8_t pageCount, const Settings& 
   for (uint8_t k = 0; k < curN && y <= 214; k++) {
     char vbuf[12];
     fmtVal(totV[k], vbuf, sizeof(vbuf));
+    // Bounded fields: the currency tag is at most 5 characters and the value
+    // at most 11, which the formatter cannot work out from the array types.
     char line[20];
-    snprintf(line, sizeof(line), "%s%s", totCur[k], vbuf);
+    snprintf(line, sizeof(line), "%.5s%.11s", totCur[k], vbuf);
     gfx->setTextSize(2);
     gfx->setTextColor(C_WHITE);
     gfx->setCursor(4, y);

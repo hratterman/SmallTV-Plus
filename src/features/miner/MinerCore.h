@@ -40,19 +40,10 @@ struct MinerStats {
   uint32_t rejected;       // shares the pool rejected
   uint32_t unverified;     // solutions software could not reproduce -> not sent
 
-  // First mismatching digest of the run, kept so the *shape* of the corruption
-  // can be read off rather than guessed at. All zeroes means a read crossing
-  // the load; equal to the previous nonce's digest means stale TEXT; a single
-  // hash of the header means the second load never landed; noise means a
-  // timing or DPORT-contention fault. The rate matters too, which is why
-  // badDigests counts candidates rather than submissions.
+  // Candidates the hardware engine got wrong, caught by the software recheck
+  // before submission. Should stay at zero; non-zero is an engine fault, not a
+  // pool problem.
   uint32_t badDigests;
-  bool     badSampled;
-  uint32_t badNonce;
-  uint8_t  badGot[32];     // what the engine returned
-  uint8_t  badWant[32];    // what software says it should have been
-  uint8_t  badMid[32];     // the *first* of the two hashes, in software
-  uint8_t  badReread[32];  // the engine's own registers, read again after idle
   uint64_t totalHashes;    // lifetime hashes this run
   uint32_t hashrate;       // H/s, updated ~1 Hz
   uint32_t uptimeSec;      // seconds since the engine started
@@ -73,9 +64,5 @@ struct MinerStats {
 void minerCoreBegin(const Settings& s);
 void minerCoreApplyConfig(const Settings& s);   // pool/address changed -> reconnect
 void minerCoreSnapshot(MinerStats& out);
-
-// Force the hardware path off for the rest of the run (software keeps mining).
-// Used when the engine is left in a state the production loop could hang on.
-void minerCoreReportHwFault(const char* why);
 
 #endif  // WITH_MINER

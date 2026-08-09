@@ -145,18 +145,17 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   if (pr != JDR_OK) {
     snprintf(s_status, sizeof(s_status), "jd_prepare err %d", (int)pr);
   } else {
-    const uint8_t scale = albumArtScaleFor((int)jd.width);
+    const AlbumArtFit fit = albumArtFit((int)jd.width);
     // Centre whatever size that lands on, so a cover a couple of pixels under
     // the box sits in the middle rather than against the top-left corner.
-    const int drawn = (int)(jd.width >> scale);
-    if (drawn < SPOTIFY_ART_PX) {
-      ctx.ox = (int16_t)(x + (SPOTIFY_ART_PX - drawn) / 2);
-      ctx.oy = (int16_t)(y + (SPOTIFY_ART_PX - drawn) / 2);
+    if (fit.px < SPOTIFY_ART_PX) {
+      ctx.ox = (int16_t)(x + (SPOTIFY_ART_PX - fit.px) / 2);
+      ctx.oy = (int16_t)(y + (SPOTIFY_ART_PX - fit.px) / 2);
     }
-    const JRESULT dr = jd_decomp(&jd, artOut, scale);
+    const JRESULT dr = jd_decomp(&jd, artOut, fit.scale);
     ok = (dr == JDR_OK);
     if (ok) snprintf(s_status, sizeof(s_status), "ok %dx%d /%d",
-                     (int)jd.width, (int)jd.height, 1 << scale);
+                     (int)jd.width, (int)jd.height, 1 << fit.scale);
     else    snprintf(s_status, sizeof(s_status), "jd_decomp err %d", (int)dr);
   }
 

@@ -61,6 +61,38 @@ def check(html):
     if dupes:
         fail("duplicate top-level function(s): %s" % ", ".join(dupes))
 
+    # Every element id the script reaches for must exist in the markup. The
+    # helpers are all null-safe by design, so a typo or a control that was never
+    # added produces no error at all: the field silently reads back nothing and
+    # silently saves nothing. That is the exact shape of the miner/ambient/flappy
+    # carousel bugs, and it is cheap to make impossible.
+    ids = set(re.findall(r'\bid="([^"]+)"', html))
+    used = set(re.findall(r"""\b(?:\$|gv|gc|sv|sc)\(['"]([A-Za-z_$][\w$-]*)['"]""", js))
+    missing = sorted(used - ids)
+    if missing:
+        fail("script references element id(s) the page does not define: %s"
+             % ", ".join(missing))
+
+    # The check above only sees string literals, and the FEATURES table is
+    # reached by computed lookup — which is precisely where this has gone wrong
+    # before. Check the table's own columns: every carousel key must be a real
+    # checkbox, and every mode value a real option in the mode <select>.
+    tbl = re.search(r"var FEATURES\s*=\s*\{(.*?)\n?\};", js, re.S)
+    if not tbl:
+        fail("the FEATURES table is gone or no longer matches its expected shape")
+    rows = re.findall(r"(\w+)\s*:\s*\{\s*mode\s*:\s*'([^']+)'\s*,\s*car\s*:\s*'([^']+)'\s*\}",
+                      tbl.group(1))
+    if not rows:
+        fail("the FEATURES table parsed as empty")
+    options = set(re.findall(r'<option value="([^"]*)"', html))
+    for name, mode, car in rows:
+        if car not in ids:
+            fail("FEATURES.%s.car is '%s', but no element has that id — the tick "
+                 "would render nothing and save nothing" % (name, car))
+        if mode not in options:
+            fail("FEATURES.%s.mode is '%s', but the mode <select> offers no such "
+                 "option" % (name, mode))
+
     node = shutil.which("node")
     if not node:
         print("webui: node not found, skipped the syntax parse "

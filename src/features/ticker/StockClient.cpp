@@ -37,12 +37,6 @@ void stocksForceRefresh() {
 uint8_t          stocksCount()        { return g_count; }
 const StockData& stockAt(uint8_t i)   { return g_stocks[i]; }
 
-bool stocksAnyValid() {
-  for (uint8_t i = 0; i < g_count; i++)
-    if (g_stocks[i].valid) return true;
-  return false;
-}
-
 bool stockDisplayChange(const StockData& d, const TickerSettings& t,
                         float& chg, float& pct, bool* onRange) {
   if (t.changeOnRange && d.sparkCount >= 1 && d.spark[0] > 0 && d.price > 0) {

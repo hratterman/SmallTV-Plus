@@ -192,8 +192,14 @@ struct Settings {
 
   // --- Carousel (mode == MODE_CAROUSEL): dwell + which features rotate ---
   uint16_t carouselSec;
-  bool carouselTicker, carouselUsage, carouselRadar, carouselMiner, carouselClock;
-  bool carouselSpotify, carouselAmbient, carouselFlappy;
+  // One bit per MODE_*. With a pad fitted these same ticks also govern which
+  // modes a tap steps through, so a mode that is off here is unreachable both
+  // ways. The bit <-> config.json key mapping is the kCarousel table in
+  // Settings.cpp; nothing outside that table names an individual mode.
+  uint16_t carouselMask;
+  bool carouselHas(uint8_t modeConst) const {
+    return (carouselMask & (uint16_t)(1u << modeConst)) != 0;
+  }
 
   // --- Shared HTTP / display ---
   uint16_t httpTimeout; // ms

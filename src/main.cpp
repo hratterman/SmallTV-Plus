@@ -94,25 +94,11 @@ static bool   g_displayOff   = false;
 static size_t   g_carIdx = 0;
 static uint32_t g_carSwitch = 0;
 
-static bool carouselHas(const Settings& s, const DisplayMode* m) {
-  switch (m->modeConst()) {
-    case MODE_STOCKS: return s.carouselTicker;
-    case MODE_USAGE:  return s.carouselUsage;
-    case MODE_RADAR:  return s.carouselRadar;
-    case MODE_MINER:  return s.carouselMiner;
-    case MODE_CLOCK:  return s.carouselClock;
-    case MODE_SPOTIFY: return s.carouselSpotify;
-    case MODE_AMBIENT: return s.carouselAmbient;
-    case MODE_FLAPPY:  return s.carouselFlappy;
-    default:          return true;
-  }
-}
-
 // Advance g_carIdx to the next ticked mode (stays put if none other is ticked).
 static void carouselNext(const Settings& s) {
   for (size_t hop = 1; hop <= kModeCount; hop++) {
     size_t cand = (g_carIdx + hop) % kModeCount;
-    if (!carouselHas(s, kModes[cand])) continue;
+    if (!s.carouselHas(kModes[cand]->modeConst())) continue;
     if (cand != g_carIdx) {
       g_carIdx = cand;
       kModes[cand]->wake(s);
@@ -147,7 +133,7 @@ static DisplayMode* activeMode(const Settings& s) {
 #endif
   if (s.mode == MODE_CAROUSEL && kModeCount > 0) {
     if (g_carSwitch == 0) g_carSwitch = millis();
-    if (!carouselHas(s, kModes[g_carIdx])) carouselNext(s);   // settings changed
+    if (!s.carouselHas(kModes[g_carIdx]->modeConst())) carouselNext(s);   // settings changed
     // A mode in the middle of something keeps the screen; the dwell timer
     // restarts so it gets a full turn once it lets go.
     if (kModes[g_carIdx]->holdsScreen()) {
@@ -171,10 +157,6 @@ static DisplayMode* activeMode(const Settings& s) {
 // does nothing but hash. A tap wakes the screen for a while so you can look at
 // it without waiting for morning.
 static uint32_t g_nightWakeUntil = 0;
-
-// True while the active mode is mid-something it should not be interrupted
-// during. Gates the background polling that would otherwise stall a frame.
-static bool g_holdingScreen = false;
 
 // Longest single pass through loop(), in ms, since it was last read. Anything
 // animating shows a stall as a freeze, and this says whether one happened and
@@ -202,22 +184,25 @@ static String   g_resetReason;        // why the chip last reset (diagnostics)
 static bool     g_safeMode = false;   // last reset was an exception -> don't re-enter the crash
 static char     g_epcStr[16] = "";
 static char     g_addrStr[16] = "";
-static int g_lastBr = -1;        // last effective brightness written (-1 = none yet)
+static int  g_lastBr  = -1;      // last effective brightness written (-1 = none yet)
+static bool g_lastInv = false;   // ...and the polarity it was written with
+static const char* g_brWhy = "manual";   // which rule picked it (diagnostics)
 #if HAS_LDR
 static uint32_t g_lastAutoBr = 0;
 static uint8_t  g_ldrCache   = DEFAULT_BRIGHTNESS;   // last LDR reading (2 s cadence)
 #endif
 
 // Single brightness resolver: night mode overrides auto-brightness overrides the
-// manual level. Only writes the PWM when the effective target changes.
+// manual level. Also records *why*, because a dark screen has five possible
+// causes and they are indistinguishable from the outside (see /api/status).
 static uint8_t appEffectiveBrightness() {
 #if HAS_TOUCH
-  if (g_displayOff) return 0;          // double-tap wins over the night schedule
+  if (g_displayOff) { g_brWhy = "blanked"; return 0; }   // double-tap wins over the schedule
 #endif
   // Fully dark, not merely dim — except for a pushed banner, which is allowed to
   // light the screen to the night level like it would on any other night.
-  if (nightMiningActive(g_settings) && !notifyActive()) return 0;
-  if (clockNightActive()) return g_settings.clock.nightLevel;
+  if (nightMiningActive(g_settings) && !notifyActive()) { g_brWhy = "nightMining"; return 0; }
+  if (clockNightActive()) { g_brWhy = "night"; return g_settings.clock.nightLevel; }
 #if HAS_LDR
   if (g_settings.autoBrightness) {
     if (millis() - g_lastAutoBr > 2000) {
@@ -225,19 +210,31 @@ static uint8_t appEffectiveBrightness() {
       int raw = analogRead(LDR_PIN);
       g_ldrCache = (uint8_t)constrain(raw * 100 / ADC_MAX, 5, 100);
     }
+    g_brWhy = "auto";
     return g_ldrCache;
   }
 #endif
+  g_brWhy = "manual";
   return g_settings.brightness;
 }
 
+// The PWM write is skipped when nothing changed, so the cache has to cover
+// every input to it. It used to hold only the percentage, which meant flipping
+// "backlight is active-low" was a no-op until some *other* thing moved the
+// number — the setting appeared not to work, then took effect later out of
+// nowhere. Both inputs, or the cache lies.
 void appApplyBrightness() {
-  uint8_t t = appEffectiveBrightness();
-  if ((int)t != g_lastBr) {
-    g_lastBr = t;
-    gfxSetBrightness(t, g_settings.backlightInverted);
-  }
+  const uint8_t t = appEffectiveBrightness();
+  const bool inv = g_settings.backlightInverted;
+  if ((int)t == g_lastBr && inv == g_lastInv) return;
+  g_lastBr = t;
+  g_lastInv = inv;
+  gfxSetBrightness(t, inv);
 }
+
+// For /api/status: the level actually on the panel and the rule that chose it.
+uint8_t     appBrightnessLevel() { return (uint8_t)(g_lastBr < 0 ? 0 : g_lastBr); }
+const char* appBrightnessWhy()   { return g_brWhy; }
 
 // Exposed to the web portal (/api/status) so the last reset reason is visible.
 const char* appResetReason() { return g_resetReason.c_str(); }
@@ -267,7 +264,7 @@ void appNextMode() {
     if (kModes[i] == cur) { from = i; break; }
   for (size_t hop = 1; hop <= kModeCount; hop++) {
     const size_t cand = (from + hop) % kModeCount;
-    if (!carouselHas(g_settings, kModes[cand])) continue;
+    if (!g_settings.carouselHas(kModes[cand]->modeConst())) continue;
     g_modeOverride = (int8_t)cand;
     kModes[cand]->wake(g_settings);
     return;
@@ -484,11 +481,7 @@ void loop() {
     s_lastMode = m;
     m->wake(g_settings);
   }
-  if (m) {
-    m->service(g_settings);
-    // Read after servicing: a one-frame lag is irrelevant to a ten-second poll.
-    g_holdingScreen = m->holdsScreen();
-  }
+  if (m) m->service(g_settings);
 
   delay(5);
 }

@@ -8,9 +8,10 @@ This repo is my fork of giovi321/smalltv-mod, open firmware for a GeekMagic-styl
 
 ## Status
 
-Miner: **done through M5.** Hybrid engine (SHA peripheral on core 0, software on
-core 1) at ~375 KH/s, up from ~50 KH/s dual-core software. Every optimization
-was measured on the device, and the ones that lost are recorded in
+Miner: **done through M5 and proven end to end** — a share accepted by
+solo.ckpool.org at difficulty 1.00. Hybrid engine (SHA peripheral on core 0,
+software on core 1) at ~375 KH/s, up from ~50 KH/s dual-core software. Every
+optimization was measured on the device, and the ones that lost are recorded in
 `MinerShaHw.cpp` so nobody retries them.
 
 The 1043 KH/s target turned out not to be a like-for-like number. Three
@@ -23,17 +24,49 @@ floor for this silicon is ~447 KH/s and we are at ~84% of it.
 
 Phase 2: **B1-B3 done.** The lid pad is discovered from the web UI (Touch tab)
 rather than needing a diagnostic build, and tap / double-tap / long-press are
-wired globally. B4 is partly there: radar cycles its range on long-press, the
-other modes' context actions are no-ops behind an existing hook.
+wired globally. B4 is partly there: radar cycles its range on long-press,
+ambient steps patterns, flappy flaps.
 
-Phase 3: **notification flash done** (`POST /notify`). The rest is untouched.
+Phase 3: **notification flash done** (`POST /notify`). Four modes have landed
+beyond the original three: clock (SNTP wall time), Spotify now-playing with
+album art and auto-focus, ambient (five no-network patterns), and flappy bird
+on the lid pad. The rest of the backlog below is untouched.
 
-Flash budget: 93.3% of the OTA slot, ~102 KB free. It was 95.9% before a
-cleanup pass that gzipped the web UI (-33 KB), dropped the mining benchmark
-scaffolding (-13 KB), and replaced the fully unrolled software SHA with a
-compact midstate version (-25 KB, costing ~3% of hashrate that the hardware
-engine now dwarfs). Keep an eye on this: it is the binding constraint on every
-remaining feature, and `tools/gen_webui.py` means UI additions are nearly free.
+Flash budget: 93.7% of the OTA slot, ~99 KB free. It was 95.9% before a cleanup
+pass that gzipped the web UI (-33 KB), dropped the mining benchmark scaffolding
+(-13 KB) and replaced the fully unrolled software SHA with a compact midstate
+version (-25 KB). That last one cost ~27% of the software path, not the ~3%
+first claimed here — the arithmetic divided by the post-change total instead of
+the pre-change one. It was recovered by moving the hot functions to IRAM
+(`MINER_HOT` in MinerJob.h); the compact version stays. Keep an eye on this
+budget: it is the binding constraint on every remaining feature, and
+`tools/gen_webui.py` means UI additions are nearly free.
+
+## Invariants worth not relearning
+
+These are the failure modes this codebase actually produces, and the guards now
+in place against them. Adding a feature means touching the guard, not routing
+around it.
+
+- **One rule, one place.** A list written twice is the single largest source of
+  bugs here: the mode token ladders, the carousel ticks, the album-art descale
+  rule and the web UI's feature lists each shipped broken because one copy was
+  updated and the other was not. They are now single tables — `kModeTokens` and
+  `kCarousel` in `Settings.cpp`, `albumArtFit()` in `AlbumArt.h`, `FEATURES` in
+  `webui.html`. Add a row; do not add a branch.
+- **The page must parse.** A JS syntax error blanks every tab while the device
+  runs perfectly, including the tab you would use to flash a fix. That shipped
+  once. `tools/gen_webui.py` now fails the build on unbalanced tags, duplicate
+  top-level functions, unparseable JS (`node --check`), an element id the script
+  reaches for that the markup never defines, and a `FEATURES` row pointing at a
+  control or mode option that does not exist.
+- **Zero warnings.** Project sources build clean at `-Wall -Wextra` on all five
+  targets, enforced from `platformio.ini`. Two real bugs were sitting in that
+  noise. Keep it at zero or the next one hides too.
+- **Say why, not just what.** `/api/status` reports the resolved backlight level
+  *and the rule that chose it*, the worst loop time since last read, and the
+  album-art failure stage. Every one of those exists because a symptom was
+  otherwise indistinguishable from three other causes over a phone screen.
 
 ## Hardware facts (verified, do not re-derive)
 

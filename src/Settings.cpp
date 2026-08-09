@@ -358,7 +358,7 @@ void SpotifySettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
-// Touch slice
+// Ambient slice
 // ===========================================================================
 void AmbientSettings::setDefaults() {
   dwellSec   = DEFAULT_AMBIENT_DWELL_SEC;
@@ -378,6 +378,9 @@ void AmbientSettings::fromJson(JsonObjectConst o) {
   if (o["shuffle"].is<bool>())   shuffle = o["shuffle"];
 }
 
+// ===========================================================================
+// Touch slice
+// ===========================================================================
 void TouchSettings::setDefaults() {
   enabled   = true;
   gpio      = DEFAULT_TOUCH_GPIO;
@@ -399,6 +402,29 @@ void TouchSettings::fromJson(JsonObjectConst o) {
 // ===========================================================================
 // Top-level settings
 // ===========================================================================
+
+// Every mode the carousel can rotate through: the MODE_* constant, the
+// config.json key, and whether it is ticked out of the box. Adding a mode used
+// to mean editing the struct, the defaults, both JSON directions and the
+// dispatcher in main.cpp — five places, and missing any one of them left a
+// checkbox that renders, reads back its saved value, and does nothing. The
+// miner tick shipped that way, then ambient and flappy after it. One row now.
+static const struct {
+  uint8_t     mode;
+  const char* key;
+  bool        defOn;
+} kCarousel[] = {
+    {MODE_STOCKS,  "carouselTicker",  true},
+    {MODE_USAGE,   "carouselUsage",   true},
+    {MODE_RADAR,   "carouselRadar",   true},
+    {MODE_MINER,   "carouselMiner",   true},
+    {MODE_CLOCK,   "carouselClock",   true},
+    {MODE_SPOTIFY, "carouselSpotify", true},
+    {MODE_AMBIENT, "carouselAmbient", false},  // decoration, not information
+    {MODE_FLAPPY,  "carouselFlappy",  false},  // a game should never just appear
+};
+static_assert(MODE_FLAPPY < 16, "carouselMask is 16 bits wide");
+
 void Settings::setDefaults() {
   wifiCount = 0;
   for (uint8_t i = 0; i < MAX_WIFI_NETS; i++) {
@@ -413,10 +439,9 @@ void Settings::setDefaults() {
 
   mode = DEFAULT_MODE;
   carouselSec = DEFAULT_CAROUSEL_SEC;
-  carouselTicker = carouselUsage = carouselRadar = carouselMiner = carouselClock = true;
-  carouselSpotify = true;
-  carouselAmbient = false;   // opt-in: it is decoration, not information
-  carouselFlappy  = false;   // and a game should never just appear
+  carouselMask = 0;
+  for (const auto& e : kCarousel)
+    if (e.defOn) carouselMask |= (uint16_t)(1u << e.mode);
   httpTimeout = DEFAULT_HTTP_TIMEOUT;
 
   brightness = DEFAULT_BRIGHTNESS;
@@ -528,14 +553,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   // Mode + shared HTTP/display
   root["mode"]              = modeToken(s.mode);
   root["carouselSec"]       = s.carouselSec;
-  root["carouselTicker"]    = s.carouselTicker;
-  root["carouselUsage"]     = s.carouselUsage;
-  root["carouselRadar"]     = s.carouselRadar;
-  root["carouselMiner"]     = s.carouselMiner;
-  root["carouselClock"]     = s.carouselClock;
-  root["carouselSpotify"]   = s.carouselSpotify;
-  root["carouselAmbient"]   = s.carouselAmbient;
-  root["carouselFlappy"]    = s.carouselFlappy;
+  for (const auto& e : kCarousel) root[e.key] = s.carouselHas(e.mode);
   root["httpTimeout"]       = s.httpTimeout;
   root["brightness"]        = s.brightness;
   root["autoBrightness"]    = s.autoBrightness;
@@ -601,14 +619,12 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
     s.mode = modeFromToken(root["mode"].as<String>());
   }
   if (root["carouselSec"].is<int>())      s.carouselSec = constrain((int)root["carouselSec"], 5, 3600);
-  if (root["carouselTicker"].is<bool>())  s.carouselTicker = root["carouselTicker"];
-  if (root["carouselUsage"].is<bool>())   s.carouselUsage = root["carouselUsage"];
-  if (root["carouselRadar"].is<bool>())   s.carouselRadar = root["carouselRadar"];
-  if (root["carouselMiner"].is<bool>())   s.carouselMiner = root["carouselMiner"];
-  if (root["carouselClock"].is<bool>())   s.carouselClock = root["carouselClock"];
-  if (root["carouselSpotify"].is<bool>()) s.carouselSpotify = root["carouselSpotify"];
-  if (root["carouselAmbient"].is<bool>()) s.carouselAmbient = root["carouselAmbient"];
-  if (root["carouselFlappy"].is<bool>())  s.carouselFlappy = root["carouselFlappy"];
+  for (const auto& e : kCarousel) {
+    if (!root[e.key].is<bool>()) continue;          // absent = leave as-is
+    const uint16_t bit = (uint16_t)(1u << e.mode);
+    if (root[e.key].as<bool>()) s.carouselMask |= bit;
+    else                        s.carouselMask &= (uint16_t)~bit;
+  }
 
   if (root["httpTimeout"].is<int>())        s.httpTimeout = constrain((int)root["httpTimeout"], 1000, 20000);
   if (root["brightness"].is<int>())         s.brightness = constrain((int)root["brightness"], 0, 100);

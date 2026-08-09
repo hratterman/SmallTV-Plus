@@ -21,7 +21,9 @@
 #define AMB_CELL_PX (TFT_WIDTH / AMB_CELLS)
 #define AMB_STARS 48
 #define AMB_COLS  40      // matrix rain columns, 6 px apart
-#define AMB_SPARKS 40     // firework particles alive at once
+#define AMB_SPARKS 96     // firework particles alive at once (two bursts' worth)
+#define AMB_BURST  32     // particles per shell — enough that the ring reads as one
+#define AMB_SPARK_PX 2    // particle size; one pixel is a speck, not a spark
 
 class AmbientMode : public DisplayMode {
  public:
@@ -66,7 +68,17 @@ class AmbientMode : public DisplayMode {
   int16_t  rainY_[AMB_COLS] = {};
   uint8_t  rainSpd_[AMB_COLS] = {};
 
-  struct Spark { int16_t x, y, px, py; int8_t vx, vy; uint8_t life; uint16_t col; };
+  // Position and velocity are 8.8 fixed point. Integer pixels-per-frame made
+  // the slowest non-zero particle cross 30 px/s and the fastest 210, which is
+  // why the old bursts looked like a handful of darting specks: there was no
+  // room between "barely moves" and "gone in three frames".
+  struct Spark {
+    int16_t  x, y;         // 8.8 position
+    int16_t  vx, vy;       // 8.8 velocity, px per frame
+    int16_t  px, py;       // last drawn pixel (whole pixels), -1 = not drawn
+    uint8_t  life, age;    // frames remaining, frames lived
+    uint16_t col;
+  };
   Spark    sparks_[AMB_SPARKS] = {};
   uint16_t sparkTimer_ = 0;
 

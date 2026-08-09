@@ -21,20 +21,26 @@
 // why SpotifyClient prefers those two sources.
 #define SPOTIFY_ART_PX 152
 
-// The descale that brings a source of `width` closest to the box. Shared,
-// because the client uses it to choose which of Spotify's three sizes to ask
-// for and the decoder uses it to unpack what arrives — and if those two rules
-// ever differ, the client optimises for a scale the decoder will not apply. It
-// did: the 300 px source was chosen for its 1/2 descale to 150, then decoded at
-// 1/1 and clipped, so the screen showed the top-left corner of the cover.
-static inline uint8_t albumArtScaleFor(int width) {
-  uint8_t best = 0;
-  int bestErr = 1 << 30;
+// How well a source of `width` pixels can be made to fit the box, and at which
+// of TJpgDec's 1/1..1/8 descales. Both callers need this and they must agree:
+// SpotifyClient picks which of Spotify's three sizes to download, AlbumArt
+// unpacks what arrives, and if the two rules differ the client optimises for a
+// scale the decoder will not apply. They did differ — the 300 px source was
+// chosen for its 1/2 descale to 150, then decoded at 1/1 and clipped, so the
+// screen showed the top-left corner of the cover. One function, both callers.
+struct AlbumArtFit {
+  uint8_t  scale;   // 0..3, the shift TJpgDec should apply
+  uint16_t px;      // resulting edge length
+  int      err;     // distance from the box; lower is a better source
+};
+
+static inline AlbumArtFit albumArtFit(int width) {
+  AlbumArtFit best = {0, 0, 1 << 30};
   for (uint8_t s = 0; s <= 3; s++) {
     const int got = width >> s;
     const int err = got > SPOTIFY_ART_PX ? (got - SPOTIFY_ART_PX) * 2   // cropping
                                          : (SPOTIFY_ART_PX - got);      // margin
-    if (err < bestErr) { bestErr = err; best = s; }
+    if (err < best.err) { best.scale = s; best.px = (uint16_t)got; best.err = err; }
   }
   return best;
 }

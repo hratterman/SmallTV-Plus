@@ -26,9 +26,14 @@ static const int STAT_Y = 110, STAT_H = 92;
 static const int ROW0_Y = 120, ROW_DY = 22;
 static const int VAL_R = 220, VAL_SLOT = 132;   // right edge + erase width
 
-// Last-drawn text per slot, so a field only repaints when it changes.
+// Last-drawn text per slot, so a field only repaints when it changes. The
+// footer gets its own size: it carries the pool's error text, which is longer
+// than any number on this screen, and a slot too small to hold it would also
+// make two different errors compare equal and skip the repaint.
 struct Slot { char text[24]; };
-static Slot s_state, s_rate, s_rateUnit, s_rows[4], s_foot;
+struct FootSlot { char text[64]; };
+static Slot s_state, s_rate, s_rateUnit, s_rows[4];
+static FootSlot s_foot;
 
 static void slotClear() {
   s_state.text[0] = s_rate.text[0] = s_rateUnit.text[0] = s_foot.text[0] = 0;
@@ -108,12 +113,6 @@ void MinerMode::begin(const Settings& s) {
 void MinerMode::invalidate(const Settings& s) {
   minerCoreApplyConfig(s);
   needFull_ = true;
-}
-
-// Shorten a bech32/base58 address to one line: head...tail.
-static void shortAddr(const String& a, char* out, size_t outLen) {
-  if (a.length() <= 20) { strlcpy(out, a.c_str(), outLen); return; }
-  snprintf(out, outLen, "%.9s...%s", a.c_str(), a.c_str() + a.length() - 8);
 }
 
 // Static chrome: header, panels, row labels. Painted only on a full repaint.
@@ -215,13 +214,13 @@ void MinerMode::render(const Settings& s, bool full) {
   // pool complaint displaces it. Shares that all bounce look the same on screen
   // whatever the cause; the pool's own wording is what tells them apart, so it
   // gets the line rather than sitting on a serial port nobody is watching.
-  char up[16], foot[40];
+  char up[16], foot[64];   // the panel clips; the buffer should not also cut
   const bool bad = st.lastError[0] != 0;
   if (bad) {
     snprintf(foot, sizeof(foot), "pool: %s", st.lastError);
   } else {
     fmtUptime(st.uptimeSec, up, sizeof(up));
-    snprintf(foot, sizeof(foot), "%s  %s", st.poolHost, up);
+    snprintf(foot, sizeof(foot), "%.40s  %s", st.poolHost, up);
   }
   if (strcmp(s_foot.text, foot)) {
     strlcpy(s_foot.text, foot, sizeof(s_foot.text));
