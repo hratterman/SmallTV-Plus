@@ -8,9 +8,21 @@ about 32 KB of the OTA slot.
 
 Runs automatically from platformio.ini (extra_scripts). The generated header is
 build output, not source, so it is gitignored and regenerated every build.
+
+It also refuses to package a page that is broken, because the failure mode is
+nasty: a JavaScript syntax error anywhere in the script block stops the *whole*
+block executing, so the page still serves, still renders its HTML and CSS, and
+every tab comes up empty — including the one you would use to flash a fix. The
+device looks bricked from the browser while running perfectly. That shipped once,
+from an edit that duplicated a hundred lines instead of deleting them, and the
+duplicate-definition check below is aimed squarely at that.
 """
 import gzip
 import os
+import re
+import shutil
+import subprocess
+import sys
 
 Import("env")  # noqa: F821  (injected by PlatformIO/SCons)
 
@@ -21,9 +33,52 @@ SRC = os.path.join(ROOT, "src", "webui.html")
 OUT = os.path.join(ROOT, "src", "webui_gz.h")
 
 
+def fail(msg):
+    sys.stderr.write("\nwebui: %s\n" % msg)
+    sys.stderr.write("webui: refusing to build a page that cannot run.\n\n")
+    raise SystemExit(1)
+
+
+def check(html):
+    """Structural checks that need no JS engine, then a real parse if one exists."""
+    for tag in ("script", "main", "section"):
+        o, c = html.count("<%s>" % tag), html.count("</%s>" % tag)
+        if tag == "section":
+            o = html.count("<section")
+        if o != c:
+            fail("%d <%s> against %d </%s>" % (o, tag, c, tag))
+
+    m = re.search(r"<script>(.*)</script>", html, re.S)
+    if not m:
+        fail("no <script> block found")
+    js = m.group(1)
+
+    # Two definitions of one top-level function is the signature of a botched
+    # cut-and-splice, and it is invisible to a brace count because the braces
+    # still balance within each copy.
+    names = re.findall(r"^function\s+([A-Za-z_$][\w$]*)\s*\(", js, re.M)
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        fail("duplicate top-level function(s): %s" % ", ".join(dupes))
+
+    node = shutil.which("node")
+    if not node:
+        print("webui: node not found, skipped the syntax parse "
+              "(structural checks still ran)")
+        return
+    tmp = os.path.join(env.subst("$BUILD_DIR"), "webui_check.js")  # noqa: F821
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
+    with open(tmp, "w") as f:
+        f.write(js)
+    r = subprocess.run([node, "--check", tmp], capture_output=True, text=True)
+    if r.returncode != 0:
+        fail("JavaScript does not parse:\n" + (r.stderr or r.stdout).strip())
+
+
 def generate():
     with open(SRC, "rb") as f:
         raw = f.read()
+    check(raw.decode("utf-8"))
     # mtime=0 so the output is byte-identical for identical input, which keeps
     # incremental builds from relinking on every run.
     packed = gzip.compress(raw, compresslevel=9, mtime=0)
