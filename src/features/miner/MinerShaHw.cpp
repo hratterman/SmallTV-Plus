@@ -27,6 +27,17 @@
 //                      progressively during a compression rather than latching
 //                      it at start_block, so a fill cannot hide inside the
 //                      previous block. That is what sets the floor above.
+//   Fast DPORT reads   For the *full* digest. Reading all eight words with
+//                      DPORT_SEQUENCE_REG_READ returns another master's data in
+//                      the first read or two under load from the other core. The
+//                      device showed it directly: a bad digest and an immediate
+//                      re-read agreed on words 1-6 and disagreed on 0 and 7 —
+//                      the two read earliest. Word 7 corrupting to zero was the
+//                      damaging case, since zero is precisely what the early
+//                      exit is looking for, so the engine's read errors were
+//                      selected *for* rather than filtered out. The full read
+//                      now uses the protected accessor; the probe does not,
+//                      because a wrong probe only wastes a full read.
 //   Bare fixed spin    Any spin with no poll behind it, including the 95 that
 //                      shipped. The reasoning against spin 72 — undershoot is a
 //                      silently wrong hash — applied to 95 as well, just more
@@ -108,36 +119,30 @@ static inline __attribute__((always_inline)) void hwWaitIdle() {
   while (DPORT_REG_READ(SHA_256_BUSY_REG)) {}
 }
 
-// Read the digest, byte-swapping into standard SHA-256 output order. The
-// early-exit checks word 7's low half first: the last two digest bytes are zero
-// only when it is, and all but ~1/65536 nonces stop right there.
+// Read the digest, byte-swapping into standard SHA-256 output order.
+//
+// Two accessors, deliberately. The device settled which is needed where: a
+// mismatching digest was captured alongside an immediate re-read of the same
+// registers, and words 1-6 were identical across both while words 0 and 7
+// differed. Those two are exactly the first two reads this function performs.
+// The fast DPORT sequence accessor is only sound once the access pattern is
+// established; its first reads can return another bus master's data, and core 1
+// is running a hash worker and WiFi the whole time.
+//
+// So the per-nonce probe keeps the fast read — a bad value there costs at most
+// a wasted full read, which the recheck catches — and the full digest, which
+// happens about once in 65536 nonces, uses the protected accessor that is
+// correct under contention and far too expensive to put in the hot path.
 static inline __attribute__((always_inline)) bool hwReadDigest(void* out, bool earlyExit) {
-  DPORT_INTERRUPT_DISABLE();
-  uint32_t last = DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 7 * 4);
-  if (earlyExit && (last & 0xFFFF) != 0) {
+  if (earlyExit) {
+    DPORT_INTERRUPT_DISABLE();
+    const uint32_t last = DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 7 * 4);
     DPORT_INTERRUPT_RESTORE();
-    return false;
-  }
-  // Word 7 is read first, which makes it the word most exposed to a read that
-  // lands before the digest does — and the device produced exactly that: a
-  // mismatching digest whose word 7 was 0x00000000, which does not merely pass
-  // the test above, it passes it every time. So confirm the word before
-  // trusting it. This sits on the 1-in-65536 path, so the per-nonce cost is nil.
-  last = DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 7 * 4);
-  if (earlyExit && (last & 0xFFFF) != 0) {
-    DPORT_INTERRUPT_RESTORE();
-    return false;
+    if ((last & 0xFFFF) != 0) return false;
   }
   uint32_t* p = (uint32_t*)out;
-  p[7] = __builtin_bswap32(last);
-  p[0] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 0 * 4));
-  p[1] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 1 * 4));
-  p[2] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 2 * 4));
-  p[3] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 3 * 4));
-  p[4] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 4 * 4));
-  p[5] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 5 * 4));
-  p[6] = __builtin_bswap32(DPORT_SEQUENCE_REG_READ(SHA_TEXT_BASE + 6 * 4));
-  DPORT_INTERRUPT_RESTORE();
+  for (int i = 0; i < 8; i++)
+    p[i] = __builtin_bswap32(DPORT_REG_READ(SHA_TEXT_BASE + i * 4));
   return true;
 }
 
