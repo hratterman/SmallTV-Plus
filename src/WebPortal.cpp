@@ -180,8 +180,19 @@ static void handleStatus() {
 #if WITH_SPOTIFY
   {
     const SpotifyData& sd = spotifyGet();
+    // The art status is unreadable without this: an empty url means the poll
+    // never produced one, and the reasons for that (not linked, nothing
+    // playing, poll erroring) look identical from the art's point of view.
+    JsonObject sp = o["spotify"].to<JsonObject>();
+    sp["enabled"] = S->spotify.enabled;
+    sp["linked"]  = S->spotify.refreshToken.length() > 0;
+    sp["polled"]  = sd.valid;         // a poll has succeeded at least once
+    sp["playing"] = sd.playing;
+    sp["track"]   = sd.track;
+    sp["error"]   = sd.error ? sd.errorMsg : "";
+
     JsonObject a = o["art"].to<JsonObject>();
-    a["url"]    = sd.artUrl;      // "" means the poll found no cover
+    a["url"]    = sd.artUrl;          // "" means the poll found no cover
     a["status"] = albumArtStatus();
   }
 #endif

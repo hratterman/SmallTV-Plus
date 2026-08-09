@@ -478,7 +478,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('nightLevel',ck.nightLevel!=null?ck.nightLevel:0); $('nlVal')&&($('nlVal').textContent=(ck.nightLevel!=null?ck.nightLevel:0));
  $('mode').value=c.mode||'stocks'; modeChanged();
  sv('carouselSec',c.carouselSec||30);
- sc('carouselTicker',c.carouselTicker!==false); sc('carouselUsage',c.carouselUsage!==false); sc('carouselRadar',c.carouselRadar!==false); sc('carouselMiner',c.carouselMiner!==false); sc('carouselClock',c.carouselClock!==false); sc('carouselSpotify',c.carouselSpotify!==false);
+ Object.keys(CAROPT).forEach(function(k){sc(CAROPT[k],!!c[CAROPT[k]])});
  // ticker slice
  T_TEXT.forEach(function(k){sv(k,t[k])});
  T_NUM.forEach(function(k){sv(k,t[k])});
@@ -574,14 +574,17 @@ function radarSrcChanged(){if(!$('radarSource'))return;var d=$('radarSource').va
 function collect(){
  var o={mode:gv('mode'),
   carouselSec:parseInt(gv('carouselSec'))||30,
-  carouselTicker:gc('carouselTicker'), carouselUsage:gc('carouselUsage'), carouselRadar:gc('carouselRadar'),
-  carouselMiner:gc('carouselMiner'), carouselClock:gc('carouselClock'), carouselSpotify:gc('carouselSpotify'),
   brightness:parseInt(gv('brightness'))||0,
   rotation:parseInt(gv('rotation')),
   autoBrightness:gc('autoBrightness'),
   backlightInverted:gc('backlightInverted'),
   hostname:gv('hostname'), apSsid:gv('apSsid'), apPass:gv('apPass'),
   wifi:collectWifi()};
+ // Every mode tick, taken from CAROPT rather than listed again. Spelling them
+ // out here is how the miner tick went unsent for weeks, and then ambient and
+ // flappy after it: the checkbox renders, reads back its saved value, and is
+ // simply never posted, so it looks like it works and quietly does nothing.
+ Object.keys(CAROPT).forEach(function(k){o[CAROPT[k]]=gc(CAROPT[k])});
  // ticker slice (only if compiled in)
  if($('ticker')){
   var t={colorInverted:gv('colorInverted')==='true',changeOnRange:gv('changeOnRange')==='true'};
