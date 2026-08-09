@@ -1,4 +1,5 @@
 #include "SpotifyClient.h"
+#include "AlbumArt.h"   // SPOTIFY_ART_PX: the size the screen wants
 #if WITH_SPOTIFY
 
 #include <WiFi.h>
@@ -142,6 +143,11 @@ static bool fetchNowPlaying(const Settings& s) {
   item["name"] = true;
   item["duration_ms"] = true;
   item["artists"][0]["name"] = true;
+  // The art list is three entries of {url,width,height}; small enough to keep
+  // now that the rest of the payload is filtered away.
+  JsonObject img = item["album"]["images"][0].to<JsonObject>();
+  img["url"] = true;
+  img["width"] = true;
 
   JsonDocument doc;
   DeserializationError err =
@@ -161,6 +167,33 @@ static bool fetchNowPlaying(const Settings& s) {
     if (!n[0]) continue;
     if (s_data.artist[0]) strlcat(s_data.artist, ", ", sizeof(s_data.artist));
     strlcat(s_data.artist, n, sizeof(s_data.artist));
+  }
+
+  // Pick the cover closest to the size the screen wants once TJpgDec's power-of
+  // two descaling is applied. Spotify offers 640/300/64, so 300 at 1/2 and 640
+  // at 1/4 both land near the target; preferring the smaller source keeps the
+  // download short, and the download is the slow part.
+  s_data.artUrl[0] = 0;
+  s_data.artPx = 0;
+  {
+    int bestErr = 1 << 30;
+    uint32_t bestBytes = 0;
+    for (JsonObjectConst im : doc["item"]["album"]["images"].as<JsonArrayConst>()) {
+      const char* u = im["url"] | "";
+      const int w = im["width"] | 0;
+      if (!u[0] || w <= 0 || strlen(u) >= SPOTIFY_ART_LEN) continue;
+      for (int sc = 0; sc <= 3; sc++) {
+        const int got = w >> sc;
+        const int e = got > SPOTIFY_ART_PX ? (got - SPOTIFY_ART_PX) * 2   // upscaling is worse
+                                           : (SPOTIFY_ART_PX - got);
+        if (e < bestErr || (e == bestErr && (uint32_t)w < bestBytes)) {
+          bestErr = e;
+          bestBytes = (uint32_t)w;
+          strlcpy(s_data.artUrl, u, sizeof(s_data.artUrl));
+          s_data.artPx = (uint16_t)w;
+        }
+      }
+    }
   }
 
   s_data.valid = true;

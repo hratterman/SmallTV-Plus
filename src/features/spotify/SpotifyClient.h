@@ -15,6 +15,8 @@
 
 #define SPOTIFY_TRACK_LEN  64
 #define SPOTIFY_ARTIST_LEN 64
+// Spotify's art URLs are a fixed shape: https://i.scdn.co/image/<40 hex>.
+#define SPOTIFY_ART_LEN    72
 
 struct SpotifyData {
   bool     valid;        // a successful poll has happened
@@ -25,6 +27,8 @@ struct SpotifyData {
   uint32_t durationMs;
   uint32_t lastOkMs;     // millis() of the last good poll
   uint32_t startedAtMs;  // millis() when progressMs was sampled, for interpolation
+  char     artUrl[SPOTIFY_ART_LEN];   // album cover, "" if the track has none
+  uint16_t artPx;        // the cover's native square size, for picking a scale
   bool     error;
   char     errorMsg[48];
 };

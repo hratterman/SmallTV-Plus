@@ -111,6 +111,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="miner">Bitcoin miner</option>
     <option value="clock">Clock</option>
     <option value="spotify">Spotify now playing</option>
+    <option value="ambient">Ambient patterns</option>
     <option value="carousel">Carousel (rotate modes)</option>
    </select>
    <div id="carouselRow">
@@ -123,6 +124,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
+   <div class="chk"><input id="carouselAmbient" type="checkbox"><label>Ambient</label></div>
    <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
   </div>
   <div class="card"><h2>Screen</h2>
@@ -430,9 +432,9 @@ var TZMAP={
 function fillTz(){var s=$('tz');if(!s)return;var keys=Object.keys(TZMAP).filter(function(k){return k!==''});
  keys.sort();s.innerHTML='<option value="">UTC</option>'+keys.map(function(k){return '<option value="'+k+'">'+k+'</option>'}).join('');}
 
-var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify'};
+var MODEOPT={ticker:'stocks',usage:'usage',radar:'radar',miner:'miner',clock:'clock',spotify:'spotify',ambient:'ambient'};
 var TOUCHGPIOS=[4,0,12,27,33,32];
-var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify'};
+var CAROPT={ticker:'carouselTicker',usage:'carouselUsage',radar:'carouselRadar',miner:'carouselMiner',clock:'carouselClock',spotify:'carouselSpotify',ambient:'carouselAmbient'};
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
  var sec=$(name); if(sec)sec.remove();
@@ -442,7 +444,7 @@ function hideFeat(name){
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
- var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify'].forEach(function(k){if(f[k]===false)hideFeat(k)});
+ var f=c.features||{}; ['ticker','usage','radar','miner','clock','spotify','ambient'].forEach(function(k){if(f[k]===false)hideFeat(k)});
  if(f.touch===false){var tb=document.querySelector('nav button[data-t="touch"]');if(tb)tb.remove();var ts=$('touch');if(ts)ts.remove();}
  var t=c.ticker||{}, u=c.usage||{};
  // shared

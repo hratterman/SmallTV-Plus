@@ -39,6 +39,9 @@
 #include "SpotifyMode.h"
 #include "SpotifyClient.h"
 #endif
+#if WITH_AMBIENT
+#include "AmbientMode.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -65,6 +68,9 @@ static DisplayMode* kModes[] = {
 #if WITH_SPOTIFY
   &g_spotifyMode,
 #endif
+#if WITH_AMBIENT
+  &g_ambientMode,
+#endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
 
@@ -90,6 +96,7 @@ static bool carouselHas(const Settings& s, const DisplayMode* m) {
     case MODE_MINER:  return s.carouselMiner;
     case MODE_CLOCK:  return s.carouselClock;
     case MODE_SPOTIFY: return s.carouselSpotify;
+    case MODE_AMBIENT: return s.carouselAmbient;
     default:          return true;
   }
 }

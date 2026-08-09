@@ -68,6 +68,7 @@
 //   4 = bitcoin solo miner (ESP32 targets only, see WITH_MINER below)
 //   5 = clock (SNTP wall time, big digits)
 //   6 = spotify now-playing (ESP32 targets only)
+//   7 = ambient patterns (no network, nothing to report)
 // ---------------------------------------------------------------------------
 #define MODE_STOCKS    0
 #define MODE_USAGE     1
@@ -76,6 +77,7 @@
 #define MODE_MINER     4
 #define MODE_CLOCK     5
 #define MODE_SPOTIFY   6
+#define MODE_AMBIENT   7
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -108,6 +110,12 @@
 #endif
 
 #define DEFAULT_SPOTIFY_POLL_SEC 10
+
+// Ambient patterns. Only the grid buffers cost anything (~7 KB) and there is no
+// network path at all, so this is on everywhere the display is.
+#ifndef WITH_AMBIENT
+#define WITH_AMBIENT 1
+#endif
 // Miner is classic-ESP32 only: the mining core runs FreeRTOS worker tasks
 // pinned across both cores and (optionally) the ESP32 SHA peripheral. The
 // ESP8266 has neither, and the single-core C2 has no cycles to spare.

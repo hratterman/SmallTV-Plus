@@ -3,6 +3,7 @@
 
 #include <Arduino_GFX_Library.h>
 #include "Gfx.h"
+#include "AlbumArt.h"
 
 SpotifyMode g_spotifyMode;
 
@@ -10,12 +11,16 @@ SpotifyMode g_spotifyMode;
 #define C_DIM   0xB574
 #define C_PANEL 0x18E3
 
+// The cover takes the top of the screen and everything else stacks under it.
+static const int ART_X = (TFT_WIDTH - SPOTIFY_ART_PX) / 2;
+static const int ART_Y = 30;
+
 // Progress bar geometry, shared by the full paint and the incremental update.
 static const int BAR_X = 18;
-static const int BAR_Y = 178;
+static const int BAR_Y = 222;
 static const int BAR_W = TFT_WIDTH - 36;
-static const int BAR_H = 8;
-static const int TIME_Y = BAR_Y + 14;
+static const int BAR_H = 6;
+static const int TIME_Y = BAR_Y - 11;
 
 void SpotifyMode::begin(const Settings& s) {
   spotifyInit(s);
@@ -27,6 +32,7 @@ void SpotifyMode::invalidate(const Settings& s) {
   spotifyForceRefresh();
   needFull_ = true;
   drawnTrack_[0] = drawnArtist_[0] = 0;
+  drawnArt_[0] = 0;
   barW_ = elapsed_ = -1;
 }
 
@@ -73,10 +79,10 @@ void SpotifyMode::renderAll(const Settings& s) {
 
   gfx->fillScreen(C_BLACK);
 
-  gfx->fillCircle(22, 22, 9, C_SPOT);
+  gfx->fillCircle(22, 16, 7, C_SPOT);
   gfx->setTextSize(1);
   gfx->setTextColor(C_DIM);
-  gfx->setCursor(40, 18);
+  gfx->setCursor(36, 12);
   gfx->print(d.playing ? "NOW PLAYING" : "SPOTIFY");
 
   if (!s.spotify.refreshToken.length()) {
@@ -99,9 +105,28 @@ void SpotifyMode::renderAll(const Settings& s) {
     return;
   }
 
-  const uint8_t tsz = (strlen(d.track) > 22) ? 2 : 3;
-  drawTitle(gfx, d.track, 62, tsz);
-  gfxDrawCentered(d.artist, 132, 2, C_DIM);
+  // Cover first: it is the slow part, and drawing it before the text means the
+  // screen is never blank while the download runs.
+  if (d.artUrl[0]) {
+    if (strcmp(d.artUrl, drawnArt_) != 0 || artFailed_) {
+      artFailed_ = !albumArtDraw(d.artUrl, ART_X, ART_Y);
+      strlcpy(drawnArt_, d.artUrl, sizeof(drawnArt_));
+    }
+    if (artFailed_) {
+      // A cover that would not load leaves a plate rather than a hole, so the
+      // layout below it does not move about between tracks.
+      gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
+      gfx->fillCircle(TFT_WIDTH / 2, ART_Y + SPOTIFY_ART_PX / 2, 18, C_SPOT);
+    }
+  } else {
+    drawnArt_[0] = 0;
+    gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
+  }
+
+  const int textY = ART_Y + SPOTIFY_ART_PX + 8;
+  const uint8_t tsz = (strlen(d.track) > 26) ? 1 : 2;
+  drawTitle(gfx, d.track, textY, tsz);
+  gfxDrawCentered(d.artist, textY + (tsz == 1 ? 22 : 30), 1, C_DIM);
 
   // Bar track and total duration are static for this song; only the fill and
   // the elapsed label move from here on.
