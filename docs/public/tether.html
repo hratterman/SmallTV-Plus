@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmallTV tether</title>
+<style>
+:root{--bg:#0f1115;--fg:#e7e9ee;--mut:#8b93a7;--acc:#4ea1ff;--ok:#3ddc84;--bad:#ff6b6b;--panel:#171a21;--line:#252a35}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px}
+h1{font-size:26px;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 28px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:18px}
+button{font:inherit;font-weight:600;border:0;border-radius:9px;padding:11px 20px;cursor:pointer;background:var(--acc);color:#06101f}
+button.sec{background:#2a3040;color:var(--fg)}
+button:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--mut);display:inline-block;margin-right:8px;vertical-align:middle}
+.dot.on{background:var(--ok)}
+.dot.err{background:var(--bad)}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.kv:last-child{border-bottom:0}
+.kv span:first-child{color:var(--mut)}
+code{background:#0b0d12;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:13px}
+#log{background:#0b0d12;border:1px solid var(--line);border-radius:9px;padding:12px;height:230px;overflow:auto;
+     font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+.log-req{color:var(--acc)}.log-err{color:var(--bad)}.log-dev{color:var(--mut)}.log-ok{color:var(--ok)}
+.hint{color:var(--mut);font-size:13.5px;margin:10px 0 0}
+.warn{background:#2a1d1d;border-color:#4a2b2b}
+ol{padding-left:20px}li{margin:6px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>SmallTV tether</h1>
+<p class="sub">Lends this computer's internet connection to the cube, over the USB cable.</p>
+
+<div id="unsupported" class="card warn" hidden>
+  <b>This browser can't do it.</b>
+  <p class="hint">Talking to a serial port from a page needs the Web Serial API, which today means
+  <b>Chrome, Edge or Opera</b> on desktop. Safari and Firefox haven't implemented it. Open this same
+  page in one of those and the button below will work.</p>
+</div>
+
+<div id="insecure" class="card warn" hidden>
+  <b>This page needs to be served over HTTPS.</b>
+  <p class="hint">Browsers only expose serial ports to secure pages. Opening the file straight from
+  disk may or may not count, depending on the browser's rules — the hosted copy always does.</p>
+</div>
+
+<div class="card">
+  <div class="row">
+    <button id="connect">Connect the cube</button>
+    <button id="disconnect" class="sec" disabled>Disconnect</button>
+    <span style="margin-left:auto"><span id="dot" class="dot"></span><span id="state">not connected</span></span>
+  </div>
+  <p class="hint">Your browser will show its own list of serial devices — pick the cube and press
+  Connect. Nothing is installed and nothing runs outside this tab.
+  <b>Leave this tab open</b> while you want the cube online.</p>
+</div>
+
+<div class="card">
+  <div class="kv"><span>Requests served</span><span id="nreq">0</span></div>
+  <div class="kv"><span>Data to the cube</span><span id="nbytes">0 B</span></div>
+  <div class="kv"><span>Last request</span><span id="last">—</span></div>
+</div>
+
+<div class="card">
+  <div class="row" style="margin-bottom:10px">
+    <b style="flex:1">Activity</b>
+    <button class="sec" id="clear" style="padding:6px 12px;font-size:13px">Clear</button>
+  </div>
+  <div id="log"></div>
+  <p class="hint">The cube's own log shares the cable and appears here in grey.</p>
+</div>
+
+<div class="card">
+  <b>What works over the cable</b>
+  <p class="hint">A page can only fetch what the far end allows it to (CORS), so this is not
+  everything the cube can do on a normal network:</p>
+  <ul class="hint" style="margin-top:6px">
+    <li><b>Spotify</b> — fully, including album art.</li>
+    <li><b>Clock</b> — taken from this computer, so no time server is needed.</li>
+    <li><b>Ticker</b> — set your symbols to the <b>GitHub</b> source. Yahoo blocks browser requests.</li>
+    <li><b>Radar</b> — not available; adsb.fi blocks browser requests too.</li>
+  </ul>
+</div>
+</div>
+
+<script>
+'use strict';
+// ---------------------------------------------------------------------------
+// Wire format — must match src/SerialFrame.h. SLIP framing with a CRC, so
+// frames and the cube's debug log share one UART without corrupting each other.
+const END=0xC0, ESC=0xDB, ESC_END=0xDC, ESC_ESC=0xDD;
+const VERSION=1, HEADER=6, MAX_PAYLOAD=1024;
+const HELLO=0x01, HELLO_ACK=0x02;
+const HTTP_REQ=0x10, HTTP_STATUS=0x11, HTTP_DATA=0x12, HTTP_END=0x13, HTTP_ERR=0x14;
+const TIME=0x20;
+const CHUNK=512;
+
+function crc16(bytes, crc=0xFFFF){
+  for(const b of bytes){
+    crc ^= b<<8;
+    for(let i=0;i<8;i++) crc = (crc&0x8000) ? ((crc<<1)^0x1021)&0xFFFF : (crc<<1)&0xFFFF;
+  }
+  return crc;
+}
+
+function encode(type,id,payload=new Uint8Array(0)){
+  if(payload.length>MAX_PAYLOAD) throw new Error('payload too large');
+  const head=new Uint8Array(HEADER);
+  head[0]=VERSION; head[1]=type;
+  head[2]=id&0xFF; head[3]=id>>8;
+  head[4]=payload.length&0xFF; head[5]=payload.length>>8;
+  const crc=crc16(payload,crc16(head));
+  const body=new Uint8Array(HEADER+payload.length+2);
+  body.set(head,0); body.set(payload,HEADER);
+  body[body.length-2]=crc>>8; body[body.length-1]=crc&0xFF;
+  const out=[END];
+  for(const b of body){
+    if(b===END){out.push(ESC,ESC_END);}
+    else if(b===ESC){out.push(ESC,ESC_ESC);}
+    else out.push(b);
+  }
+  out.push(END);
+  return new Uint8Array(out);
+}
+
+// Incremental decoder. Anything that is not a valid frame is handed back as
+// text, which is exactly what should happen to the cube's log lines.
+class Decoder{
+  constructor(onText){ this.buf=[]; this.inFrame=false; this.esc=false; this.bad=false;
+                       this.text=[]; this.onText=onText||(()=>{}); }
+  *feed(bytes){
+    for(const b of bytes){ const f=this._byte(b); if(f) yield f; }
+  }
+  _byte(b){
+    if(b===END){
+      let frame=null;
+      if(this.inFrame && !this.bad) frame=this._finish();
+      if(!frame && this.buf.length) this._text(this.buf);
+      this.inFrame=true; this.buf=[]; this.esc=false; this.bad=false;
+      return frame;
+    }
+    if(!this.inFrame){ this._text([b]); return null; }
+    if(this.esc){
+      this.esc=false;
+      if(b===ESC_END) b=END; else if(b===ESC_ESC) b=ESC; else { this.bad=true; return null; }
+    } else if(b===ESC){ this.esc=true; return null; }
+    if(this.buf.length>=HEADER+MAX_PAYLOAD+2){ this.bad=true; return null; }
+    this.buf.push(b);
+    return null;
+  }
+  _text(bytes){
+    for(const b of bytes){
+      if(b===10){ const s=new TextDecoder().decode(new Uint8Array(this.text)).replace(/\r$/,'');
+                  this.text=[]; if(s.trim()) this.onText(s); }
+      else if(this.text.length<400) this.text.push(b);
+    }
+  }
+  _finish(){
+    const n=this.buf.length;
+    if(n<HEADER+2) return null;
+    if(this.buf[0]!==VERSION) return null;
+    const len=this.buf[4]|(this.buf[5]<<8);
+    if(n!==HEADER+len+2) return null;
+    const want=(this.buf[n-2]<<8)|this.buf[n-1];
+    if(crc16(this.buf.slice(0,HEADER+len))!==want) return null;
+    return {type:this.buf[1], id:this.buf[2]|(this.buf[3]<<8),
+            payload:new Uint8Array(this.buf.slice(HEADER,HEADER+len))};
+  }
+}
+
+function parseRequest(p){
+  const dv=new DataView(p.buffer,p.byteOffset,p.byteLength);
+  let o=0;
+  const method=p[o]; o+=1;
+  const urlLen=dv.getUint16(o,true); o+=2;
+  const url=new TextDecoder().decode(p.subarray(o,o+urlLen)); o+=urlLen;
+  const hdrLen=dv.getUint16(o,true); o+=2;
+  const raw=new TextDecoder().decode(p.subarray(o,o+hdrLen)); o+=hdrLen;
+  const bodyLen=dv.getUint16(o,true); o+=2;
+  const body=p.subarray(o,o+bodyLen);
+  const headers={};
+  for(const line of raw.split('\n')){
+    const i=line.indexOf(':');
+    if(i>0) headers[line.slice(0,i).trim()]=line.slice(i+1).trim();
+  }
+  return {method,url,headers,body};
+}
+
+// ---------------------------------------------------------------------------
+const $=id=>document.getElementById(id);
+let port=null, writer=null, keepReading=false, nreq=0, nbytes=0;
+
+function log(msg,cls){
+  const el=$('log'), atEnd=el.scrollTop+el.clientHeight>=el.scrollHeight-20;
+  const d=document.createElement('div');
+  if(cls) d.className=cls;
+  d.textContent=msg;
+  el.appendChild(d);
+  while(el.childNodes.length>500) el.removeChild(el.firstChild);
+  if(atEnd) el.scrollTop=el.scrollHeight;
+}
+function setState(text,cls){ $('state').textContent=text; $('dot').className='dot'+(cls?' '+cls:''); }
+function fmtBytes(n){ return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB'; }
+
+async function send(type,id,payload){
+  if(!writer) return;
+  try { await writer.write(encode(type,id,payload)); }
+  catch(e){ log('write failed: '+e.message,'log-err'); }
+}
+
+async function sendTime(){
+  // The cube has no route to a time server while it is tethered, so hand it
+  // this computer's clock as part of saying hello.
+  const secs=BigInt(Math.floor(Date.now()/1000));
+  const b=new Uint8Array(8);
+  new DataView(b.buffer).setBigInt64(0,secs,true);
+  await send(TIME,0,b);
+}
+
+async function handleRequest(id,payload){
+  let req;
+  try { req=parseRequest(payload); }
+  catch(e){ await send(HTTP_ERR,id,new TextEncoder().encode('bad request frame')); return; }
+
+  const method = req.method ? 'POST' : 'GET';
+  nreq++; $('nreq').textContent=nreq;
+  $('last').textContent = method+' '+req.url.replace(/^https?:\/\//,'').slice(0,52);
+  log(`#${id} ${method} ${req.url}`,'log-req');
+
+  try{
+    const res=await fetch(req.url,{
+      method, headers:req.headers,
+      body: req.method ? req.body : undefined,
+      // Follow redirects and send no cookies: this is a plain proxy, and the
+      // cube supplies its own Authorization header when it needs one.
+      redirect:'follow', credentials:'omit',
+    });
+    const buf=new Uint8Array(await res.arrayBuffer());
+    const st=new Uint8Array(6);
+    const dv=new DataView(st.buffer);
+    dv.setUint16(0,res.status,true);
+    dv.setUint32(2,buf.length,true);
+    await send(HTTP_STATUS,id,st);
+    for(let o=0;o<buf.length;o+=CHUNK) await send(HTTP_DATA,id,buf.subarray(o,o+CHUNK));
+    await send(HTTP_END,id);
+    nbytes+=buf.length; $('nbytes').textContent=fmtBytes(nbytes);
+    log(`#${id} → ${res.status}, ${fmtBytes(buf.length)}`, res.ok?'log-ok':'log-err');
+  }catch(e){
+    // A CORS refusal arrives here as a bare TypeError, which tells the user
+    // nothing — name it, since it is the most likely failure by far.
+    const msg = (e instanceof TypeError)
+      ? 'blocked by the browser (CORS) or unreachable' : e.message;
+    await send(HTTP_ERR,id,new TextEncoder().encode(msg.slice(0,180)));
+    log(`#${id} failed: ${msg}`,'log-err');
+  }
+}
+
+async function readLoop(){
+  const dec=new Decoder(t=>log(t,'log-dev'));
+  const reader=port.readable.getReader();
+  try{
+    while(keepReading){
+      const {value,done}=await reader.read();
+      if(done) break;
+      if(!value) continue;
+      for(const f of dec.feed(value)){
+        if(f.type===HELLO){
+          const who=new TextDecoder().decode(f.payload);
+          setState('connected — '+who,'on');
+          log('cube says hello: '+who,'log-ok');
+          await send(HELLO_ACK,f.id);
+          await sendTime();
+        } else if(f.type===HTTP_REQ){
+          await handleRequest(f.id,f.payload);
+        }
+      }
+    }
+  }catch(e){
+    log('the cable went away: '+e.message,'log-err');
+  }finally{
+    try{ reader.releaseLock(); }catch(_){}
+    await teardown();
+  }
+}
+
+async function teardown(){
+  keepReading=false;
+  try{ if(writer){ writer.releaseLock(); } }catch(_){}
+  writer=null;
+  try{ if(port) await port.close(); }catch(_){}
+  port=null;
+  setState('not connected');
+  $('connect').disabled=false; $('disconnect').disabled=true;
+}
+
+$('connect').onclick=async()=>{
+  try{
+    port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+  }catch(e){
+    if(e && e.name==='NotFoundError'){ log('no device picked','log-dev'); return; }
+    log('could not open the port: '+e.message,'log-err');
+    setState('failed to open','err');
+    port=null; return;
+  }
+  writer=port.writable.getWriter();
+  keepReading=true;
+  $('connect').disabled=true; $('disconnect').disabled=false;
+  setState('waiting for the cube to say hello…');
+  log('port open at 115200 — the cube announces itself every couple of seconds','log-dev');
+  readLoop();
+};
+
+$('disconnect').onclick=()=>{ keepReading=false; teardown(); };
+$('clear').onclick=()=>{ $('log').textContent=''; };
+
+if(!('serial' in navigator)) {
+  $('unsupported').hidden=false;
+  $('connect').disabled=true;
+  if(!window.isSecureContext) $('insecure').hidden=false;
+}
+
+// Chrome fires this when the cable is physically pulled.
+if(navigator.serial && navigator.serial.addEventListener)
+  navigator.serial.addEventListener('disconnect',()=>{ if(port){ log('cable unplugged','log-err'); teardown(); }});
+</script>
+</body>
+</html>
