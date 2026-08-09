@@ -27,4 +27,10 @@
 // arrived; the caller decides what to show instead.
 bool albumArtDraw(const char* url, int16_t x, int16_t y);
 
+// Why the last attempt ended the way it did — "ok", an HTTP status, or the
+// decoder's complaint. Served from /api/status, because "the art doesn't work"
+// is not something anyone can act on and this device has taught that lesson
+// more than once already.
+const char* albumArtStatus();
+
 #endif  // WITH_SPOTIFY

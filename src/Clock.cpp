@@ -44,6 +44,13 @@ static bool clockWanted(const Settings& s) {
 #if WITH_CLOCK
   if (s.mode == MODE_CLOCK) return true;
   if (s.mode == MODE_CAROUSEL && s.carouselClock) return true;
+#if HAS_TOUCH
+  // With a pad fitted, a tap reaches any ticked mode whatever s.mode says, so
+  // gating SNTP on the configured mode meant tapping round to the clock showed
+  // a clock that had never been told the time. Selecting any other mode as the
+  // default was enough to do it — ambient was just how it got noticed.
+  if (s.carouselClock) return true;
+#endif
 #endif
   return false;
 }

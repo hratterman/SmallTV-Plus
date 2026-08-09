@@ -154,6 +154,17 @@ struct SpotifySettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Ambient patterns slice -------------------------------------------------
+struct AmbientSettings {
+  uint16_t dwellSec;     // carousel time for ambient; it is meant to be dwelt on
+  uint16_t patternSec;   // auto-advance within a long block, 0 = stay put
+  bool     shuffle;      // random next pattern instead of in order
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Capacitive touch slice (device-wide input) ----------------------------
 struct TouchSettings {
   bool    enabled;
@@ -197,6 +208,7 @@ struct Settings {
   RadarSettings  radar;
   MinerSettings   miner;
   SpotifySettings spotify;
+  AmbientSettings ambient;
   TouchSettings   touch;
   ClockSettings  clock;
 

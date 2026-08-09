@@ -89,18 +89,32 @@ UINT artOut(JDEC* jd, void* bitmap, JRECT* rect) {
 
 }  // namespace
 
+static char s_status[40] = "not tried";
+
+const char* albumArtStatus() { return s_status; }
+
 bool albumArtDraw(const char* url, int16_t x, int16_t y) {
-  if (!url || !url[0]) return false;
+  if (!url || !url[0]) { strlcpy(s_status, "no art url", sizeof(s_status)); return false; }
 
   WiFiClientSecure client;
   client.setInsecure();          // same posture as the rest of the Spotify path
   client.setTimeout(6);
   HTTPClient http;
   http.setTimeout(6000);
-  if (!http.begin(client, url)) return false;
+  // The CDN can answer with a redirect, and HTTPClient does not follow one
+  // unless asked — which looks identical to the image simply not loading.
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(client, url)) {
+    strlcpy(s_status, "begin failed (TLS/heap)", sizeof(s_status));
+    return false;
+  }
 
   const int code = http.GET();
-  if (code != HTTP_CODE_OK) { http.end(); return false; }
+  if (code != HTTP_CODE_OK) {
+    snprintf(s_status, sizeof(s_status), "HTTP %d", code);
+    http.end();
+    return false;
+  }
 
   ArtCtx ctx;
   ctx.stream    = http.getStreamPtr();
@@ -110,17 +124,28 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   ctx.deadline = millis() + 8000;
 
   void* work = malloc(ART_WORK_SZ);
-  if (!work) { http.end(); return false; }
+  if (!work) {
+    strlcpy(s_status, "no heap for the decoder", sizeof(s_status));
+    http.end();
+    return false;
+  }
 
   JDEC jd;
   bool ok = false;
-  if (jd_prepare(&jd, artIn, work, ART_WORK_SZ, &ctx) == JDR_OK) {
+  const JRESULT pr = jd_prepare(&jd, artIn, work, ART_WORK_SZ, &ctx);
+  if (pr != JDR_OK) {
+    snprintf(s_status, sizeof(s_status), "jd_prepare err %d", (int)pr);
+  } else {
     // Descale by the power of two that brings the cover closest to the box
     // without going under it — a slightly cropped cover reads better than one
     // floating in a margin.
     uint8_t scale = 0;
     while (scale < 3 && (jd.width >> (scale + 1)) >= SPOTIFY_ART_PX) scale++;
-    ok = jd_decomp(&jd, artOut, scale) == JDR_OK;
+    const JRESULT dr = jd_decomp(&jd, artOut, scale);
+    ok = (dr == JDR_OK);
+    if (ok) snprintf(s_status, sizeof(s_status), "ok %dx%d /%d",
+                     (int)jd.width, (int)jd.height, 1 << scale);
+    else    snprintf(s_status, sizeof(s_status), "jd_decomp err %d", (int)dr);
   }
 
   free(work);

@@ -17,6 +17,10 @@
 #include "MinerCore.h"
 #include "MinerShaHw.h"
 #endif
+#if WITH_SPOTIFY
+#include "SpotifyClient.h"
+#include "AlbumArt.h"
+#endif
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
 extern void appInvalidate();
@@ -171,6 +175,14 @@ static void handleStatus() {
       w["rate"] = ms.workerRate[i];
       w["hw"]   = ms.workerHw[i];
     }
+  }
+#endif
+#if WITH_SPOTIFY
+  {
+    const SpotifyData& sd = spotifyGet();
+    JsonObject a = o["art"].to<JsonObject>();
+    a["url"]    = sd.artUrl;      // "" means the poll found no cover
+    a["status"] = albumArtStatus();
   }
 #endif
   sendJson(doc);

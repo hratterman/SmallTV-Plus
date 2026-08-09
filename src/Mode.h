@@ -37,6 +37,11 @@ class DisplayMode {
   virtual bool wantsTap() const { return false; }
   virtual void onTap(Settings& s) {}
 
+  // How long this mode should hold the carousel, in seconds. 0 means "use the
+  // global dwell". Some modes are glanceable and some are meant to be left
+  // running; one number for both makes the second kind pointless.
+  virtual uint16_t dwellSec(const Settings& s) const { return 0; }
+
   // True while the mode should not be rotated away from mid-activity. The
   // carousel checks this before its dwell timer, so a game in progress or an
   // animation part-way through keeps the screen.

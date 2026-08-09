@@ -360,6 +360,24 @@ void SpotifySettings::fromJson(JsonObjectConst o) {
 // ===========================================================================
 // Touch slice
 // ===========================================================================
+void AmbientSettings::setDefaults() {
+  dwellSec   = DEFAULT_AMBIENT_DWELL_SEC;
+  patternSec = DEFAULT_AMBIENT_PATTERN_SEC;
+  shuffle    = true;
+}
+
+void AmbientSettings::toJson(JsonObject o) const {
+  o["dwellSec"]   = dwellSec;
+  o["patternSec"] = patternSec;
+  o["shuffle"]    = shuffle;
+}
+
+void AmbientSettings::fromJson(JsonObjectConst o) {
+  if (o["dwellSec"].is<int>())   dwellSec = constrain((int)o["dwellSec"], 10, 3600);
+  if (o["patternSec"].is<int>()) patternSec = (uint16_t)constrain((int)o["patternSec"], 0, 3600);
+  if (o["shuffle"].is<bool>())   shuffle = o["shuffle"];
+}
+
 void TouchSettings::setDefaults() {
   enabled   = true;
   gpio      = DEFAULT_TOUCH_GPIO;
@@ -411,6 +429,7 @@ void Settings::setDefaults() {
   radar.setDefaults();
   miner.setDefaults();
   spotify.setDefaults();
+  ambient.setDefaults();
   touch.setDefaults();
   clock.setDefaults();
 }
@@ -529,6 +548,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.radar.toJson(root["radar"].to<JsonObject>());
   s.miner.toJson(root["miner"].to<JsonObject>());
   s.spotify.toJson(root["spotify"].to<JsonObject>(), includeSecrets);
+  s.ambient.toJson(root["ambient"].to<JsonObject>());
   s.touch.toJson(root["touch"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
 }
@@ -607,6 +627,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["radar"].is<JsonObjectConst>()) s.radar.fromJson(root["radar"].as<JsonObjectConst>());
   if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
   if (root["spotify"].is<JsonObjectConst>()) s.spotify.fromJson(root["spotify"].as<JsonObjectConst>());
+  if (root["ambient"].is<JsonObjectConst>()) s.ambient.fromJson(root["ambient"].as<JsonObjectConst>());
   if (root["touch"].is<JsonObjectConst>()) s.touch.fromJson(root["touch"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());
 }

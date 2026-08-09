@@ -154,7 +154,9 @@ static DisplayMode* activeMode(const Settings& s) {
       g_carSwitch = millis();
       return kModes[g_carIdx];
     }
-    if (millis() - g_carSwitch >= (uint32_t)s.carouselSec * 1000UL) {
+    uint16_t dwell = kModes[g_carIdx]->dwellSec(s);
+    if (!dwell) dwell = s.carouselSec;
+    if (millis() - g_carSwitch >= (uint32_t)dwell * 1000UL) {
       g_carSwitch = millis();
       carouselNext(s);
     }

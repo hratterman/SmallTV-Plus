@@ -129,6 +129,15 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="carouselFlappy" type="checkbox"><label>Flappy bird</label></div>
    <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
   </div>
+  <div class="card"><h2>Ambient</h2>
+   <small class="hint">Five patterns with no network involved: Conway's Life, a plasma field, a starfield, matrix rain and fireworks. Long-press the lid pad to step to the next one by hand.</small>
+   <label>Carousel dwell (s) <span class="muted">&mdash; how long ambient holds the screen</span></label>
+   <input id="ambientDwell" type="number" min="10" max="3600">
+   <label>Change pattern every (s) <span class="muted">(0 = stay on one)</span></label>
+   <input id="ambientPattern" type="number" min="0" max="3600">
+   <div class="chk"><input id="ambientShuffle" type="checkbox"><label>Shuffle patterns instead of cycling in order</label></div>
+   <small class="hint">Ambient is meant to be watched rather than read, so it gets its own dwell instead of the carousel's. The other screens keep the shared one above.</small>
+  </div>
   <div class="card"><h2>Screen</h2>
    <label>Brightness: <span id="brVal"></span>%</label>
    <input id="brightness" type="range" min="0" max="100" oninput="brVal.textContent=this.value">
@@ -498,6 +507,10 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('poolHost',mn.poolHost); sv('poolPort',mn.poolPort);
  sv('btcAddress',mn.btcAddress); sv('minerWorker',mn.workerName);
  sv('minerEngine',mn.engine||'sw');
+ // ambient slice
+ var am=c.ambient||{};
+ sv('ambientDwell',am.dwellSec||180); sv('ambientPattern',am.patternSec!=null?am.patternSec:45);
+ sc('ambientShuffle',am.shuffle!==false);
  // spotify slice
  var sp=c.spotify||{};
  sc('spotifyEnabled',!!sp.enabled); sc('spotifyAutoShow',sp.autoShow!==false);
@@ -591,6 +604,9 @@ function collect(){
   nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
   nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,nightMining:gc('nightMining'),
   mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
+ // ambient slice
+ if($('ambientDwell')){o.ambient={dwellSec:parseInt(gv('ambientDwell'))||180,
+  patternSec:parseInt(gv('ambientPattern'))||0,shuffle:gc('ambientShuffle')};}
  // radar slice
  if($('radar')){
   var r={lat:parseFloat(gv('radarLat'))||0, lon:parseFloat(gv('radarLon'))||0,

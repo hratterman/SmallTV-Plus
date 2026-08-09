@@ -119,6 +119,12 @@
 #define WITH_AMBIENT 1
 #endif
 
+// Ambient is the one mode meant to be watched rather than read, so it holds the
+// carousel far longer than the informational screens and rotates its own
+// patterns inside that block.
+#define DEFAULT_AMBIENT_DWELL_SEC   180
+#define DEFAULT_AMBIENT_PATTERN_SEC 45
+
 // The game needs the pad, so it only exists where there is one to press.
 #ifndef WITH_GAME
 #if defined(SMALLTV_ESP32)

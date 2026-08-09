@@ -9,10 +9,12 @@
 
 AmbientMode g_ambientMode;
 
-#define AMB_PATTERNS 3
+#define AMB_PATTERNS 5
 #define PAT_LIFE   0
 #define PAT_PLASMA 1
 #define PAT_STARS  2
+#define PAT_RAIN   3
+#define PAT_SPARKS 4
 
 // A cell's colour by how long it has been alive: new cells are bright, settled
 // ones cool off. Turns a binary automaton into something with depth.
@@ -31,8 +33,27 @@ void AmbientMode::invalidate(const Settings& s) {
   pattern_ = 0;
 }
 
+uint16_t AmbientMode::dwellSec(const Settings& s) const {
+  return s.ambient.dwellSec ? s.ambient.dwellSec : DEFAULT_AMBIENT_DWELL_SEC;
+}
+
+// Long-press always steps in order: when you ask for the next one you want the
+// next one, not a coin flip.
 void AmbientMode::onContextAction(Settings& s) {
   pattern_ = (uint8_t)((pattern_ + 1) % AMB_PATTERNS);
+  needFull_ = true;
+}
+
+// The automatic advance inside a long block can shuffle, so a three-minute
+// stretch does not always run the patterns in the same order.
+void AmbientMode::nextPattern(const Settings& s) {
+  if (s.ambient.shuffle && AMB_PATTERNS > 1) {
+    uint8_t n = pattern_;
+    while (n == pattern_) n = (uint8_t)(xr(&rng_) % AMB_PATTERNS);
+    pattern_ = n;
+  } else {
+    pattern_ = (uint8_t)((pattern_ + 1) % AMB_PATTERNS);
+  }
   needFull_ = true;
 }
 
@@ -64,7 +85,16 @@ void AmbientMode::startPattern(const Settings& s) {
       stars_[i].z = (uint8_t)(1 + xr(&rng_) % 255);
       stars_[i].drawn = false;
     }
+  } else if (pattern_ == PAT_RAIN) {
+    for (int i = 0; i < AMB_COLS; i++) {
+      rainY_[i] = -(int16_t)(xr(&rng_) % TFT_HEIGHT);
+      rainSpd_[i] = (uint8_t)(2 + xr(&rng_) % 5);
+    }
+  } else if (pattern_ == PAT_SPARKS) {
+    for (int i = 0; i < AMB_SPARKS; i++) sparks_[i].life = 0;
+    sparkTimer_ = 0;
   }
+  patternSince_ = millis();
 }
 
 // Conway, wrapped at the edges so gliders come back round rather than falling
@@ -180,6 +210,88 @@ void AmbientMode::stepStars() {
   }
 }
 
+// Falling glyph columns. Each column only paints its new head and blanks the
+// cell one tail-length behind it, so a frame is a few dozen small fills rather
+// than a screen.
+void AmbientMode::stepRain() {
+  Arduino_GFX* gfx = gfxDev();
+  if (!gfx) return;
+  const int tail = 14;
+  gfx->setTextSize(1);
+  for (int c = 0; c < AMB_COLS; c++) {
+    const int x = c * 6;
+    const int y = rainY_[c];
+    if (y >= 0 && y < TFT_HEIGHT) {
+      // The head is bright, the character one step back cools to green: two
+      // draws gives the whole trail its gradient for free.
+      gfx->setTextColor(0xFFFF);
+      gfx->setCursor(x, y);
+      gfx->write((char)(33 + xr(&rng_) % 90));
+      if (y >= 8) {
+        gfx->setTextColor(0x07E0);
+        gfx->setCursor(x, y - 8);
+        gfx->write((char)(33 + xr(&rng_) % 90));
+      }
+    }
+    const int erase = y - tail * 8;
+    if (erase >= 0 && erase < TFT_HEIGHT) gfx->fillRect(x, erase, 6, 8, C_BLACK);
+
+    rainY_[c] += rainSpd_[c] + 4;
+    if (rainY_[c] - tail * 8 >= TFT_HEIGHT) {
+      rainY_[c] = -(int16_t)(xr(&rng_) % 60);
+      rainSpd_[c] = (uint8_t)(2 + xr(&rng_) % 5);
+    }
+  }
+}
+
+// Fireworks. Particles carry their own previous position so each one erases
+// exactly the pixel it left, which keeps a burst to a couple of hundred pixels.
+void AmbientMode::stepSparks() {
+  Arduino_GFX* gfx = gfxDev();
+  if (!gfx) return;
+
+  if (sparkTimer_) sparkTimer_--;
+  if (!sparkTimer_) {
+    sparkTimer_ = (uint16_t)(25 + xr(&rng_) % 40);
+    const int bx = 40 + (int)(xr(&rng_) % (TFT_WIDTH - 80));
+    const int by = 50 + (int)(xr(&rng_) % (TFT_HEIGHT - 120));
+    // One hue per burst reads as a firework; mixed colours read as confetti.
+    static const uint16_t kHue[6] = {0xF800, 0xFD20, 0xFFE0, 0x07E0, 0x05FF, 0xF81F};
+    const uint16_t col = kHue[xr(&rng_) % 6];
+    int made = 0;
+    for (int i = 0; i < AMB_SPARKS && made < 18; i++) {
+      if (sparks_[i].life) continue;
+      Spark& p = sparks_[i];
+      p.x = p.px = (int16_t)bx;
+      p.y = p.py = (int16_t)by;
+      p.vx = (int8_t)((int)(xr(&rng_) % 15) - 7);
+      p.vy = (int8_t)((int)(xr(&rng_) % 15) - 9);
+      p.life = (uint8_t)(18 + xr(&rng_) % 14);
+      p.col = col;
+      made++;
+    }
+  }
+
+  for (int i = 0; i < AMB_SPARKS; i++) {
+    Spark& p = sparks_[i];
+    if (!p.life) continue;
+    if (p.px >= 0 && p.px < TFT_WIDTH && p.py >= 0 && p.py < TFT_HEIGHT)
+      gfx->drawPixel(p.px, p.py, C_BLACK);
+    p.px = p.x; p.py = p.y;
+    p.x = (int16_t)(p.x + p.vx);
+    p.y = (int16_t)(p.y + p.vy);
+    p.vy = (int8_t)(p.vy + 1);            // gravity
+    if (--p.life == 0 || p.x < 0 || p.x >= TFT_WIDTH || p.y < 0 || p.y >= TFT_HEIGHT) {
+      p.life = 0;
+      if (p.px >= 0 && p.px < TFT_WIDTH && p.py >= 0 && p.py < TFT_HEIGHT)
+        gfx->drawPixel(p.px, p.py, C_BLACK);
+      continue;
+    }
+    // Fade to dark over the last few frames rather than blinking out.
+    gfx->drawPixel(p.x, p.y, p.life > 6 ? p.col : 0x8410);
+  }
+}
+
 void AmbientMode::service(const Settings& s) {
   if (!gfxDev()) return;
 
@@ -192,8 +304,10 @@ void AmbientMode::service(const Settings& s) {
 
   // Each pattern has its own natural pace. Life wants to be readable, the
   // starfield wants to be smooth, and the plasma runs as fast as the bus allows.
-  const uint32_t period = (pattern_ == PAT_LIFE) ? 110
-                        : (pattern_ == PAT_STARS) ? 33 : 0;
+  const uint32_t period = (pattern_ == PAT_LIFE)   ? 110
+                        : (pattern_ == PAT_STARS)  ? 33
+                        : (pattern_ == PAT_RAIN)   ? 60
+                        : (pattern_ == PAT_SPARKS) ? 33 : 0;
   const uint32_t now = millis();
   if (period && now - lastMs_ < period) return;
   lastMs_ = now;
@@ -201,7 +315,16 @@ void AmbientMode::service(const Settings& s) {
   switch (pattern_) {
     case PAT_LIFE:   stepLife();   break;
     case PAT_PLASMA: stepPlasma(); break;
+    case PAT_RAIN:   stepRain();   break;
+    case PAT_SPARKS: stepSparks(); break;
     default:         stepStars();  break;
+  }
+
+  // Three minutes of one pattern is a screensaver that has stopped being
+  // interesting; rotate inside the block.
+  if (s.ambient.patternSec &&
+      now - patternSince_ >= (uint32_t)s.ambient.patternSec * 1000UL) {
+    nextPattern(s);
   }
 }
 

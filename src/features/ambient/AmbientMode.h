@@ -20,6 +20,8 @@
 #define AMB_CELLS 60
 #define AMB_CELL_PX (TFT_WIDTH / AMB_CELLS)
 #define AMB_STARS 48
+#define AMB_COLS  40      // matrix rain columns, 6 px apart
+#define AMB_SPARKS 40     // firework particles alive at once
 
 class AmbientMode : public DisplayMode {
  public:
@@ -32,11 +34,18 @@ class AmbientMode : public DisplayMode {
   void wake(const Settings& s) override { needFull_ = true; }
   void onContextAction(Settings& s) override;   // long-press: next pattern
 
+  // Ambient is meant to be left running, so it holds the carousel for minutes
+  // rather than the glanceable dwell the informational screens use.
+  uint16_t dwellSec(const Settings& s) const override;
+
  private:
   void startPattern(const Settings& s);
   void stepLife();
   void stepPlasma();
   void stepStars();
+  void stepRain();
+  void stepSparks();
+  void nextPattern(const Settings& s);
 
   uint8_t  pattern_ = 0;
   bool     needFull_ = true;
@@ -52,6 +61,16 @@ class AmbientMode : public DisplayMode {
   struct Star { int16_t x, y; uint8_t z, px, py; bool drawn; };
   Star     stars_[AMB_STARS] = {};
 
+  // Matrix rain: one head position and speed per column, and the tail is drawn
+  // by simply not erasing behind it until the head wraps.
+  int16_t  rainY_[AMB_COLS] = {};
+  uint8_t  rainSpd_[AMB_COLS] = {};
+
+  struct Spark { int16_t x, y, px, py; int8_t vx, vy; uint8_t life; uint16_t col; };
+  Spark    sparks_[AMB_SPARKS] = {};
+  uint16_t sparkTimer_ = 0;
+
+  uint32_t patternSince_ = 0;
   uint16_t phase_ = 0;
 };
 
