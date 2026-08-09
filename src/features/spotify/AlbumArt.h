@@ -21,6 +21,24 @@
 // why SpotifyClient prefers those two sources.
 #define SPOTIFY_ART_PX 152
 
+// The descale that brings a source of `width` closest to the box. Shared,
+// because the client uses it to choose which of Spotify's three sizes to ask
+// for and the decoder uses it to unpack what arrives — and if those two rules
+// ever differ, the client optimises for a scale the decoder will not apply. It
+// did: the 300 px source was chosen for its 1/2 descale to 150, then decoded at
+// 1/1 and clipped, so the screen showed the top-left corner of the cover.
+static inline uint8_t albumArtScaleFor(int width) {
+  uint8_t best = 0;
+  int bestErr = 1 << 30;
+  for (uint8_t s = 0; s <= 3; s++) {
+    const int got = width >> s;
+    const int err = got > SPOTIFY_ART_PX ? (got - SPOTIFY_ART_PX) * 2   // cropping
+                                         : (SPOTIFY_ART_PX - got);      // margin
+    if (err < bestErr) { bestErr = err; best = s; }
+  }
+  return best;
+}
+
 // Downloads `url` and draws it with its top-left at (x, y), clipped to a
 // SPOTIFY_ART_PX square. Blocking, typically under a second on a good link.
 // Returns false if the fetch or the decode failed, having drawn whatever

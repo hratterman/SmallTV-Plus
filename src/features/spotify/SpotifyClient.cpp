@@ -36,6 +36,16 @@ static struct {
   String   clientId, clientSecret, refreshToken;
 } s_cfg;
 
+// Guards the radio, not the data: only one TLS handshake may be in flight, so
+// the art fetch on the render task cannot collide with a poll on core 0.
+static SemaphoreHandle_t s_net = nullptr;
+
+bool spotifyNetLock(uint32_t waitMs) {
+  if (!s_net) return true;                 // not up yet: nothing to collide with
+  return xSemaphoreTake(s_net, pdMS_TO_TICKS(waitMs)) == pdTRUE;
+}
+void spotifyNetUnlock() { if (s_net) xSemaphoreGive(s_net); }
+
 static inline void lockTake() { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
 static inline void lockGive() { if (s_lock) xSemaphoreGive(s_lock); }
 
@@ -55,6 +65,7 @@ static void spotifyTask(void*);
 
 void spotifyInit(const Settings& s) {
   if (!s_lock) s_lock = xSemaphoreCreateMutex();
+  if (!s_net)  s_net  = xSemaphoreCreateMutex();
   lockTake();
   memset(&s_data, 0, sizeof(s_data));
   s_cfg.enabled      = s.spotify.enabled;
@@ -293,13 +304,17 @@ static void spotifyTask(void*) {
     s_forced = false;
     lastPoll = now;
 
+    if (!spotifyNetLock(10000)) { vTaskDelay(200 / portTICK_PERIOD_MS); continue; }
+    bool tokenOk = true;
     if (!s_accessToken.length() || (int32_t)(now - s_tokenExpiresAt) >= 0) {
-      if (!refreshAccessToken(cid, csec, rtok)) {
-        vTaskDelay(3000 / portTICK_PERIOD_MS);   // back off; do not hammer
-        continue;
-      }
+      tokenOk = refreshAccessToken(cid, csec, rtok);
     }
-    fetchNowPlaying();
+    if (tokenOk) fetchNowPlaying();
+    spotifyNetUnlock();
+    if (!tokenOk) {
+      vTaskDelay(3000 / portTICK_PERIOD_MS);     // back off; do not hammer
+      continue;
+    }
     vTaskDelay(50 / portTICK_PERIOD_MS);
   }
 }

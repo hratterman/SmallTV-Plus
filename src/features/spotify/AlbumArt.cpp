@@ -8,6 +8,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <esp32/rom/tjpgd.h>
+#include "SpotifyClient.h"
 
 // TJpgDec's scratch pool. 3100 bytes is the documented figure for baseline
 // JPEGs; the spare covers 4:4:4 covers, which some labels use.
@@ -96,6 +97,14 @@ const char* albumArtStatus() { return s_status; }
 bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   if (!url || !url[0]) { strlcpy(s_status, "no art url", sizeof(s_status)); return false; }
 
+  // The poll task can be mid-handshake on core 0 right now, and two TLS
+  // sessions at once do not fit in this heap. Wait for it rather than fail.
+  if (!spotifyNetLock(9000)) {
+    strlcpy(s_status, "busy: poll holds the radio", sizeof(s_status));
+    return false;
+  }
+  struct NetRelease { ~NetRelease() { spotifyNetUnlock(); } } netRelease;
+
   WiFiClientSecure client;
   client.setInsecure();          // same posture as the rest of the Spotify path
   client.setTimeout(6);
@@ -136,11 +145,14 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   if (pr != JDR_OK) {
     snprintf(s_status, sizeof(s_status), "jd_prepare err %d", (int)pr);
   } else {
-    // Descale by the power of two that brings the cover closest to the box
-    // without going under it — a slightly cropped cover reads better than one
-    // floating in a margin.
-    uint8_t scale = 0;
-    while (scale < 3 && (jd.width >> (scale + 1)) >= SPOTIFY_ART_PX) scale++;
+    const uint8_t scale = albumArtScaleFor((int)jd.width);
+    // Centre whatever size that lands on, so a cover a couple of pixels under
+    // the box sits in the middle rather than against the top-left corner.
+    const int drawn = (int)(jd.width >> scale);
+    if (drawn < SPOTIFY_ART_PX) {
+      ctx.ox = (int16_t)(x + (SPOTIFY_ART_PX - drawn) / 2);
+      ctx.oy = (int16_t)(y + (SPOTIFY_ART_PX - drawn) / 2);
+    }
     const JRESULT dr = jd_decomp(&jd, artOut, scale);
     ok = (dr == JDR_OK);
     if (ok) snprintf(s_status, sizeof(s_status), "ok %dx%d /%d",
