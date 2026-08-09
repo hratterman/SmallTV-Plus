@@ -44,6 +44,7 @@ class SpotifyMode : public DisplayMode {
   bool     drawnValid_   = false;
   bool     drawnError_   = false;
   bool     drawnLinked_  = false;
+  bool     drawnExplicit_ = false;
   // The cover currently on the glass, and whether it is still intact. Any other
   // mode drawing invalidates it, which is exactly what wake() means.
   char     drawnArt_[SPOTIFY_ART_LEN] = {0};

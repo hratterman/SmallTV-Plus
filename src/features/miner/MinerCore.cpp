@@ -631,7 +631,12 @@ static void storeConfig(const Settings& s) {
   if (s.miner.workerName.length()) user += "." + s.miner.workerName;
 
   lockTake();
-  s_cfg.configured = s.miner.enabled && s.miner.btcAddress.length() > 0;
+  // Work mode is an interlock, not a preference: mining runs on someone else's
+  // network and someone else's electricity, so it is refused outright rather
+  // than left to whether the miner tab happens to be ticked.
+  const bool workBlocks = s.work.enabled && s.work.noMining;
+  s_cfg.configured = s.miner.enabled && s.miner.btcAddress.length() > 0 && !workBlocks;
+  s_stats.blockedByWork = workBlocks;
   s_cfg.host = s.miner.poolHost;
   s_cfg.port = s.miner.poolPort;
   s_cfg.user = user;

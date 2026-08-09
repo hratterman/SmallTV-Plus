@@ -29,6 +29,10 @@ struct SpotifyData {
   uint32_t startedAtMs;  // millis() when progressMs was sampled, for interpolation
   char     artUrl[SPOTIFY_ART_LEN];   // album cover, "" if the track has none
   uint16_t artPx;        // the cover's native square size, for picking a scale
+  // Spotify's own flag for the track. Far better than guessing from the title:
+  // it is the label's marking, it covers lyrics the title says nothing about,
+  // and it needs no word list to maintain.
+  bool     explicitTrack;
   bool     error;
   char     errorMsg[48];
 };

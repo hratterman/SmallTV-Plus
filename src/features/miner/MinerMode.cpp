@@ -154,9 +154,12 @@ void MinerMode::render(const Settings& s, bool full) {
       gfx->setTextColor(C_BTC);
       gfx->setCursor(10, 10);
       gfx->print("MINER");
-      gfxDrawCentered(s.miner.enabled ? "no BTC address" : "mining disabled",
-                      104, 2, C_WHITE);
-      gfxDrawCentered("configure in the web UI", 134, 1, C_DIM);
+      const bool work = st.blockedByWork;
+      gfxDrawCentered(work ? "off for work mode"
+                           : (s.miner.enabled ? "no BTC address" : "mining disabled"),
+                      104, 2, work ? C_DIM : C_WHITE);
+      gfxDrawCentered(work ? "not mining on an office network"
+                           : "configure in the web UI", 134, 1, C_DIM);
       slotClear();
     }
     return;

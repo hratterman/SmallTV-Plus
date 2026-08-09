@@ -165,6 +165,22 @@ struct AmbientSettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Work mode slice --------------------------------------------------------
+// One switch for "this cube is on a desk at an office". It is deliberately a
+// device-wide setting rather than a per-feature one: the point is to be able to
+// make the thing appropriate for work without having to remember which of eight
+// features needs turning down.
+struct WorkSettings {
+  bool   enabled;
+  bool   noMining;      // mining on a company network and their power
+  bool   hideExplicit;  // honour Spotify's own explicit flag
+  String blocklist;     // extra words to mask, comma or space separated
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Captive portal slice ---------------------------------------------------
 struct CaptiveSettings {
   bool   autoAccept;   // try to submit the portal's form by ourselves
@@ -230,6 +246,7 @@ struct Settings {
   MinerSettings   miner;
   SpotifySettings spotify;
   AmbientSettings ambient;
+  WorkSettings    work;
   CaptiveSettings captive;
   TouchSettings   touch;
   ClockSettings  clock;

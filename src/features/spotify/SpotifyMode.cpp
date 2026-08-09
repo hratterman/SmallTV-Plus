@@ -4,8 +4,27 @@
 #include <Arduino_GFX_Library.h>
 #include "Gfx.h"
 #include "AlbumArt.h"
+#include "WorkMask.h"
 
 SpotifyMode g_spotifyMode;
+
+// What to put on the glass for a track, once work mode has had its say.
+// Applied at render time rather than at fetch time on purpose: the poll should
+// keep the real values so turning work mode off shows the right thing
+// immediately, without waiting for the next poll.
+static void workText(const Settings& s, const SpotifyData& d,
+                     char* title, size_t titleN, char* artist, size_t artistN) {
+  strlcpy(title, d.track, titleN);
+  strlcpy(artist, d.artist, artistN);
+  if (!s.work.enabled) return;
+  if (s.work.hideExplicit && d.explicitTrack) {
+    // The cover, the artist and the progress all stay — enough to know what is
+    // playing without the title announcing itself across an open-plan office.
+    strlcpy(title, "(explicit track)", titleN);
+  }
+  workMaskWords(title, s.work.blocklist.c_str());
+  workMaskWords(artist, s.work.blocklist.c_str());
+}
 
 #define C_SPOT  0x1E6C   // Spotify green #1db954
 #define C_DIM   0xB574
@@ -146,8 +165,10 @@ void SpotifyMode::renderAll(const Settings& s) {
     }
   }
 
-  scrolling_ = gfxMarqueeDraw(kTitleBand, d.track, millis());
-  scrolling_ |= gfxMarqueeDraw(kArtistBand, d.artist, millis());
+  char title[SPOTIFY_TRACK_LEN], artist[SPOTIFY_ARTIST_LEN];
+  workText(s, d, title, sizeof(title), artist, sizeof(artist));
+  scrolling_ = gfxMarqueeDraw(kTitleBand, title, millis());
+  scrolling_ |= gfxMarqueeDraw(kArtistBand, artist, millis());
 
   // Bar track and total duration are static for this song; only the fill and
   // the elapsed label move from here on.
@@ -224,7 +245,8 @@ void SpotifyMode::service(const Settings& s) {
       d.error != drawnError_ ||
       d.playing != drawnPlaying_ ||
       strncmp(d.track, drawnTrack_, sizeof(drawnTrack_)) != 0 ||
-      strncmp(d.artist, drawnArtist_, sizeof(drawnArtist_)) != 0;
+      strncmp(d.artist, drawnArtist_, sizeof(drawnArtist_)) != 0 ||
+      d.explicitTrack != drawnExplicit_;
 
   if (contentChanged) {
     needFull_ = false;
@@ -234,6 +256,7 @@ void SpotifyMode::service(const Settings& s) {
     drawnPlaying_ = d.playing;
     strlcpy(drawnTrack_, d.track, sizeof(drawnTrack_));
     strlcpy(drawnArtist_, d.artist, sizeof(drawnArtist_));
+    drawnExplicit_ = d.explicitTrack;
     lastTick_ = now;
     renderAll(s);
     return;
@@ -249,8 +272,10 @@ void SpotifyMode::service(const Settings& s) {
   // over the bus, and nothing at all when both titles fit.
   if (d.playing && scrolling_ && (now - scrollTick_) >= 40) {
     scrollTick_ = now;
-    gfxMarqueeDraw(kTitleBand, d.track, now);
-    gfxMarqueeDraw(kArtistBand, d.artist, now);
+    char title[SPOTIFY_TRACK_LEN], artist[SPOTIFY_ARTIST_LEN];
+    workText(s, d, title, sizeof(title), artist, sizeof(artist));
+    gfxMarqueeDraw(kTitleBand, title, now);
+    gfxMarqueeDraw(kArtistBand, artist, now);
   }
 }
 

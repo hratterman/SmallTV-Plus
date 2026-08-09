@@ -47,7 +47,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
 .chip{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;letter-spacing:.03em;background:var(--acc2);color:#fff;vertical-align:middle}
 </style></head>
 <body>
-<header><span id="dot" class="dot"></span><h1>SmallTV</h1><span id="chip" class="chip" style="display:none"></span><span id="hi" class="muted"></span></header>
+<header><span id="dot" class="dot"></span><h1>SmallTV</h1><span id="chip" class="chip" style="display:none"></span><span id="workBadge" class="chip" style="display:none;background:var(--mut)">WORK</span><span id="hi" class="muted"></span></header>
 <nav>
  <button data-t="status" class="active">Status</button>
  <button data-t="wifi">WiFi</button>
@@ -152,6 +152,17 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <input id="ambientPattern" type="number" min="0" max="3600">
    <div class="chk"><input id="ambientShuffle" type="checkbox"><label>Shuffle patterns instead of cycling in order</label></div>
    <small class="hint">Ambient is meant to be watched rather than read, so it gets its own dwell instead of the carousel's. The other screens keep the shared one above.</small>
+  </div>
+  <div class="card"><h2>Work mode</h2>
+   <div class="chk"><input id="workEnabled" type="checkbox" onchange="workChanged()"><label>This cube is at work</label></div>
+   <div id="workOpts" style="display:none">
+    <div class="chk"><input id="workNoMining" type="checkbox"><label>Never mine</label></div>
+    <div class="chk"><input id="workHideExplicit" type="checkbox"><label>Hide track names Spotify marks explicit</label></div>
+    <label>Also mask these words <span class="muted">(comma or space separated)</span></label>
+    <input id="workBlocklist" type="text" placeholder="word, another">
+    <small class="hint">Masking is whole-word and case-insensitive, so a blocked <code>ass</code> does not turn <i>bassline</i> into asterisks. An explicit track still shows its cover, artist and progress &mdash; only the title is replaced, which is enough to know what is playing without it announcing itself across the room.</small>
+   </div>
+   <small class="hint">Mining is refused outright while this is on, whatever the Miner tab says: it runs on someone else&rsquo;s network and someone else&rsquo;s electricity, which is a policy question rather than a preference.</small>
   </div>
   <div class="card"><h2>Screen</h2>
    <label>Brightness: <span id="brVal"></span>% <span class="muted">(0 = screen off)</span></label>
@@ -480,6 +491,7 @@ function hideFeat(name){
  var o=document.querySelector('#mode option[value="'+FEATURES[name].mode+'"]'); if(o)o.remove();
  var c=$(FEATURES[name].car); if(c)c.closest('.chk').remove();
 }
+function workChanged(){var o=$('workOpts'); if(o)o.style.display=gc('workEnabled')?'block':'none';}
 function modeChanged(){if(!$('mode'))return;
  $('carouselRow').style.display=$('mode').value==='carousel'?'block':'none';}
 function loadConfig(){return j('/api/config').then(function(c){C=c;
@@ -548,6 +560,11 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('spotifyClientId',sp.clientId); sv('spotifyPollSec',sp.pollSec||10);
  var scs=$('spotifyClientSecret'); if(scs)scs.placeholder=sp.secretSet?'(unchanged)':'paste the client secret';
  var srt=$('spotifyRefreshToken'); if(srt)srt.placeholder=sp.tokenSet?'(unchanged)':'paste the refresh token';
+ // work mode slice
+ var wk=c.work||{};
+ sc('workEnabled',!!wk.enabled); sc('workNoMining',wk.noMining!==false);
+ sc('workHideExplicit',wk.hideExplicit!==false); sv('workBlocklist',wk.blocklist);
+ workChanged();
  // captive portal slice
  var cp=c.captive||{};
  sc('captiveAuto',cp.autoAccept!==false);
@@ -668,6 +685,8 @@ function collect(){
  if($('spotify')) o.spotify={enabled:gc('spotifyEnabled'),autoShow:gc('spotifyAutoShow'),
   clientId:gv('spotifyClientId').trim(), clientSecret:gv('spotifyClientSecret').trim(),
   refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
+ if($('workEnabled')) o.work={enabled:gc('workEnabled'),noMining:gc('workNoMining'),
+  hideExplicit:gc('workHideExplicit'),blocklist:gv('workBlocklist').trim()};
  if($('captiveAuto')) o.captive={autoAccept:gc('captiveAuto'),
   formUrl:gv('captiveFormUrl').trim(), formBody:gv('captiveFormBody').trim(),
   probeUrl:gv('captiveProbe').trim()};
@@ -750,6 +769,7 @@ function loadStatus(){j('/api/status').then(function(s){
  $('hi').textContent=s.mode==='ap'?'setup mode':(s.ip||'');
  var cn=$('clockNow'); if(cn){var ne=!!(C.clock&&C.clock.nightEnabled);var ns=s.night?'  · night mode active':(s.nightHeld?'  · night mode waiting for NTP':'');cn.textContent=!ne?'Clock: NTP runs only when night mode is on':('Clock: '+(s.synced?(s.time||'synced')+(s.tz?' ('+s.tz+')':''):'waiting for NTP...')+ns);}
  var fw=$('fwVer'); if(fw)fw.textContent=s.fw+' '+s.version;
+ var wb=$('workBadge'); if(wb)wb.style.display=s.work?'inline-block':'none';
  // What the backlight is actually set to and which rule chose it. A black
  // screen is otherwise indistinguishable from a dead one.
  // Associated is not online, and until the portal probe existed there was

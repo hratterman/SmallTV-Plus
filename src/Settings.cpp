@@ -379,6 +379,30 @@ void AmbientSettings::fromJson(JsonObjectConst o) {
 }
 
 // ===========================================================================
+// Work mode slice
+// ===========================================================================
+void WorkSettings::setDefaults() {
+  enabled      = false;
+  noMining     = true;    // the sub-switches describe what "work mode" means,
+  hideExplicit = true;    // and both are on by default once it is enabled
+  blocklist    = "";
+}
+
+void WorkSettings::toJson(JsonObject o) const {
+  o["enabled"]      = enabled;
+  o["noMining"]     = noMining;
+  o["hideExplicit"] = hideExplicit;
+  o["blocklist"]    = blocklist;
+}
+
+void WorkSettings::fromJson(JsonObjectConst o) {
+  if (o["enabled"].is<bool>())      enabled = o["enabled"];
+  if (o["noMining"].is<bool>())     noMining = o["noMining"];
+  if (o["hideExplicit"].is<bool>()) hideExplicit = o["hideExplicit"];
+  if (o["blocklist"].is<const char*>()) blocklist = o["blocklist"].as<String>();
+}
+
+// ===========================================================================
 // Captive portal slice
 // ===========================================================================
 void CaptiveSettings::setDefaults() {
@@ -479,6 +503,7 @@ void Settings::setDefaults() {
   miner.setDefaults();
   spotify.setDefaults();
   ambient.setDefaults();
+  work.setDefaults();
   captive.setDefaults();
   touch.setDefaults();
   clock.setDefaults();
@@ -592,6 +617,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.miner.toJson(root["miner"].to<JsonObject>());
   s.spotify.toJson(root["spotify"].to<JsonObject>(), includeSecrets);
   s.ambient.toJson(root["ambient"].to<JsonObject>());
+  s.work.toJson(root["work"].to<JsonObject>());
   s.captive.toJson(root["captive"].to<JsonObject>());
   s.touch.toJson(root["touch"].to<JsonObject>());
   s.clock.toJson(root["clock"].to<JsonObject>());
@@ -670,6 +696,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
   if (root["spotify"].is<JsonObjectConst>()) s.spotify.fromJson(root["spotify"].as<JsonObjectConst>());
   if (root["ambient"].is<JsonObjectConst>()) s.ambient.fromJson(root["ambient"].as<JsonObjectConst>());
+  if (root["work"].is<JsonObjectConst>()) s.work.fromJson(root["work"].as<JsonObjectConst>());
   if (root["captive"].is<JsonObjectConst>()) s.captive.fromJson(root["captive"].as<JsonObjectConst>());
   if (root["touch"].is<JsonObjectConst>()) s.touch.fromJson(root["touch"].as<JsonObjectConst>());
   if (root["clock"].is<JsonObjectConst>()) s.clock.fromJson(root["clock"].as<JsonObjectConst>());

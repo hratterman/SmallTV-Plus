@@ -139,6 +139,7 @@ static void handleStatus() {
   // outside they look identical. Say which one is in force and at what level,
   // so "the screen went black" is one request to answer instead of a guess.
   {
+    o["work"] = S->work.enabled;
     JsonObject sc = o["screen"].to<JsonObject>();
     sc["level"]    = appBrightnessLevel();
     sc["why"]      = appBrightnessWhy();
@@ -171,6 +172,7 @@ static void handleStatus() {
     minerCoreSnapshot(ms);
     JsonObject m = o["miner"].to<JsonObject>();
     m["configured"] = ms.configured;
+    m["blockedByWork"] = ms.blockedByWork;
     m["state"]      = (ms.state == MINER_MINING)      ? "mining"
                     : (ms.state == MINER_SUBSCRIBED)  ? "subscribed"
                     : (ms.state == MINER_CONNECTING)  ? "connecting"

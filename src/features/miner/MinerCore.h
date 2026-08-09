@@ -31,7 +31,8 @@ enum MinerPoolState : uint8_t {
 // renderer never sees a torn multi-field read.
 struct MinerStats {
   MinerPoolState state;
-  bool     configured;     // enabled && address set
+  bool     configured;     // enabled && address set && not blocked
+  bool     blockedByWork;  // work mode is holding it off, whatever the tab says
   uint32_t templates;      // jobs received from the pool
   double   poolDiff;       // current pool share difficulty
   double   bestDiff;       // best share difficulty seen this run

@@ -243,6 +243,7 @@ static bool fetchNowPlaying() {
     s_data.error = false;
     s_data.playing = false;
     s_data.track[0] = s_data.artist[0] = s_data.artUrl[0] = 0;
+    s_data.explicitTrack = false;
     s_artCandidates = 0;
     s_data.lastOkMs = millis();
     return true;
@@ -270,6 +271,7 @@ static bool fetchNowPlaying() {
   JsonObject item = filter["item"].to<JsonObject>();
   item["name"] = true;
   item["duration_ms"] = true;
+  item["explicit"] = true;
   item["artists"][0]["name"] = true;
   // The art list is three entries of {url,width,height}; small enough to keep
   // now that the rest of the payload is filtered away.
@@ -297,6 +299,7 @@ static bool fetchNowPlaying() {
   s_data.playing    = doc["is_playing"] | false;
   s_data.progressMs = doc["progress_ms"] | 0;
   s_data.durationMs = doc["item"]["duration_ms"] | 0;
+  s_data.explicitTrack = doc["item"]["explicit"] | false;
   strlcpy(s_data.track, doc["item"]["name"] | "", sizeof(s_data.track));
 
   // Join however many artists there are, comma separated, until the field fills.
