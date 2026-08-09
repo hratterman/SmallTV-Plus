@@ -9,6 +9,10 @@
 #include <HTTPClient.h>
 #include <esp32/rom/tjpgd.h>
 #include "SpotifyClient.h"
+#include "Platform.h"          // platformMaxFreeBlock()
+#if WITH_MINER
+#include "MinerCore.h"
+#endif
 
 // TJpgDec's scratch pool. 3100 bytes is the documented figure for baseline
 // JPEGs; the spare covers 4:4:4 covers, which some labels use.
@@ -129,6 +133,15 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   }
   struct NetRelease { ~NetRelease() { spotifyNetUnlock(); } } netRelease;
 
+#if WITH_MINER
+  // The hash workers hold the SHA peripheral that mbedTLS needs and share the
+  // core with this task at the same priority. Between them they were failing
+  // the handshake outright — "HTTP -1" with the miner on, a clean cover with it
+  // off. Park them for the second this takes.
+  minerCorePause();
+  struct MinerRelease { ~MinerRelease() { minerCoreResume(); } } minerRelease;
+#endif
+
   WiFiClientSecure client;
   client.setInsecure();          // same posture as the rest of the Spotify path
   client.setTimeout(6);
@@ -138,14 +151,16 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   // unless asked — which looks identical to the image simply not loading.
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) {
-    strlcpy(s_status, "begin failed (TLS/heap)", sizeof(s_status));
+    snprintf(s_status, sizeof(s_status), "begin failed, blk %uk",
+             (unsigned)(platformMaxFreeBlock() / 1024));
     s_retryAt = millis() + 15000;
     return false;
   }
 
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    snprintf(s_status, sizeof(s_status), "HTTP %d", code);
+    snprintf(s_status, sizeof(s_status), "HTTP %d, blk %uk", code,
+             (unsigned)(platformMaxFreeBlock() / 1024));
     http.end();
     s_retryAt = millis() + 15000;
     return false;

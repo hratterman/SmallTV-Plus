@@ -131,6 +131,27 @@ static bool hwSelfCheck(const MinerWork& w) {
 }
 #endif
 
+// Cooperative pause. Suspending the tasks outright would risk stopping one
+// while it holds the stats lock or the SHA engine; parking them at the top of
+// the chunk loop means neither is ever held across a pause.
+static volatile bool s_pauseReq = false;
+static volatile bool s_workerParked[2] = {false, false};
+
+void minerCorePause() {
+  if (!s_workerTask[0] && !s_workerTask[1]) return;   // engine never started
+  s_pauseReq = true;
+  // Bounded wait: a worker parks within one nonce chunk. If one is wedged we
+  // carry on anyway rather than hold up the display.
+  const uint32_t deadline = millis() + 300;
+  while ((int32_t)(millis() - deadline) < 0) {
+    if ((!s_workerTask[0] || s_workerParked[0]) &&
+        (!s_workerTask[1] || s_workerParked[1])) break;
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
+void minerCoreResume() { s_pauseReq = false; }
+
 static void minerWorkerTask(void* arg) {
   const uint32_t idx = (uint32_t)(uintptr_t)arg;
 
@@ -149,6 +170,17 @@ static void minerWorkerTask(void* arg) {
   Serial.printf("[miner] worker %u on core %d\n", (unsigned)idx, xPortGetCoreID());
 
   for (;;) {
+    // Park here, between chunks: the engine is unlocked and no lock is held, so
+    // a TLS handshake gets both the SHA peripheral and the core to itself.
+    if (s_pauseReq) {
+      s_workerParked[idx & 1] = true;
+      while (s_pauseReq) {
+        esp_task_wdt_reset();          // parked, not hung
+        vTaskDelay(pdMS_TO_TICKS(5));
+      }
+      s_workerParked[idx & 1] = false;
+    }
+
     uint32_t nonceStart = 0;
     bool haveWork = false;
 

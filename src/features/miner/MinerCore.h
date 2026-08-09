@@ -61,6 +61,15 @@ struct MinerStats {
   char     lastError[48];
 };
 
+// Park the hash workers at a safe point and wait (briefly) for them to get
+// there. Needed around a TLS handshake: the workers hold the SHA peripheral —
+// which mbedTLS also uses — and run at the same priority as the task doing the
+// handshake, so between them they can stall a connection until it times out.
+// Cheap: a cover fetch costs about a second of hashing, once per track.
+// Both are no-ops when the engine was never started.
+void minerCorePause();
+void minerCoreResume();
+
 void minerCoreBegin(const Settings& s);
 void minerCoreApplyConfig(const Settings& s);   // pool/address changed -> reconnect
 void minerCoreSnapshot(MinerStats& out);
