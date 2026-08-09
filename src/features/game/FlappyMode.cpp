@@ -35,16 +35,21 @@ FlappyMode g_flappyMode;
 #define BIRD_H    12
 
 #define PIPE_W    30
-#define PIPE_STEP 108           // horizontal spacing between pipes
+#define PIPE_STEP 116           // horizontal spacing between pipes
 #define LIP_H     5
-#define GAP_MAX   66
-#define GAP_MIN   50
+#define GAP_MAX   74
+#define GAP_MIN   56
 
-#define SCROLL_DX 2             // pixels per frame; 30 fps => 60 px/s
-#define FRAME_MS  33
-#define GRAVITY   0.42f
-#define FLAP_V    (-4.9f)
-#define MAX_FALL  7.5f
+// Motion is in pixels per second, not per frame. The loop shares core 1 with a
+// mining worker at the same priority, so frames arrive irregularly; fixed
+// per-frame steps turn that jitter into the bird visibly changing speed. With a
+// real dt an uneven frame still traces the same arc.
+#define FRAME_MS      25          // aim for 40 fps
+#define DT_MAX        0.06f       // a stalled frame slows time, never teleports
+#define GRAVITY_PS2   400.0f
+#define FLAP_PS       (-195.0f)   // ~48 px of lift over ~0.5 s
+#define MAX_FALL_PS   300.0f
+#define SCROLL_PS     52.0f
 
 #define BEST_PATH "/flappy.dat"
 
@@ -107,14 +112,20 @@ void FlappyMode::reset() {
 void FlappyMode::onTap(Settings& s) {
   if (state_ == READY) {
     state_ = PLAYING;
-    vel_ = FLAP_V;
+    vel_ = FLAP_PS;
+    scrollAcc_ = 0;
     // First pipe starts off the right edge so there is a moment to react.
     for (int i = 0; i < FLAP_PIPES; i++)
       spawnPipe(i, TFT_WIDTH + 40 + i * PIPE_STEP);
+    // The prompt has to go now. Nothing else repaints the playfield once play
+    // starts, so it would sit there until a pipe happened to scroll over it.
+    clearField();
+    drawnY_ = -1;
+    drawBird();
     lastFrame_ = millis();
   } else if (state_ == PLAYING) {
-    vel_ = FLAP_V;
-    wing_ = 6;                       // frames of "wing up" after a flap
+    vel_ = FLAP_PS;
+    wing_ = 8;                       // frames of "wing up" after a flap
   } else if (state_ == DEAD) {
     // Brief lockout so the tap that killed you does not also restart you.
     if (millis() - deadAt_ > 600) { reset(); needFull_ = true; }
@@ -253,11 +264,25 @@ void FlappyMode::scrollPipes(int dx) {
   }
 }
 
+void FlappyMode::clearField() {
+  Arduino_GFX* gfx = gfxDev();
+  if (gfx) gfx->fillRect(0, PLAY_TOP, TFT_WIDTH, PLAY_H, C_SKY);
+}
+
+// Erase only the sliver the new position will not cover. Wiping the whole box
+// and redrawing leaves the bird absent for a frame, which at this size reads as
+// the bird flickering rather than moving.
 void FlappyMode::eraseBird() {
   Arduino_GFX* gfx = gfxDev();
   if (!gfx || drawnY_ < 0) return;
-  gfx->fillRect(BIRD_X, drawnY_, BIRD_W, BIRD_H, C_SKY);
-  patchPipes(BIRD_X, drawnY_, BIRD_W, BIRD_H);
+  const int ny = (int)birdY_, oy = drawnY_;
+  if (ny == oy) return;
+  int y0, h;
+  if (ny > oy) { y0 = oy; h = ny - oy; }              // moved down: clear above
+  else         { y0 = ny + BIRD_H; h = oy - ny; }     // moved up: clear below
+  if (h > BIRD_H) { y0 = oy; h = BIRD_H; }            // jumped clear of itself
+  gfx->fillRect(BIRD_X, y0, BIRD_W, h, C_SKY);
+  patchPipes(BIRD_X, y0, BIRD_W, h);
 }
 
 void FlappyMode::drawBird() {
@@ -322,14 +347,22 @@ void FlappyMode::service(const Settings& s) {
 
   const uint32_t now = millis();
   if (now - lastFrame_ < FRAME_MS) return;
+  float dt = (now - lastFrame_) / 1000.0f;
+  if (dt > DT_MAX) dt = DT_MAX;
   lastFrame_ = now;
 
   eraseBird();
-  scrollPipes(SCROLL_DX);
 
-  vel_ += GRAVITY;
-  if (vel_ > MAX_FALL) vel_ = MAX_FALL;
-  birdY_ += vel_;
+  // Whole pixels only — the scroll draws edge strips — but the leftover carries
+  // to the next frame so the speed stays honest.
+  scrollAcc_ += SCROLL_PS * dt;
+  int dx = (int)scrollAcc_;
+  if (dx > 8) dx = 8;                  // keep the strip narrower than a pipe
+  if (dx > 0) { scrollAcc_ -= dx; scrollPipes(dx); }
+
+  vel_ += GRAVITY_PS2 * dt;
+  if (vel_ > MAX_FALL_PS) vel_ = MAX_FALL_PS;
+  birdY_ += vel_ * dt;
   if (birdY_ < PLAY_TOP) { birdY_ = PLAY_TOP; vel_ = 0; }
   if (wing_) wing_--;
 

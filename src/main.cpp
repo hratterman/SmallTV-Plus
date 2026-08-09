@@ -170,6 +170,10 @@ static DisplayMode* activeMode(const Settings& s) {
 // it without waiting for morning.
 static uint32_t g_nightWakeUntil = 0;
 
+// True while the active mode is mid-something it should not be interrupted
+// during. Gates the background polling that would otherwise stall a frame.
+static bool g_holdingScreen = false;
+
 static bool nightMiningActive(const Settings& s) {
   if (!s.clock.nightMining || !clockNightActive()) return false;
   if (g_nightWakeUntil) {
@@ -430,8 +434,10 @@ void loop() {
 
 #if WITH_SPOTIFY
   // Poll regardless of what is showing: auto-takeover depends on noticing that
-  // playback started while a different mode has the screen.
-  spotifyService(g_settings);
+  // playback started while a different mode has the screen. The exception is a
+  // mode holding the screen — a game — because this poll blocks for a few
+  // hundred milliseconds over TLS and that is a very visible freeze at 40 fps.
+  if (!g_holdingScreen) spotifyService(g_settings);
 #endif
 
   // A pushed banner owns the screen while it lasts, then the mode repaints.
@@ -458,7 +464,11 @@ void loop() {
     s_lastMode = m;
     m->wake(g_settings);
   }
-  if (m) m->service(g_settings);
+  if (m) {
+    m->service(g_settings);
+    // Read after servicing: a one-frame lag is irrelevant to a ten-second poll.
+    g_holdingScreen = m->holdsScreen();
+  }
 
   delay(5);
 }

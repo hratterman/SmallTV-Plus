@@ -42,6 +42,7 @@ class FlappyMode : public DisplayMode {
 
   void reset();
   void drawChrome();
+  void clearField();
   void drawBird();
   void eraseBird();
   void patchPipes(int16_t x, int16_t y, int16_t w, int16_t h);
@@ -57,7 +58,8 @@ class FlappyMode : public DisplayMode {
   uint32_t deadAt_ = 0;
   uint32_t rng_ = 12345u;
 
-  float    birdY_ = 0, vel_ = 0;
+  float    birdY_ = 0, vel_ = 0;   // px and px/s
+  float    scrollAcc_ = 0;         // sub-pixel scroll carried between frames
   int16_t  drawnY_ = -1;
   uint8_t  wing_ = 0;
 
