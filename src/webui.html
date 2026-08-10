@@ -389,7 +389,10 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <span class="muted" id="calLinkMsg"></span></div>
    <small class="hint"><b>Linking, once.</b> The cube reads your next two days and shows the
     nearest event with a countdown. Recurring events are expanded by the provider, not the cube.
-    <br><b>Google:</b> <a href="https://console.cloud.google.com/apis/credentials" target="_blank">console.cloud.google.com</a>
+    <br><b>Google, the easy way:</b> open the hosted tether page and use its <i>Link Google
+    Calendar</i> card &mdash; the consent runs in the browser and the token lands on the cube over
+    the cable (or is shown for pasting here). No terminal.
+    <br><b>Google, by script:</b> <a href="https://console.cloud.google.com/apis/credentials" target="_blank">console.cloud.google.com</a>
     &rarr; OAuth client, type <i>Desktop app</i>; enable the Calendar API; then
     <code>python3 tools/calendar_auth.py google --id &lt;ID&gt; --secret &lt;SECRET&gt;</code>
     <br><b>Microsoft:</b> <a href="https://portal.azure.com" target="_blank">portal.azure.com</a>

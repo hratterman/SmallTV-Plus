@@ -20,6 +20,11 @@
 
   Web Serial is Chrome/Edge/Opera on desktop only. Safari and Firefox have not
   implemented it, and the page says so rather than offering a dead button.
+
+  The page also doubles as the Google Calendar OAuth helper: being HTTPS on a
+  real domain is exactly what Google accepts as a redirect URI, which a device
+  and a terminal script are not. Moving or renaming the page changes that URI,
+  and every user's OAuth client registration breaks until they update it.
 -->
 <html lang="en">
 <head>
@@ -161,6 +166,42 @@ details>div{margin-top:12px}
         <div class="bar">
           <button id="btnClear">Clear log</button>
           <span class="msg" id="linkMsg">Leave this tab open. The cube stops fetching when it closes.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2>Link Google Calendar</h2>
+      <div class="body">
+        <p class="msg" style="margin-top:0">This page is HTTPS on your own domain, which is exactly
+          what Google accepts as an OAuth redirect. So the whole consent dance can happen right here
+          &mdash; no script, no terminal &mdash; and the token goes to the cube over the cable.</p>
+        <div class="row">
+          <label>One-time setup <span class="hint">&mdash; in
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a></span></label>
+          <p class="msg">Create an OAuth client, type <b>Web application</b>, and add this exact
+            redirect URI:</p>
+          <input type="text" id="gRedirect" readonly onclick="this.select()">
+          <p class="msg" style="margin-top:6px">Also enable the <b>Google Calendar API</b> for the project.</p>
+        </div>
+        <div class="two">
+          <div class="row">
+            <label for="gClientId">Client ID</label>
+            <input id="gClientId" type="text" autocomplete="off">
+          </div>
+          <div class="row">
+            <label for="gClientSecret">Client secret</label>
+            <input id="gClientSecret" type="password" autocomplete="off">
+          </div>
+        </div>
+        <div class="bar" style="margin-top:4px">
+          <button class="primary" id="gLinkBtn">Link Google</button>
+          <span class="msg" id="gLinkMsg"></span>
+        </div>
+        <div class="row hide" id="gTokenRow" style="margin-top:12px">
+          <label>Refresh token <span class="hint">&mdash; if the cube is not on the cable, paste
+            this into its web UI instead</span></label>
+          <input type="text" id="gToken" readonly onclick="this.select()">
         </div>
       </div>
     </div>
@@ -577,6 +618,7 @@ function cfgReceived(){
   try{ cfgDoc=JSON.parse(text); }
   catch(e){ $('cfgEmpty').textContent='The settings did not parse: '+e.message; return; }
   fillForm();
+  if(gPending) gDeliver();      // a Google link was waiting for the cube
   $('cfgEmpty').classList.add('hide');
   $('cfgForm').classList.remove('hide');
   $('cfgMsg').textContent=`${(text.length/1024).toFixed(1)} KB read over the cable`;
@@ -650,14 +692,10 @@ async function teardown(){
   cfgDoc=null;
 }
 
-$('btnConnect').onclick=async()=>{
-  try{
-    port=await navigator.serial.requestPort();
-    await port.open({baudRate:115200});
-  }catch(e){
-    if(e.name!=='NotFoundError') log('could not open the port: '+e.message,'l-err');
-    port=null; return;
-  }
+async function openPort(p){
+  try{ await p.open({baudRate:115200}); }
+  catch(e){ log('could not open the port: '+e.message,'l-err'); return false; }
+  port=p;
   writer=port.writable.getWriter();
   keepReading=true;
   setState('waiting for the cube','');
@@ -665,7 +703,91 @@ $('btnConnect').onclick=async()=>{
   $('btnDisconnect').classList.remove('hide');
   log('port open at 115200 — waiting for the cube to say hello','l-warn');
   readLoop();
+  return true;
+}
+
+$('btnConnect').onclick=async()=>{
+  let p;
+  try{ p=await navigator.serial.requestPort(); }
+  catch(e){ if(e.name!=='NotFoundError') log('could not open the port: '+e.message,'l-err'); return; }
+  await openPort(p);
 };
+
+// A port the user has already approved can be reopened without the picker, so
+// the page reconnects by itself — which is what makes the Google hop below
+// seamless: consent navigates away, and coming back just picks up the cable.
+(async()=>{
+  if(!('serial' in navigator) || !window.isSecureContext) return;
+  const ports=await navigator.serial.getPorts();
+  if(ports.length===1) await openPort(ports[0]);
+})();
+
+// ---- Google linking ---------------------------------------------------------
+// The auth-code flow with this page as the redirect target. The token endpoint
+// answers a browser (it reflects the request origin), so the exchange happens
+// right here; the refresh token then rides the existing CFG frames to the cube.
+const G_AUTH_URL='https://accounts.google.com/o/oauth2/v2/auth';
+const G_TOKEN_URL='https://oauth2.googleapis.com/token';
+const G_SCOPE='https://www.googleapis.com/auth/calendar.readonly';
+const gSelf=location.origin+location.pathname;
+$('gRedirect').value=gSelf;
+
+$('gLinkBtn').onclick=()=>{
+  const cid=$('gClientId').value.trim(), sec=$('gClientSecret').value.trim();
+  if(!cid||!sec){ $('gLinkMsg').textContent='both fields first'; return; }
+  const state=Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(16).padStart(2,'0')).join('');
+  // Survives the round trip to Google; session-scoped and cleared on return.
+  sessionStorage.setItem('gLink',JSON.stringify({cid,sec,state}));
+  const q=new URLSearchParams({client_id:cid,redirect_uri:gSelf,response_type:'code',
+    scope:G_SCOPE,access_type:'offline',prompt:'consent',state});
+  location.href=G_AUTH_URL+'?'+q;
+};
+
+let gPending=null;   // {cid,sec,refresh} waiting for a cube to store it
+
+async function gLinkFinish(){
+  const saved=sessionStorage.getItem('gLink');
+  const q=new URLSearchParams(location.search);
+  if(!saved||!q.get('code')) return;
+  history.replaceState(null,'',gSelf);          // the code must not linger in the URL
+  const {cid,sec,state}=JSON.parse(saved);
+  sessionStorage.removeItem('gLink');
+  if(q.get('state')!==state){ $('gLinkMsg').textContent='state mismatch - try again'; return; }
+  $('gClientId').value=cid;
+  $('gLinkMsg').textContent='exchanging the code...';
+  try{
+    const res=await fetch(G_TOKEN_URL,{method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({code:q.get('code'),client_id:cid,client_secret:sec,
+        redirect_uri:gSelf,grant_type:'authorization_code'})});
+    const tok=await res.json();
+    if(!tok.refresh_token){
+      $('gLinkMsg').textContent='no refresh token: '+(tok.error_description||tok.error||'refused');
+      return;
+    }
+    gPending={cid,sec,refresh:tok.refresh_token};
+    $('gToken').value=tok.refresh_token;
+    $('gTokenRow').classList.remove('hide');
+    $('gLinkMsg').textContent=cfgDoc?'linked - saving to the cube...':'linked - connect the cube to store it';
+    if(cfgDoc) gDeliver();
+  }catch(e){ $('gLinkMsg').textContent='exchange failed: '+e.message; }
+}
+
+async function gDeliver(){
+  if(!gPending||!cfgDoc) return;
+  cfgDoc.calendar=Object.assign(cfgDoc.calendar||{}, {provider:'google',enabled:true,
+    clientId:gPending.cid,clientSecret:gPending.sec,refreshToken:gPending.refresh});
+  const out=JSON.parse(JSON.stringify(cfgDoc));
+  delete out.features; delete out.chip;         // device-owned, not settings
+  const bytes=new TextEncoder().encode(JSON.stringify(out));
+  for(let o=0;o<bytes.length;o+=480) await send(0x43,0,bytes.subarray(o,o+480)); // SF_CFG_SET
+  await send(0x44,0);                                                            // SF_CFG_APPLY
+  gPending=null;
+  $('gLinkMsg').textContent='saved - the cube is linked to Google Calendar';
+  log('google calendar credentials written to the cube','l-ok');
+}
+
+gLinkFinish();
 
 $('btnDisconnect').onclick=()=>{ keepReading=false; teardown(); };
 $('btnClear').onclick=()=>{ $('log').textContent=''; };
