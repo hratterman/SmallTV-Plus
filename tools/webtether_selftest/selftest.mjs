@@ -121,6 +121,37 @@ console.log('\n--- the request unpacking matches what the firmware packs ---');
   ck(new TextDecoder().decode(r.body) === 'grant_type=refresh_token', 'body');
 }
 
+console.log('\n--- the page itself -----------------------------------------');
+{
+  // The checks above only exercise the framing half. These cover the whole
+  // file, because a syntax error anywhere in the script block stops all of it
+  // running while the page still renders — the same failure that once blanked
+  // every tab of the device's own web UI.
+  const tmp = mkdtempSync(join(tmpdir(), 'webtether-page-'));
+  const jsPath = join(tmp, 'page.js');
+  writeFileSync(jsPath, script);
+  let parsed = true;
+  try { execFileSync('node', ['--check', jsPath]); } catch (e) { parsed = false; console.log(String(e.stderr || e)); }
+  ck(parsed, 'the whole script parses');
+
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]));
+  const used = new Set([...script.matchAll(/\$\(['"]([A-Za-z_$][\w$-]*)['"]\)/g)].map(m => m[1]));
+  const missing = [...used].filter(i => !ids.has(i));
+  ck(missing.length === 0,
+     missing.length ? `script names ids the page lacks: ${missing.join(', ')}`
+                    : 'every element id the script names exists');
+
+  // The settings editor and the firmware have to agree on these numbers, and
+  // they are written as bare hex in the page's dispatch.
+  for (const [name, val] of [['SF_CFG_GET', 0x40], ['SF_CFG_DATA', 0x41],
+                             ['SF_CFG_END', 0x42], ['SF_CFG_SET', 0x43],
+                             ['SF_CFG_APPLY', 0x44], ['SF_CFG_OK', 0x45]]) {
+    const hdr = readFileSync(join(root, 'src/SerialFrame.h'), 'utf8');
+    const m = hdr.match(new RegExp(name + '\\s*=\\s*(0x[0-9a-fA-F]+)'));
+    ck(m && parseInt(m[1], 16) === val, `${name} matches the firmware (0x${val.toString(16)})`);
+  }
+}
+
 console.log('\n-------------------------------------------------------------');
 if (failures) { console.log(`${failures} check(s) FAILED`); process.exit(1); }
 console.log('all checks passed');

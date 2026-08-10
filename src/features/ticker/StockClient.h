@@ -9,6 +9,11 @@ void  stocksInit(const Settings& s);        // (re)build list from settings
 void  stocksService(const Settings& s);     // call often; self-times the polling
 void  stocksForceRefresh();                 // poll ASAP (e.g. after config save)
 
+// Why the ticker has nothing to show, when the reason is worth stating rather
+// than leaving the panel simply blank.
+void             stocksSetNote(const char* n);
+const char*      stocksNote();
+
 uint8_t          stocksCount();
 const StockData& stockAt(uint8_t i);
 

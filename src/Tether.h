@@ -29,6 +29,13 @@
 
 void tetherBegin();
 
+// Settings over the cable. Tether.cpp owns the framing; these two are supplied
+// by the application because Tether has no business knowing what a Setting is.
+//   serialise: write the current settings as JSON into `out`
+//   apply:     take JSON, apply and persist it; return an error or nullptr
+void tetherOnConfig(void (*serialise)(String& out),
+                    const char* (*apply)(const String& json));
+
 // Pump the link: send the periodic hello, take delivery of the clock, notice
 // the host going away. Call from the main loop; costs nothing when idle.
 void tetherService();

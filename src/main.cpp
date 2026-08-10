@@ -19,6 +19,7 @@
 #include "Mode.h"
 #include "Clock.h"
 #include "Notify.h"
+#include <ArduinoJson.h>
 #if WITH_CAPTIVE
 #include "Captive.h"
 #endif
@@ -387,6 +388,28 @@ void setup() {
 #endif
 #if WITH_TETHER
   tetherBegin();
+  // The tether page doubles as the settings UI, because on a network the cube
+  // could not join it is the only thing that can reach it at all. Same JSON the
+  // web portal uses, same apply path — a second contract here would be a second
+  // thing to keep in step, and this codebase has paid for that mistake enough.
+  tetherOnConfig(
+      [](String& out) {
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        settingsToJson(g_settings, root, /*includeSecrets=*/false);
+        serializeJson(doc, out);
+      },
+      [](const String& json) -> const char* {
+        JsonDocument doc;
+        if (deserializeJson(doc, json)) return "settings were not valid JSON";
+        settingsApplyJson(g_settings, doc.as<JsonObjectConst>());
+        if (!saveSettings(g_settings)) return "could not write config.json";
+        clockReapply(g_settings);
+        appApplyBrightness();
+        gfxSetRotation(g_settings.rotation);
+        appInvalidate();
+        return nullptr;
+      });
 #endif
 
   Serial.println("[boot] web");

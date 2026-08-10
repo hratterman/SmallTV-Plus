@@ -45,6 +45,17 @@ enum SerialFrameType : uint8_t {
   SF_HTTP_ERR    = 0x14,   // host: could not perform it, reason in payload
   SF_TIME        = 0x20,   // host: unix epoch, so a tethered cube needs no NTP
   SF_LOG         = 0x30,   // device: a log line, framed rather than loose
+
+  // Settings over the same cable. The page that lends the cube its internet is
+  // also the only thing that can reach it on a network it could not join, so it
+  // doubles as the configuration UI. Both directions chunk, because the config
+  // document is several KB and a frame holds one.
+  SF_CFG_GET     = 0x40,   // host: send me the settings
+  SF_CFG_DATA    = 0x41,   // device: a slice of the settings JSON
+  SF_CFG_END     = 0x42,   // device: that was all of it
+  SF_CFG_SET     = 0x43,   // host: a slice of new settings
+  SF_CFG_APPLY   = 0x44,   // host: that was all of it, apply and save
+  SF_CFG_OK      = 0x45,   // device: applied (payload: "ok" or the reason not)
 };
 
 // CRC-16/CCITT-FALSE. Chosen for being three lines rather than for pedigree —

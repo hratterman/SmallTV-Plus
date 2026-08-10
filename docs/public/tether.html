@@ -51,6 +51,18 @@ code{background:#0b0d12;border:1px solid var(--line);border-radius:5px;padding:1
 .hint{color:var(--mut);font-size:13.5px;margin:10px 0 0}
 .warn{background:#2a1d1d;border-color:#4a2b2b}
 ol{padding-left:20px}li{margin:6px 0}
+.grp{border:1px solid var(--line);border-radius:9px;margin-bottom:10px;overflow:hidden}
+.grp>summary{padding:9px 13px;cursor:pointer;font-weight:600;font-size:14px;background:#12151b;list-style:none}
+.grp>summary::-webkit-details-marker{display:none}
+.grp>summary::before{content:"\25B8 ";color:var(--mut)}
+.grp[open]>summary::before{content:"\25BE "}
+.grp .fields{padding:6px 13px 12px}
+.f{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13.5px}
+.f label{flex:1;color:var(--mut);word-break:break-word}
+.f input[type=text],.f input[type=number]{flex:0 0 190px;background:#0b0d12;color:var(--fg);
+  border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:13px}
+.f input[type=checkbox]{width:17px;height:17px;accent-color:var(--acc)}
+.f .arr{flex:0 0 190px;color:var(--mut);font-size:12px;font-style:italic}
 </style>
 </head>
 <body>
@@ -95,6 +107,20 @@ ol{padding-left:20px}li{margin:6px 0}
   </div>
   <div id="log"></div>
   <p class="hint">The cube's own log shares the cable and appears here in grey.</p>
+</div>
+
+<div class="card" id="cfgCard" hidden>
+  <div class="row" style="margin-bottom:12px">
+    <b style="flex:1">Cube settings</b>
+    <button class="sec" id="cfgReload" style="padding:6px 12px;font-size:13px">Reload</button>
+    <button id="cfgSave" style="padding:6px 14px;font-size:13px">Save to cube</button>
+  </div>
+  <div id="cfgMsg" class="hint" style="margin:0 0 10px"></div>
+  <div id="cfg"></div>
+  <p class="hint">Read from the cube over the same cable, and written back the same way &mdash;
+  this is the identical settings file the built-in web page edits. Fields are generated from
+  whatever the firmware sends, so nothing here can fall out of step with it. Passwords and tokens
+  are never sent out by the cube; leave those blank to keep what is stored.</p>
 </div>
 
 <div class="card">
@@ -297,8 +323,17 @@ async function readLoop(){
           log('cube says hello: '+who,'log-ok');
           await send(HELLO_ACK,f.id);
           await sendTime();
+          if(!cfgDoc && !cfgWaiting) await requestCfg();
         } else if(f.type===HTTP_REQ){
           await handleRequest(f.id,f.payload);
+        } else if(f.type===0x41){            // SF_CFG_DATA
+          cfgChunks.push(f.payload);
+        } else if(f.type===0x42){            // SF_CFG_END
+          cfgReceived();
+        } else if(f.type===0x45){            // SF_CFG_OK
+          const m=new TextDecoder().decode(f.payload);
+          $('cfgMsg').textContent = m==='ok' ? 'saved to the cube' : 'not saved: '+m;
+          log('settings '+(m==='ok'?'saved':'rejected: '+m), m==='ok'?'log-ok':'log-err');
         }
       }
     }
@@ -338,7 +373,91 @@ $('connect').onclick=async()=>{
   readLoop();
 };
 
-$('disconnect').onclick=()=>{ keepReading=false; teardown(); };
+// --- settings over the cable -------------------------------------------
+// The editor is generated from the JSON the cube sends, not from a list kept
+// here. A hardcoded list would be a second copy of the firmware's settings
+// schema, and keeping two copies in step is the single most reliable source of
+// bugs this project has produced.
+let cfgDoc=null, cfgChunks=[], cfgWaiting=false;
+
+function isLeaf(v){ return v===null||['string','number','boolean'].includes(typeof v); }
+
+function renderCfg(obj, into, path){
+  for(const [k,v] of Object.entries(obj)){
+    const id=path.concat(k);
+    if(Array.isArray(v)){
+      // Arrays are symbol lists, WiFi networks, airports — structured enough
+      // that a generic editor would do more harm than good. Shown, not edited.
+      const row=document.createElement('div'); row.className='f';
+      row.innerHTML=`<label>${k}</label><span class="arr">${v.length} item(s) — edit on the cube's own page</span>`;
+      into.appendChild(row);
+    } else if(v && typeof v==='object'){
+      const d=document.createElement('details'); d.className='grp'; d.open=path.length===0&&false;
+      const s=document.createElement('summary'); s.textContent=k; d.appendChild(s);
+      const box=document.createElement('div'); box.className='fields'; d.appendChild(box);
+      renderCfg(v, box, id);
+      into.appendChild(d);
+    } else if(isLeaf(v)){
+      const row=document.createElement('div'); row.className='f';
+      const lab=document.createElement('label'); lab.textContent=k; row.appendChild(lab);
+      let inp;
+      if(typeof v==='boolean'){ inp=document.createElement('input'); inp.type='checkbox'; inp.checked=v; }
+      else if(typeof v==='number'){ inp=document.createElement('input'); inp.type='number'; inp.value=v; }
+      else { inp=document.createElement('input'); inp.type='text'; inp.value=v===null?'':v; }
+      inp.dataset.path=JSON.stringify(id);
+      inp.dataset.kind=typeof v;
+      row.appendChild(inp); into.appendChild(row);
+    }
+  }
+}
+
+function collectCfg(){
+  const out=JSON.parse(JSON.stringify(cfgDoc));
+  for(const inp of document.querySelectorAll('#cfg [data-path]')){
+    const path=JSON.parse(inp.dataset.path);
+    let node=out;
+    for(let i=0;i<path.length-1;i++) node=node[path[i]];
+    const key=path[path.length-1];
+    if(inp.dataset.kind==='boolean') node[key]=inp.checked;
+    else if(inp.dataset.kind==='number') node[key]=Number(inp.value)||0;
+    else node[key]=inp.value;
+  }
+  // The cube never hands out its secrets, so these come back as flags rather
+  // than values; sending them on would overwrite real settings with booleans.
+  delete out.features; delete out.chip;
+  return out;
+}
+
+async function requestCfg(){
+  cfgChunks=[]; cfgWaiting=true;
+  $('cfgMsg').textContent='reading settings from the cube…';
+  await send(0x40,0);              // SF_CFG_GET
+}
+
+function cfgReceived(){
+  const text=new TextDecoder().decode(new Uint8Array(cfgChunks.flatMap(a=>[...a])));
+  cfgChunks=[]; cfgWaiting=false;
+  try{ cfgDoc=JSON.parse(text); }
+  catch(e){ $('cfgMsg').textContent='the settings did not parse: '+e.message; return; }
+  const box=$('cfg'); box.textContent='';
+  renderCfg(cfgDoc, box, []);
+  $('cfgCard').hidden=false;
+  $('cfgMsg').textContent=`${(text.length/1024).toFixed(1)} KB of settings, read over the cable`;
+}
+
+async function saveCfg(){
+  if(!cfgDoc) return;
+  const json=JSON.stringify(collectCfg());
+  const bytes=new TextEncoder().encode(json);
+  $('cfgMsg').textContent='writing…';
+  for(let o=0;o<bytes.length;o+=480) await send(0x43,0,bytes.subarray(o,o+480)); // SF_CFG_SET
+  await send(0x44,0);                                                            // SF_CFG_APPLY
+}
+
+$('cfgReload').onclick=requestCfg;
+$('cfgSave').onclick=saveCfg;
+
+$('disconnect').onclick=()=>{ keepReading=false; teardown(); $('cfgCard').hidden=true; };
 $('clear').onclick=()=>{ $('log').textContent=''; };
 
 if(!('serial' in navigator)) {

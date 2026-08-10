@@ -32,6 +32,18 @@ static uint16_t s_nextId = 1;
 static uint8_t s_wire[SF_HEADER + SF_MAX_PAYLOAD + SF_CRC + 64];
 static uint8_t s_req[SF_MAX_PAYLOAD];
 
+// Supplied by main.cpp. Kept as callbacks so this file stays a transport and
+// does not grow a dependency on the settings layer.
+static void (*s_cfgSerialise)(String&) = nullptr;
+static const char* (*s_cfgApply)(const String&) = nullptr;
+static String s_cfgIn;          // accumulates SF_CFG_SET chunks
+
+void tetherOnConfig(void (*serialise)(String& out),
+                    const char* (*apply)(const String& json)) {
+  s_cfgSerialise = serialise;
+  s_cfgApply = apply;
+}
+
 void tetherBegin() {
 #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32)
   if (!s_lock) s_lock = xSemaphoreCreateMutex();
@@ -68,10 +80,45 @@ static void applyTime(const uint8_t* p, uint16_t n) {
   settimeofday(&tv, nullptr);
 }
 
+// Send the settings as a run of chunks. Serialised into a String first: the
+// document is a few KB and building it twice to measure it would cost more than
+// holding it once.
+static void sendConfig() {
+  if (!s_cfgSerialise) return;
+  String json;
+  s_cfgSerialise(json);
+  const uint32_t n = json.length();
+  for (uint32_t o = 0; o < n; o += TETHER_CFG_CHUNK) {
+    const uint16_t len = (uint16_t)((n - o) < TETHER_CFG_CHUNK ? (n - o) : TETHER_CFG_CHUNK);
+    writeFrame(SF_CFG_DATA, 0, (const uint8_t*)json.c_str() + o, len);
+  }
+  writeFrame(SF_CFG_END, 0, nullptr, 0);
+  Serial.printf("[tether] sent %u bytes of settings\n", (unsigned)n);
+}
+
 // Handle one frame that is not part of a reply. Returns true if it was
 // consumed here.
 static bool handleAside(uint8_t type, const uint8_t* p, uint16_t n) {
   switch (type) {
+    case SF_CFG_GET:
+      s_lastHeard = millis();
+      sendConfig();
+      return true;
+    case SF_CFG_SET:
+      s_lastHeard = millis();
+      // Bounded: a settings document that will not fit is a bug or an attack,
+      // and either way should not be allowed to exhaust the heap.
+      if (s_cfgIn.length() + n <= TETHER_CFG_MAX) s_cfgIn.concat((const char*)p, n);
+      return true;
+    case SF_CFG_APPLY: {
+      s_lastHeard = millis();
+      const char* err = s_cfgApply ? s_cfgApply(s_cfgIn) : "no handler";
+      s_cfgIn = "";
+      const char* reply = err ? err : "ok";
+      writeFrame(SF_CFG_OK, 0, (const uint8_t*)reply, (uint16_t)strlen(reply));
+      Serial.printf("[tether] settings %s\n", err ? err : "applied");
+      return true;
+    }
     case SF_HELLO_ACK:
       if (!s_everSeen) Serial.println("[tether] host answered; using the cable");
       s_everSeen = true;

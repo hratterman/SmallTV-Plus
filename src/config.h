@@ -289,6 +289,8 @@
 #define TETHER_HELLO_DOWN_MS  2000    // announcing, nobody listening yet
 #define TETHER_HELLO_UP_MS   10000    // heartbeat once a host has answered
 #define TETHER_IDLE_MS       25000    // silence this long = the cable is gone
+#define TETHER_CFG_CHUNK       480    // settings JSON, bytes per frame
+#define TETHER_CFG_MAX        8192    // largest settings document accepted
 
 // ---------------------------------------------------------------------------
 // Captive portal handling. Associating is not the same as being online, and on

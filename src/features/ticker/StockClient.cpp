@@ -1,4 +1,30 @@
 #include "StockClient.h"
+#include "NetFetch.h"
+
+// Lets the existing Stream-based parsers read a response that arrived as text
+// over the tether, without giving any of them a second implementation.
+namespace {
+class StringStream : public Stream {
+ public:
+  explicit StringStream(const String& s) : s_(s) {}
+  int available() override { return (int)(s_.length() - pos_); }
+  int read() override { return pos_ < s_.length() ? (uint8_t)s_[pos_++] : -1; }
+  int peek() override { return pos_ < s_.length() ? (uint8_t)s_[pos_] : -1; }
+  void flush() override {}
+  size_t write(uint8_t) override { return 0; }
+ private:
+  const String& s_;
+  unsigned pos_ = 0;
+};
+}  // namespace
+
+// Why the ticker can be blank, in the device's own words. Only set on the
+// tether path so far, where the reason is a fixed property of the source rather
+// than a transient network problem.
+static char s_note[64] = "";
+void stocksSetNote(const char* n) { strlcpy(s_note, n ? n : "", sizeof(s_note)); }
+const char* stocksNote() { return s_note; }
+
 #include "Platform.h"
 #include <ArduinoJson.h>
 #include <math.h>
@@ -456,6 +482,40 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   } else {
     client.reset(new WiFiClient());
   }
+
+  // Tethered: the request goes down the cable and comes back as text, which the
+  // same parsers read through a Stream wrapper. The WiFi path below is left
+  // exactly as it was — its per-source TLS buffer sizes and cipher choices are
+  // tuned for the ESP8266's heap, and a generic client would undo that work.
+#if WITH_TETHER
+  if (netFetchTethered()) {
+    const char* hdrs =
+        (kind == PARSE_YAHOO)  ? "Accept: application/json\nUser-Agent: " YAHOO_USER_AGENT :
+        (kind == PARSE_GITHUB) ? "Accept: application/json\nUser-Agent: " FW_NAME :
+                                 "Accept: application/json";
+    String raw;
+    const NetFetchResult r = netFetchToString(url.c_str(), false, hdrs, nullptr, 0,
+                                              raw, 12288, s.httpTimeout);
+    if (!r.ok) {
+      // Yahoo does not send CORS headers, so a browser cannot fetch it however
+      // willing it is. Say that rather than leaving a bare failure, because the
+      // remedy is a setting the user can change.
+      if (kind == PARSE_YAHOO)
+        stocksSetNote("Yahoo can't be fetched over the tether - use the GitHub source");
+      else
+        stocksSetNote(r.error);
+      return false;
+    }
+    stocksSetNote("");
+    StringStream ss(raw);
+    switch (kind) {
+      case PARSE_YAHOO:      return parseYahoo(s, d, ss);
+      case PARSE_CASH_QUOTE: return parseCashQuote(s, d, ss);
+      case PARSE_CASH_CHART: return parseCashChart(s, d, ss);
+      default:               return parseWebhook(s, d, ss);
+    }
+  }
+#endif
 
   HTTPClient http;
   http.setTimeout(s.httpTimeout);
