@@ -338,6 +338,14 @@ static void bootProgress(const char* msg) {
 }
 
 void setup() {
+#if WITH_TETHER
+  // The default RX buffer is 256 bytes. The tether pushes multi-KB HTTP bodies
+  // down this port in one continuous burst, and while the requester does pump
+  // continuously, 256 bytes is only 22 ms of slack at 115200 — one unlucky
+  // scheduler pause from dropped bytes that surface as CRC-rejected frames.
+  // 4 KB makes the slack a third of a second.
+  Serial.setRxBufferSize(4096);
+#endif
   Serial.begin(115200);
   Serial.println();
   Serial.println(FW_NAME " " FW_VERSION);

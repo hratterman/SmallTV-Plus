@@ -713,8 +713,13 @@ static bool stepSymbol(const Settings& s, StockData& d) {
     // Sparkline. Non-fatal, exactly as the cash.ch chart is: a stale chart
     // beside a fresh price beats no price at all.
     if ((s.ticker.showChart || (s.ticker.changeOnRange && s.ticker.showChange)) &&
-        s.ticker.points >= 2)
-      fetchUrl(s, buildSaHistUrl(d.symbol), PARSE_SA_HIST, d);
+        s.ticker.points >= 2) {
+      // Still non-fatal — a fresh price beside a stale chart beats neither —
+      // but no longer silent: a sparkline that never appears otherwise gives
+      // nothing to debug with.
+      if (!fetchUrl(s, buildSaHistUrl(d.symbol), PARSE_SA_HIST, d) && !d.sparkCount)
+        stocksSetNote("chart: history fetch failed (see tether log)");
+    }
     return true;
   }
 
