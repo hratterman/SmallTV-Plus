@@ -27,115 +27,257 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SmallTV tether</title>
 <style>
-:root{--bg:#0f1115;--fg:#e7e9ee;--mut:#8b93a7;--acc:#4ea1ff;--ok:#3ddc84;--bad:#ff6b6b;--panel:#171a21;--line:#252a35}
+:root{
+  --bg:#0d1117; --panel:#151b23; --panel2:#1c2530; --line:#2a3441;
+  --ink:#e6edf3; --dim:#8b98a5; --faint:#5c6b7a;
+  --accent:#4a9eff; --ok:#3fb950; --warn:#d29922; --err:#f85149;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
-.wrap{max-width:760px;margin:0 auto;padding:40px 20px 80px}
-h1{font-size:26px;margin:0 0 4px}
-.sub{color:var(--mut);margin:0 0 28px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:18px}
-button{font:inherit;font-weight:600;border:0;border-radius:9px;padding:11px 20px;cursor:pointer;background:var(--acc);color:#06101f}
-button.sec{background:#2a3040;color:var(--fg)}
-button:disabled{opacity:.45;cursor:default}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--mut);display:inline-block;margin-right:8px;vertical-align:middle}
-.dot.on{background:var(--ok)}
-.dot.err{background:var(--bad)}
-.kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
-.kv:last-child{border-bottom:0}
-.kv span:first-child{color:var(--mut)}
-code{background:#0b0d12;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:13px}
-#log{background:#0b0d12;border:1px solid var(--line);border-radius:9px;padding:12px;height:230px;overflow:auto;
-     font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
-.log-req{color:var(--acc)}.log-err{color:var(--bad)}.log-dev{color:var(--mut)}.log-ok{color:var(--ok)}
-.hint{color:var(--mut);font-size:13.5px;margin:10px 0 0}
-.warn{background:#2a1d1d;border-color:#4a2b2b}
-ol{padding-left:20px}li{margin:6px 0}
-.grp{border:1px solid var(--line);border-radius:9px;margin-bottom:10px;overflow:hidden}
-.grp>summary{padding:9px 13px;cursor:pointer;font-weight:600;font-size:14px;background:#12151b;list-style:none}
-.grp>summary::-webkit-details-marker{display:none}
-.grp>summary::before{content:"\25B8 ";color:var(--mut)}
-.grp[open]>summary::before{content:"\25BE "}
-.grp .fields{padding:6px 13px 12px}
-.f{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13.5px}
-.f label{flex:1;color:var(--mut);word-break:break-word}
-.f input[type=text],.f input[type=number]{flex:0 0 190px;background:#0b0d12;color:var(--fg);
-  border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:13px}
-.f input[type=checkbox]{width:17px;height:17px;accent-color:var(--acc)}
-.f .arr{flex:0 0 190px;color:var(--mut);font-size:12px;font-style:italic}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 18px 60px}
+
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:14px 0 18px;border-bottom:1px solid var(--line);margin-bottom:22px}
+header h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.01em}
+header .sub{color:var(--dim);font-size:13px;margin:2px 0 0}
+.spacer{flex:1}
+
+.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;
+  background:var(--panel2);border:1px solid var(--line);font-size:13px;color:var(--dim)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.pill.on{color:var(--ok);border-color:#1e4c2c}
+.pill.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.pill.err{color:var(--err);border-color:#5c2626}
+.pill.err .dot{background:var(--err)}
+
+button{font:inherit;font-size:14px;font-weight:500;padding:8px 16px;border-radius:7px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--ink);cursor:pointer;
+  transition:background .12s,border-color .12s}
+button:hover:not(:disabled){background:#273240;border-color:#3a4756}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:#06121f}
+button.primary:hover:not(:disabled){background:#63aeff;border-color:#63aeff}
+button.ghost{background:transparent}
+
+.grid{display:grid;gap:18px;grid-template-columns:1fr}
+@media(min-width:900px){.grid{grid-template-columns:minmax(0,1fr) minmax(0,1.15fr)}}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.card>h2{margin:0;padding:13px 16px;font-size:13px;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--line);
+  background:var(--panel2)}
+.card .body{padding:16px}
+.card+.card{margin-top:18px}
+
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:14px}
+.stat{background:var(--panel);padding:11px 12px}
+.stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint)}
+.stat .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:3px}
+
+#log{font-family:var(--mono);font-size:12px;line-height:1.65;height:260px;overflow-y:auto;
+  background:#0a0e14;border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+  white-space:pre-wrap;word-break:break-word}
+#log:empty::after{content:"nothing yet — press Connect";color:var(--faint)}
+.l-req{color:var(--accent)} .l-ok{color:var(--ok)} .l-err{color:var(--err)}
+.l-dev{color:var(--dim)} .l-warn{color:var(--warn)}
+
+label{display:block;font-size:13px;font-weight:500;margin:0 0 6px}
+label .hint{font-weight:400;color:var(--faint)}
+select,input[type=text],input[type=number],textarea{width:100%;font:inherit;font-size:14px;
+  padding:8px 10px;border-radius:7px;border:1px solid var(--line);
+  background:var(--bg);color:var(--ink)}
+select:focus,input:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+textarea{font-family:var(--mono);font-size:12px;min-height:180px;resize:vertical}
+input[type=range]{width:100%;accent-color:var(--accent)}
+
+.row{margin-bottom:15px}
+.row:last-child{margin-bottom:0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+.ticks{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:2px}
+.tick{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;
+  font-size:13px}
+.tick:hover{background:var(--panel2)}
+.tick input{accent-color:var(--accent);width:15px;height:15px;flex:none;margin:0}
+
+fieldset{border:1px solid var(--line);border-radius:8px;padding:13px 14px;margin:0 0 15px}
+legend{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);
+  padding:0 6px;font-weight:600}
+
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px;
+  padding-top:15px;border-top:1px solid var(--line)}
+.msg{font-size:13px;color:var(--dim)}
+.msg.ok{color:var(--ok)} .msg.err{color:var(--err)}
+
+details{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
+summary{cursor:pointer;font-size:13px;color:var(--dim);font-weight:500}
+summary:hover{color:var(--ink)}
+details>div{margin-top:12px}
+
+.note{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--warn);
+  border-radius:6px;padding:11px 13px;font-size:13px;color:var(--dim);margin-bottom:16px}
+.note b{color:var(--ink);font-weight:600}
+.note code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px;
+  border-radius:4px;color:var(--ink)}
+.hide{display:none!important}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>SmallTV tether</h1>
-<p class="sub">Lends this computer's internet connection to the cube, over the USB cable.</p>
 
-<div id="unsupported" class="card warn" hidden>
-  <b>This browser can't do it.</b>
-  <p class="hint">Talking to a serial port from a page needs the Web Serial API, which today means
-  <b>Chrome, Edge or Opera</b> on desktop. Safari and Firefox haven't implemented it. Open this same
-  page in one of those and the button below will work.</p>
-</div>
-
-<div id="insecure" class="card warn" hidden>
-  <b>This page needs to be served over HTTPS.</b>
-  <p class="hint">Browsers only expose serial ports to secure pages. Opening the file straight from
-  disk may or may not count, depending on the browser's rules — the hosted copy always does.</p>
-</div>
-
-<div class="card">
-  <div class="row">
-    <button id="connect">Connect the cube</button>
-    <button id="disconnect" class="sec" disabled>Disconnect</button>
-    <span style="margin-left:auto"><span id="dot" class="dot"></span><span id="state">not connected</span></span>
+<header>
+  <div>
+    <h1>SmallTV tether</h1>
+    <p class="sub">The cube borrows this browser's internet, over the USB cable.</p>
   </div>
-  <p class="hint">Your browser will show its own list of serial devices — pick the cube and press
-  Connect. Nothing is installed and nothing runs outside this tab.
-  <b>Leave this tab open</b> while you want the cube online.</p>
+  <div class="spacer"></div>
+  <span class="pill" id="statePill"><span class="dot"></span><span id="stateText">not connected</span></span>
+  <button class="primary" id="btnConnect">Connect</button>
+  <button class="ghost hide" id="btnDisconnect">Disconnect</button>
+</header>
+
+<div id="unsupported" class="note hide">
+  <b>This browser has no Web Serial.</b> It is Chrome, Edge or Opera on desktop only —
+  Safari and Firefox have not implemented it. The page needs to be served over
+  <code>https://</code> (or <code>localhost</code>) too.
 </div>
 
-<div class="card">
-  <div class="kv"><span>Requests served</span><span id="nreq">0</span></div>
-  <div class="kv"><span>Data to the cube</span><span id="nbytes">0 B</span></div>
-  <div class="kv"><span>Last request</span><span id="last">—</span></div>
-</div>
+<div class="grid">
 
-<div class="card">
-  <div class="row" style="margin-bottom:10px">
-    <b style="flex:1">Activity</b>
-    <button class="sec" id="clear" style="padding:6px 12px;font-size:13px">Clear</button>
+  <div>
+    <div class="card">
+      <h2>Link</h2>
+      <div class="body">
+        <div class="stats">
+          <div class="stat"><div class="k">Requests</div><div class="v" id="nreq">0</div></div>
+          <div class="stat"><div class="k">Transferred</div><div class="v" id="nbytes">0 B</div></div>
+          <div class="stat"><div class="k">Failed</div><div class="v" id="nfail">0</div></div>
+        </div>
+        <div id="log"></div>
+        <div class="bar">
+          <button id="btnClear">Clear log</button>
+          <span class="msg" id="linkMsg">Leave this tab open. The cube stops fetching when it closes.</span>
+        </div>
+      </div>
+    </div>
   </div>
-  <div id="log"></div>
-  <p class="hint">The cube's own log shares the cable and appears here in grey.</p>
-</div>
 
-<div class="card" id="cfgCard" hidden>
-  <div class="row" style="margin-bottom:12px">
-    <b style="flex:1">Cube settings</b>
-    <button class="sec" id="cfgReload" style="padding:6px 12px;font-size:13px">Reload</button>
-    <button id="cfgSave" style="padding:6px 14px;font-size:13px">Save to cube</button>
+  <div>
+    <div class="card">
+      <h2>Cube settings</h2>
+      <div class="body">
+        <div id="cfgEmpty" class="note">
+          <b>Not loaded yet.</b> Connect the cube and the settings below fill in from it.
+        </div>
+
+        <div id="cfgForm" class="hide">
+          <fieldset>
+            <legend>Display</legend>
+            <div class="row">
+              <label for="mode">Mode</label>
+              <select id="mode">
+                <option value="stocks">Ticker</option>
+                <option value="usage">Claude usage</option>
+                <option value="radar">Plane radar</option>
+                <option value="miner">Bitcoin miner</option>
+                <option value="clock">Clock</option>
+                <option value="spotify">Spotify now playing</option>
+                <option value="ambient">Ambient patterns</option>
+                <option value="blackjack">Blackjack</option>
+                <option value="carousel">Carousel (rotate modes)</option>
+              </select>
+            </div>
+            <div class="two">
+              <div class="row">
+                <label for="rotation">Rotation</label>
+                <select id="rotation">
+                  <option value="0">0&deg;</option>
+                  <option value="1">90&deg;</option>
+                  <option value="2">180&deg;</option>
+                  <option value="3">270&deg;</option>
+                </select>
+              </div>
+              <div class="row">
+                <label for="carouselSec">Carousel dwell <span class="hint">seconds</span></label>
+                <input id="carouselSec" type="number" min="5" max="3600">
+              </div>
+            </div>
+            <div class="row">
+              <label for="brightness">Brightness <span class="hint">&mdash; <span id="brightVal">100</span>%</span></label>
+              <input id="brightness" type="range" min="0" max="100">
+            </div>
+            <label class="tick"><input id="backlightInverted" type="checkbox">
+              <span>Backlight inverted <span class="hint">(only if 100% turns the panel off)</span></span></label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Modes in the rotation</legend>
+            <div class="ticks">
+              <label class="tick"><input id="carouselTicker" type="checkbox"><span>Ticker</span></label>
+              <label class="tick"><input id="carouselUsage" type="checkbox"><span>Claude usage</span></label>
+              <label class="tick"><input id="carouselRadar" type="checkbox"><span>Plane radar</span></label>
+              <label class="tick"><input id="carouselMiner" type="checkbox"><span>Bitcoin miner</span></label>
+              <label class="tick"><input id="carouselClock" type="checkbox"><span>Clock</span></label>
+              <label class="tick"><input id="carouselSpotify" type="checkbox"><span>Spotify</span></label>
+              <label class="tick"><input id="carouselAmbient" type="checkbox"><span>Ambient</span></label>
+              <label class="tick"><input id="carouselBlackjack" type="checkbox"><span>Blackjack</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Ambient</legend>
+            <div class="ticks">
+              <label class="tick"><input id="ambLife" type="checkbox"><span>Conway's Life</span></label>
+              <label class="tick"><input id="ambPlasma" type="checkbox"><span>Plasma</span></label>
+              <label class="tick"><input id="ambStars" type="checkbox"><span>Starfield</span></label>
+              <label class="tick"><input id="ambRain" type="checkbox"><span>Matrix rain</span></label>
+              <label class="tick"><input id="ambFireworks" type="checkbox"><span>Fireworks</span></label>
+            </div>
+            <div class="two" style="margin-top:12px">
+              <div class="row">
+                <label for="ambDwell">Holds screen <span class="hint">seconds</span></label>
+                <input id="ambDwell" type="number" min="10" max="3600">
+              </div>
+              <div class="row">
+                <label for="ambPatternSec">Change pattern <span class="hint">seconds, 0 = never</span></label>
+                <input id="ambPatternSec" type="number" min="0" max="3600">
+              </div>
+            </div>
+            <label class="tick"><input id="ambShuffle" type="checkbox"><span>Shuffle instead of cycling in order</span></label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Work mode</legend>
+            <label class="tick"><input id="workEnabled" type="checkbox"><span>On</span></label>
+            <label class="tick"><input id="workNoMining" type="checkbox"><span>No mining while it is on</span></label>
+            <label class="tick"><input id="workHideExplicit" type="checkbox"><span>Mask explicit words on screen</span></label>
+          </fieldset>
+
+          <details id="rawWrap">
+            <summary>Everything else, as JSON</summary>
+            <div>
+              <p class="msg">The controls above cover the settings worth a control. This is the
+                whole document &mdash; edit it and Save sends exactly what is here.</p>
+              <textarea id="raw" spellcheck="false"></textarea>
+            </div>
+          </details>
+
+          <div class="bar">
+            <button class="primary" id="btnSave">Save to cube</button>
+            <button id="btnReload">Reload from cube</button>
+            <span class="msg" id="cfgMsg"></span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
-  <div id="cfgMsg" class="hint" style="margin:0 0 10px"></div>
-  <div id="cfg"></div>
-  <p class="hint">Read from the cube over the same cable, and written back the same way &mdash;
-  this is the identical settings file the built-in web page edits. Fields are generated from
-  whatever the firmware sends, so nothing here can fall out of step with it. Passwords and tokens
-  are never sent out by the cube; leave those blank to keep what is stored.</p>
-</div>
 
-<div class="card">
-  <b>What works over the cable</b>
-  <p class="hint">A page can only fetch what the far end allows it to (CORS), so this is not
-  everything the cube can do on a normal network:</p>
-  <ul class="hint" style="margin-top:6px">
-    <li><b>Spotify</b> — fully, including album art.</li>
-    <li><b>Clock</b> — taken from this computer, so no time server is needed.</li>
-    <li><b>Ticker</b> — set your symbols to the <b>GitHub</b> source. Yahoo blocks browser requests.</li>
-    <li><b>Radar</b> — not available; adsb.fi blocks browser requests too.</li>
-  </ul>
 </div>
 </div>
-
 <script>
 'use strict';
 // ---------------------------------------------------------------------------
@@ -246,7 +388,9 @@ function parseRequest(p){
 
 // ---------------------------------------------------------------------------
 const $=id=>document.getElementById(id);
-let port=null, writer=null, keepReading=false, nreq=0, nbytes=0;
+let port=null, writer=null, keepReading=false;
+let nreq=0, nbytes=0, nfail=0;
+let cfgDoc=null, cfgChunks=[], cfgWaiting=false;
 
 function log(msg,cls){
   const el=$('log'), atEnd=el.scrollTop+el.clientHeight>=el.scrollHeight-20;
@@ -257,13 +401,16 @@ function log(msg,cls){
   while(el.childNodes.length>500) el.removeChild(el.firstChild);
   if(atEnd) el.scrollTop=el.scrollHeight;
 }
-function setState(text,cls){ $('state').textContent=text; $('dot').className='dot'+(cls?' '+cls:''); }
+function setState(text,cls){
+  $('stateText').textContent=text;
+  $('statePill').className='pill'+(cls?' '+cls:'');
+}
 function fmtBytes(n){ return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB'; }
 
 async function send(type,id,payload){
   if(!writer) return;
   try { await writer.write(encode(type,id,payload)); }
-  catch(e){ log('write failed: '+e.message,'log-err'); }
+  catch(e){ log('write failed: '+e.message,'l-err'); }
 }
 
 async function sendTime(){
@@ -282,8 +429,9 @@ async function handleRequest(id,payload){
 
   const method = req.method ? 'POST' : 'GET';
   nreq++; $('nreq').textContent=nreq;
-  $('last').textContent = method+' '+req.url.replace(/^https?:\/\//,'').slice(0,52);
-  log(`#${id} ${method} ${req.url}`,'log-req');
+  const started=performance.now();
+  const short=req.url.replace(/^https?:\/\//,'');
+  log(`→ #${id} ${method} ${short}`,'l-req');
 
   try{
     const res=await fetch(req.url,{
@@ -294,6 +442,7 @@ async function handleRequest(id,payload){
       redirect:'follow', credentials:'omit',
     });
     const buf=new Uint8Array(await res.arrayBuffer());
+    const fetched=performance.now();
     const st=new Uint8Array(6);
     const dv=new DataView(st.buffer);
     dv.setUint16(0,res.status,true);
@@ -302,19 +451,149 @@ async function handleRequest(id,payload){
     for(let o=0;o<buf.length;o+=CHUNK) await send(HTTP_DATA,id,buf.subarray(o,o+CHUNK));
     await send(HTTP_END,id);
     nbytes+=buf.length; $('nbytes').textContent=fmtBytes(nbytes);
-    log(`#${id} → ${res.status}, ${fmtBytes(buf.length)}`, res.ok?'log-ok':'log-err');
+    if(!res.ok){ nfail++; $('nfail').textContent=nfail; }
+
+    // Both halves, separately. A body that arrived from the web quickly and
+    // then took seconds to push down the cable is a different problem from one
+    // the server was slow to give up, and the totals alone cannot tell them
+    // apart — which is exactly the shape of "small requests work, big ones do
+    // not". The chunk count is here for the same reason.
+    const web=Math.round(fetched-started), wire=Math.round(performance.now()-fetched);
+    const chunks=Math.ceil(buf.length/CHUNK);
+    log(`← #${id} ${res.status} · ${fmtBytes(buf.length)} · web ${web}ms · cable ${wire}ms (${chunks} frames)`,
+        res.ok?'l-ok':'l-err');
   }catch(e){
+    nfail++; $('nfail').textContent=nfail;
     // A CORS refusal arrives here as a bare TypeError, which tells the user
     // nothing — name it, since it is the most likely failure by far.
     const msg = (e instanceof TypeError)
       ? 'blocked by the browser (CORS) or unreachable' : e.message;
     await send(HTTP_ERR,id,new TextEncoder().encode(msg.slice(0,180)));
-    log(`#${id} failed: ${msg}`,'log-err');
+    log(`← #${id} failed: ${msg}`,'l-err');
   }
 }
 
+// ---- settings ---------------------------------------------------------------
+// Every control names the config path it reads and writes. One table, so a
+// control that is added without a path (or points at a key the cube does not
+// send) is visible here rather than silently saving nothing — which is exactly
+// how the device's own page shipped three dead checkboxes.
+const FIELDS=[
+  ['mode',              ['mode'],                       'string'],
+  ['rotation',          ['rotation'],                   'number'],
+  ['carouselSec',       ['carouselSec'],                'number'],
+  ['brightness',        ['brightness'],                 'number'],
+  ['backlightInverted', ['backlightInverted'],          'bool'],
+  ['carouselTicker',    ['carouselTicker'],             'bool'],
+  ['carouselUsage',     ['carouselUsage'],              'bool'],
+  ['carouselRadar',     ['carouselRadar'],              'bool'],
+  ['carouselMiner',     ['carouselMiner'],              'bool'],
+  ['carouselClock',     ['carouselClock'],              'bool'],
+  ['carouselSpotify',   ['carouselSpotify'],            'bool'],
+  ['carouselAmbient',   ['carouselAmbient'],            'bool'],
+  ['carouselBlackjack', ['carouselBlackjack'],          'bool'],
+  ['ambLife',           ['ambient','patterns','life'],      'bool'],
+  ['ambPlasma',         ['ambient','patterns','plasma'],    'bool'],
+  ['ambStars',          ['ambient','patterns','stars'],     'bool'],
+  ['ambRain',           ['ambient','patterns','rain'],      'bool'],
+  ['ambFireworks',      ['ambient','patterns','fireworks'], 'bool'],
+  ['ambDwell',          ['ambient','dwellSec'],         'number'],
+  ['ambPatternSec',     ['ambient','patternSec'],       'number'],
+  ['ambShuffle',        ['ambient','shuffle'],          'bool'],
+  ['workEnabled',       ['work','enabled'],             'bool'],
+  ['workNoMining',      ['work','noMining'],            'bool'],
+  ['workHideExplicit',  ['work','hideExplicit'],        'bool'],
+];
+
+function dig(doc,path){
+  let n=doc;
+  for(const k of path){ if(n===null||typeof n!=='object'||!(k in n)) return undefined; n=n[k]; }
+  return n;
+}
+function plant(doc,path,val){
+  let n=doc;
+  for(let i=0;i<path.length-1;i++){
+    if(typeof n[path[i]]!=='object'||n[path[i]]===null) n[path[i]]={};
+    n=n[path[i]];
+  }
+  n[path[path.length-1]]=val;
+}
+
+function fillForm(){
+  for(const [id,path,kind] of FIELDS){
+    const el=$(id); if(!el) continue;
+    const v=dig(cfgDoc,path);
+    if(v===undefined){ el.disabled=true; continue; }   // this build does not have it
+    el.disabled=false;
+    if(kind==='bool') el.checked=!!v; else el.value=String(v);
+  }
+  $('brightVal').textContent=$('brightness').value;
+  $('raw').value=JSON.stringify(cfgDoc,null,1);
+}
+
+function collectCfg(){
+  const out=JSON.parse($('raw').value);   // the raw box is the document
+  for(const [id,path,kind] of FIELDS){
+    const el=$(id); if(!el||el.disabled) continue;
+    plant(out,path, kind==='bool' ? el.checked
+                  : kind==='number' ? (Number(el.value)||0)
+                  : el.value);
+  }
+  // The cube never hands out its secrets, so these come back as flags rather
+  // than values; sending them on would overwrite real settings with booleans.
+  delete out.features; delete out.chip;
+  return out;
+}
+
+let cfgTries=0, cfgTimer=null;
+
+async function requestCfg(first){
+  if(first) cfgTries=0;
+  cfgChunks=[]; cfgWaiting=true;
+  $('cfgEmpty').classList.remove('hide');
+  $('cfgEmpty').innerHTML = cfgTries ? `Reading settings… (attempt ${cfgTries+1})`
+                                     : 'Reading settings from the cube…';
+  await send(0x40,0);                        // SF_CFG_GET
+
+  // A frame can be corrupted by a log line landing inside it, and the CRC
+  // correctly throws it away — which leaves this waiting forever unless it
+  // asks again. Corruption is occasional, so simply retrying wins.
+  clearTimeout(cfgTimer);
+  cfgTimer=setTimeout(()=>{
+    if(!cfgWaiting) return;
+    if(++cfgTries<4) requestCfg(false);
+    else { cfgWaiting=false;
+           $('cfgEmpty').innerHTML='<b>No settings came back.</b> Press Reload to try again.'; }
+  },4000);
+}
+
+function cfgReceived(){
+  clearTimeout(cfgTimer);
+  const text=new TextDecoder().decode(new Uint8Array(cfgChunks.flatMap(a=>[...a])));
+  cfgChunks=[]; cfgWaiting=false; cfgTries=0;
+  try{ cfgDoc=JSON.parse(text); }
+  catch(e){ $('cfgEmpty').textContent='The settings did not parse: '+e.message; return; }
+  fillForm();
+  $('cfgEmpty').classList.add('hide');
+  $('cfgForm').classList.remove('hide');
+  $('cfgMsg').textContent=`${(text.length/1024).toFixed(1)} KB read over the cable`;
+  $('cfgMsg').className='msg';
+}
+
+async function saveCfg(){
+  if(!cfgDoc) return;
+  let json;
+  try{ json=JSON.stringify(collectCfg()); }
+  catch(e){ $('cfgMsg').textContent='the JSON box is not valid JSON'; $('cfgMsg').className='msg err'; return; }
+  const bytes=new TextEncoder().encode(json);
+  $('cfgMsg').textContent='writing…'; $('cfgMsg').className='msg';
+  for(let o=0;o<bytes.length;o+=480) await send(0x43,0,bytes.subarray(o,o+480)); // SF_CFG_SET
+  await send(0x44,0);                                                            // SF_CFG_APPLY
+}
+
+// ---- the link ----------------------------------------------------------------
 async function readLoop(){
-  const dec=new Decoder(t=>log(t,'log-dev'));
+  const dec=new Decoder(t=>log(t,'l-dev'));
   const reader=port.readable.getReader();
   try{
     while(keepReading){
@@ -324,8 +603,8 @@ async function readLoop(){
       for(const f of dec.feed(value)){
         if(f.type===HELLO){
           const who=new TextDecoder().decode(f.payload);
-          setState('connected — '+who,'on');
-          log('cube says hello: '+who,'log-ok');
+          setState(who,'on');
+          log('cube says hello: '+who,'l-ok');
           await send(HELLO_ACK,f.id);
           await sendTime();
           if(!cfgDoc && !cfgWaiting) await requestCfg(true);
@@ -337,13 +616,16 @@ async function readLoop(){
           cfgReceived();
         } else if(f.type===0x45){            // SF_CFG_OK
           const m=new TextDecoder().decode(f.payload);
-          $('cfgMsg').textContent = m==='ok' ? 'saved to the cube' : 'not saved: '+m;
-          log('settings '+(m==='ok'?'saved':'rejected: '+m), m==='ok'?'log-ok':'log-err');
+          const ok = m==='ok';
+          $('cfgMsg').textContent = ok ? 'saved to the cube' : 'not saved: '+m;
+          $('cfgMsg').className = 'msg '+(ok?'ok':'err');
+          log('settings '+(ok?'saved':'rejected: '+m), ok?'l-ok':'l-err');
+          if(ok) requestCfg(true);           // read back what it actually stored
         }
       }
     }
   }catch(e){
-    log('the cable went away: '+e.message,'log-err');
+    log('the cable went away: '+e.message,'l-err');
   }finally{
     try{ reader.releaseLock(); }catch(_){}
     await teardown();
@@ -352,145 +634,50 @@ async function readLoop(){
 
 async function teardown(){
   keepReading=false;
-  try{ if(writer){ writer.releaseLock(); } }catch(_){}
+  try{ if(writer) writer.releaseLock(); }catch(_){}
   writer=null;
   try{ if(port) await port.close(); }catch(_){}
   port=null;
   setState('not connected');
-  $('connect').disabled=false; $('disconnect').disabled=true;
+  $('btnConnect').classList.remove('hide');
+  $('btnDisconnect').classList.add('hide');
+  $('cfgForm').classList.add('hide');
+  $('cfgEmpty').classList.remove('hide');
+  $('cfgEmpty').innerHTML='<b>Not connected.</b> Press Connect and pick the cube.';
+  cfgDoc=null;
 }
 
-$('connect').onclick=async()=>{
+$('btnConnect').onclick=async()=>{
   try{
     port=await navigator.serial.requestPort();
     await port.open({baudRate:115200});
   }catch(e){
-    if(e && e.name==='NotFoundError'){ log('no device picked','log-dev'); return; }
-    log('could not open the port: '+e.message,'log-err');
-    setState('failed to open','err');
+    if(e.name!=='NotFoundError') log('could not open the port: '+e.message,'l-err');
     port=null; return;
   }
   writer=port.writable.getWriter();
   keepReading=true;
-  $('connect').disabled=true; $('disconnect').disabled=false;
-  setState('waiting for the cube to say hello…');
-  log('port open at 115200 — the cube announces itself every couple of seconds','log-dev');
+  setState('waiting for the cube','');
+  $('btnConnect').classList.add('hide');
+  $('btnDisconnect').classList.remove('hide');
+  log('port open at 115200 — waiting for the cube to say hello','l-warn');
   readLoop();
 };
 
-// --- settings over the cable -------------------------------------------
-// The editor is generated from the JSON the cube sends, not from a list kept
-// here. A hardcoded list would be a second copy of the firmware's settings
-// schema, and keeping two copies in step is the single most reliable source of
-// bugs this project has produced.
-let cfgDoc=null, cfgChunks=[], cfgWaiting=false;
+$('btnDisconnect').onclick=()=>{ keepReading=false; teardown(); };
+$('btnClear').onclick=()=>{ $('log').textContent=''; };
+$('btnReload').onclick=()=>requestCfg(true);
+$('btnSave').onclick=saveCfg;
+$('brightness').oninput=()=>{ $('brightVal').textContent=$('brightness').value; };
 
-function isLeaf(v){ return v===null||['string','number','boolean'].includes(typeof v); }
-
-function renderCfg(obj, into, path){
-  for(const [k,v] of Object.entries(obj)){
-    const id=path.concat(k);
-    if(Array.isArray(v)){
-      // Arrays are symbol lists, WiFi networks, airports — structured enough
-      // that a generic editor would do more harm than good. Shown, not edited.
-      const row=document.createElement('div'); row.className='f';
-      row.innerHTML=`<label>${k}</label><span class="arr">${v.length} item(s) — edit on the cube's own page</span>`;
-      into.appendChild(row);
-    } else if(v && typeof v==='object'){
-      const d=document.createElement('details'); d.className='grp'; d.open=path.length===0&&false;
-      const s=document.createElement('summary'); s.textContent=k; d.appendChild(s);
-      const box=document.createElement('div'); box.className='fields'; d.appendChild(box);
-      renderCfg(v, box, id);
-      into.appendChild(d);
-    } else if(isLeaf(v)){
-      const row=document.createElement('div'); row.className='f';
-      const lab=document.createElement('label'); lab.textContent=k; row.appendChild(lab);
-      let inp;
-      if(typeof v==='boolean'){ inp=document.createElement('input'); inp.type='checkbox'; inp.checked=v; }
-      else if(typeof v==='number'){ inp=document.createElement('input'); inp.type='number'; inp.value=v; }
-      else { inp=document.createElement('input'); inp.type='text'; inp.value=v===null?'':v; }
-      inp.dataset.path=JSON.stringify(id);
-      inp.dataset.kind=typeof v;
-      row.appendChild(inp); into.appendChild(row);
-    }
-  }
-}
-
-function collectCfg(){
-  const out=JSON.parse(JSON.stringify(cfgDoc));
-  for(const inp of document.querySelectorAll('#cfg [data-path]')){
-    const path=JSON.parse(inp.dataset.path);
-    let node=out;
-    for(let i=0;i<path.length-1;i++) node=node[path[i]];
-    const key=path[path.length-1];
-    if(inp.dataset.kind==='boolean') node[key]=inp.checked;
-    else if(inp.dataset.kind==='number') node[key]=Number(inp.value)||0;
-    else node[key]=inp.value;
-  }
-  // The cube never hands out its secrets, so these come back as flags rather
-  // than values; sending them on would overwrite real settings with booleans.
-  delete out.features; delete out.chip;
-  return out;
-}
-
-let cfgTries=0, cfgTimer=null;
-
-async function requestCfg(first){
-  if(first){ cfgTries=0; }
-  cfgChunks=[]; cfgWaiting=true;
-  $('cfgCard').hidden=false;                 // show it *now*: the status is in it
-  $('cfgMsg').textContent = cfgTries ? `reading settings… (attempt ${cfgTries+1})`
-                                     : 'reading settings from the cube…';
-  await send(0x40,0);                        // SF_CFG_GET
-
-  // A frame can be corrupted by a log line landing inside it, and the CRC
-  // correctly throws it away — which leaves this waiting forever unless it
-  // asks again. Corruption is occasional, so simply retrying wins.
-  clearTimeout(cfgTimer);
-  cfgTimer=setTimeout(()=>{
-    if(!cfgWaiting) return;
-    if(++cfgTries<4){ requestCfg(false); }
-    else { cfgWaiting=false;
-           $('cfgMsg').textContent='the cube did not send its settings — press Reload to try again'; }
-  }, 4000);
-}
-
-function cfgReceived(){
-  clearTimeout(cfgTimer);
-  const text=new TextDecoder().decode(new Uint8Array(cfgChunks.flatMap(a=>[...a])));
-  cfgChunks=[]; cfgWaiting=false; cfgTries=0;
-  try{ cfgDoc=JSON.parse(text); }
-  catch(e){ $('cfgMsg').textContent='the settings did not parse: '+e.message; return; }
-  const box=$('cfg'); box.textContent='';
-  renderCfg(cfgDoc, box, []);
-  $('cfgCard').hidden=false;
-  $('cfgMsg').textContent=`${(text.length/1024).toFixed(1)} KB of settings, read over the cable`;
-}
-
-async function saveCfg(){
-  if(!cfgDoc) return;
-  const json=JSON.stringify(collectCfg());
-  const bytes=new TextEncoder().encode(json);
-  $('cfgMsg').textContent='writing…';
-  for(let o=0;o<bytes.length;o+=480) await send(0x43,0,bytes.subarray(o,o+480)); // SF_CFG_SET
-  await send(0x44,0);                                                            // SF_CFG_APPLY
-}
-
-$('cfgReload').onclick=()=>requestCfg(true);
-$('cfgSave').onclick=saveCfg;
-
-$('disconnect').onclick=()=>{ keepReading=false; teardown(); $('cfgCard').hidden=true; };
-$('clear').onclick=()=>{ $('log').textContent=''; };
-
-if(!('serial' in navigator)) {
-  $('unsupported').hidden=false;
-  $('connect').disabled=true;
-  if(!window.isSecureContext) $('insecure').hidden=false;
+if(!('serial' in navigator) || !window.isSecureContext){
+  $('unsupported').classList.remove('hide');
+  $('btnConnect').disabled=true;
 }
 
 // Chrome fires this when the cable is physically pulled.
 if(navigator.serial && navigator.serial.addEventListener)
-  navigator.serial.addEventListener('disconnect',()=>{ if(port){ log('cable unplugged','log-err'); teardown(); }});
+  navigator.serial.addEventListener('disconnect',()=>{ if(port){ log('cable unplugged','l-err'); teardown(); }});
 </script>
 </body>
 </html>

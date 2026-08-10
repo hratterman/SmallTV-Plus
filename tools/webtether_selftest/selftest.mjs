@@ -152,6 +152,28 @@ console.log('\n--- the page itself -----------------------------------------');
   }
 }
 
+
+console.log('\n--- the settings form ----------------------------------------');
+{
+  // FIELDS reaches its controls through a variable, so the id check above --
+  // which only sees string literals -- cannot see these. An id here with no
+  // control renders nothing and saves nothing, silently: the same failure the
+  // device's own page shipped three times.
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]));
+  const tbl = script.match(/const FIELDS=\[([\s\S]*?)\n\];/);
+  ck(!!tbl, 'the FIELDS table is where it is expected');
+  if (tbl) {
+    const rows = [...tbl[1].matchAll(/\['([\w]+)',\s*\[([^\]]*)\],\s*'(\w+)'\]/g)];
+    ck(rows.length >= 20, `FIELDS parsed (${rows.length} controls)`);
+    const missing = rows.map(r => r[1]).filter(id => !ids.has(id));
+    ck(missing.length === 0, missing.length ? `ids with no control: ${missing}` : 'every control named by FIELDS exists');
+    const badKind = rows.filter(r => !['bool','number','string'].includes(r[3])).map(r => r[1]);
+    ck(badKind.length === 0, badKind.length ? `unknown kind on: ${badKind}` : 'every kind is one this page handles');
+    const dupes = rows.map(r => r[1]).filter((v, i, a) => a.indexOf(v) !== i);
+    ck(dupes.length === 0, dupes.length ? `listed twice: ${dupes}` : 'no control is listed twice');
+  }
+}
+
 console.log('\n-------------------------------------------------------------');
 if (failures) { console.log(`${failures} check(s) FAILED`); process.exit(1); }
 console.log('all checks passed');
