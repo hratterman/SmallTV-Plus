@@ -69,7 +69,7 @@
 //   5 = clock (SNTP wall time, big digits)
 //   6 = spotify now-playing (ESP32 targets only)
 //   7 = ambient patterns (no network, nothing to report)
-//   8 = flappy bird, played with the lid pad
+//   8 = blackjack, played with the lid pad
 // ---------------------------------------------------------------------------
 #define MODE_STOCKS    0
 #define MODE_USAGE     1
@@ -79,7 +79,7 @@
 #define MODE_CLOCK     5
 #define MODE_SPOTIFY   6
 #define MODE_AMBIENT   7
-#define MODE_FLAPPY    8
+#define MODE_BLACKJACK 8
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 

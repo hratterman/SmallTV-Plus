@@ -25,6 +25,7 @@ enum MinerPoolState : uint8_t {
   MINER_SUBSCRIBED,   // subscribed, waiting for the first job
   MINER_MINING,       // has a job, hashing
   MINER_AUTH_FAILED,  // pool refused mining.authorize; every share would bounce
+  MINER_NO_SOCKET,    // running on the tether, which cannot carry stratum
 };
 
 // A snapshot of engine state for the UI. Copied under the engine lock so the

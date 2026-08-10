@@ -25,11 +25,11 @@ floor for this silicon is ~447 KH/s and we are at ~84% of it.
 Phase 2: **B1-B3 done.** The lid pad is discovered from the web UI (Touch tab)
 rather than needing a diagnostic build, and tap / double-tap / long-press are
 wired globally. B4 is partly there: radar cycles its range on long-press,
-ambient steps patterns, flappy flaps.
+ambient steps patterns, blackjack moves the highlight.
 
 Phase 3: **notification flash done** (`POST /notify`). Four modes have landed
 beyond the original three: clock (SNTP wall time), Spotify now-playing with
-album art and auto-focus, ambient (five no-network patterns), and flappy bird
+album art and auto-focus, ambient (five no-network patterns), and blackjack
 on the lid pad. The rest of the backlog below is untouched.
 
 Flash budget: 93.7% of the OTA slot, ~99 KB free. It was 95.9% before a cleanup

@@ -511,9 +511,9 @@ static const struct {
     {MODE_CLOCK,   "carouselClock",   true},
     {MODE_SPOTIFY, "carouselSpotify", true},
     {MODE_AMBIENT, "carouselAmbient", false},  // decoration, not information
-    {MODE_FLAPPY,  "carouselFlappy",  false},  // a game should never just appear
+    {MODE_BLACKJACK, "carouselBlackjack", false},  // a game should never just appear
 };
-static_assert(MODE_FLAPPY < 16, "carouselMask is 16 bits wide");
+static_assert(MODE_BLACKJACK < 16, "carouselMask is 16 bits wide");
 
 void Settings::setDefaults() {
   wifiCount = 0;
@@ -605,7 +605,7 @@ static const struct { uint8_t mode; const char* tok; } kModeTokens[] = {
     {MODE_CLOCK,    "clock"},
     {MODE_SPOTIFY,  "spotify"},
     {MODE_AMBIENT,  "ambient"},
-    {MODE_FLAPPY,   "flappy"},
+    {MODE_BLACKJACK, "blackjack"},
 };
 
 static const char* modeToken(uint8_t m) {

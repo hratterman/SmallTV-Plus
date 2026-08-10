@@ -127,7 +127,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="clock">Clock</option>
     <option value="spotify">Spotify now playing</option>
     <option value="ambient">Ambient patterns</option>
-    <option value="flappy">Flappy bird</option>
+    <option value="blackjack">Blackjack</option>
     <option value="carousel">Carousel (rotate modes)</option>
    </select>
    <div id="carouselRow">
@@ -141,7 +141,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
    <div class="chk"><input id="carouselAmbient" type="checkbox"><label>Ambient</label></div>
-   <div class="chk"><input id="carouselFlappy" type="checkbox"><label>Flappy bird</label></div>
+   <div class="chk"><input id="carouselBlackjack" type="checkbox"><label>Blackjack</label></div>
    <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
   </div>
   <div class="card"><h2>Ambient</h2>
@@ -490,7 +490,7 @@ var FEATURES={
  clock  :{mode:'clock'  ,car:'carouselClock'},
  spotify:{mode:'spotify',car:'carouselSpotify'},
  ambient:{mode:'ambient',car:'carouselAmbient'},
- flappy :{mode:'flappy' ,car:'carouselFlappy'}};
+ blackjack:{mode:'blackjack',car:'carouselBlackjack'}};
 var TOUCHGPIOS=[4,0,12,27,33,32];
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();

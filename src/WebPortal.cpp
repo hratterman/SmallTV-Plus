@@ -82,7 +82,7 @@ static void handleGetConfig() {
   feat["clock"]   = (bool)WITH_CLOCK;
   feat["spotify"] = (bool)WITH_SPOTIFY;
   feat["ambient"] = (bool)WITH_AMBIENT;
-  feat["flappy"]  = (bool)WITH_GAME;
+  feat["blackjack"] = (bool)WITH_GAME;
   // Which chip this build runs on (the UI warns about per-chip limitations).
 #if defined(SMALLTV_ESP32C2)
   root["chip"] = "esp32c2";
@@ -188,7 +188,8 @@ static void handleStatus() {
     m["state"]      = (ms.state == MINER_MINING)      ? "mining"
                     : (ms.state == MINER_SUBSCRIBED)  ? "subscribed"
                     : (ms.state == MINER_CONNECTING)  ? "connecting"
-                    : (ms.state == MINER_AUTH_FAILED) ? "auth-failed" : "idle";
+                    : (ms.state == MINER_AUTH_FAILED) ? "auth-failed"
+                    : (ms.state == MINER_NO_SOCKET)   ? "no-socket" : "idle";
     // The pool's own words for its last complaint — the only thing that tells
     // a low-difficulty share apart from a stale job or a refused address.
     m["lastError"] = ms.lastError;

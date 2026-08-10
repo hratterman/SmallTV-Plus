@@ -50,7 +50,7 @@
 #include "AmbientMode.h"
 #endif
 #if WITH_GAME
-#include "FlappyMode.h"
+#include "BlackjackMode.h"
 #endif
 #if HAS_TOUCH
 #include "Touch.h"
@@ -82,7 +82,7 @@ static DisplayMode* kModes[] = {
   &g_ambientMode,
 #endif
 #if WITH_GAME
-  &g_flappyMode,
+  &g_blackjackMode,
 #endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);

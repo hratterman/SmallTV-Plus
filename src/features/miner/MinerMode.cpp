@@ -78,6 +78,7 @@ static const char* stateLabel(const MinerStats& st) {
     case MINER_SUBSCRIBED:  return "waiting job";
     case MINER_MINING:      return "mining";
     case MINER_AUTH_FAILED: return "rejected";
+    case MINER_NO_SOCKET:   return "no socket";
     default:                return "idle";
   }
 }
@@ -87,7 +88,8 @@ static uint16_t stateColor(const MinerStats& st) {
     case MINER_MINING:      return C_GREEN;
     case MINER_SUBSCRIBED:
     case MINER_CONNECTING:  return C_YELLOW;
-    case MINER_AUTH_FAILED: return C_RED;
+    case MINER_AUTH_FAILED:
+    case MINER_NO_SOCKET:   return C_RED;
     default:                return C_GRAY;
   }
 }
@@ -219,7 +221,10 @@ void MinerMode::render(const Settings& s, bool full) {
   // gets the line rather than sitting on a serial port nobody is watching.
   char up[16], foot[64];   // the panel clips; the buffer should not also cut
   const bool bad = st.lastError[0] != 0;
-  if (bad) {
+  if (st.state == MINER_NO_SOCKET) {
+    // Not the pool's doing, so do not put the pool's name on it.
+    snprintf(foot, sizeof(foot), "%s", st.lastError);
+  } else if (bad) {
     snprintf(foot, sizeof(foot), "pool: %s", st.lastError);
   } else {
     fmtUptime(st.uptimeSec, up, sizeof(up));

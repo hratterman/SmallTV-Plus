@@ -14,6 +14,9 @@
 #include "MinerJob.h"
 #include "Stratum.h"
 #include "MinerShaHw.h"
+#if WITH_TETHER
+#include "NetFetch.h"   // netFetchTethered(): is the cable carrying us right now
+#endif
 
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
@@ -376,13 +379,32 @@ static void stratumTask(void*) {
     }
 
     // Deliberately the radio and not netHaveRoute(): stratum is a long-lived
-    // raw TCP socket, and the tether carries HTTP requests, not sockets. There
-    // is no mining over the cable.
+    // raw TCP socket carrying server-pushed jobs, and the tether carries HTTP
+    // request/response through a browser's fetch(), which cannot open a socket
+    // at all. There is no mining over the cable, and no host-side script would
+    // change that — it would take a proxy server between the cube and the pool.
     if (!configured || WiFi.status() != WL_CONNECTED) {
       if (subscribed) { client.stop(); subscribed = false; clearJob(); }
+#if WITH_TETHER
+      // Say which of the two it is. Left as "connecting" this sits on a yellow
+      // spinner forever, looking like a pool that will come back — so the
+      // screen has to name the one thing that will never happen.
+      const bool cabled = configured && netFetchTethered();
+#else
+      const bool cabled = false;
+#endif
       lockTake();
-      s_stats.state = configured ? MINER_CONNECTING : MINER_IDLE;
+      s_stats.state = cabled     ? MINER_NO_SOCKET
+                      : configured ? MINER_CONNECTING
+                                   : MINER_IDLE;
       s_stats.configured = configured;
+      // Set it going in, clear it coming out: unplug the cable and join WiFi
+      // and the old explanation must not still be sitting on the screen.
+      if (cabled)
+        strlcpy(s_stats.lastError, "no mining over the cable - needs a socket",
+                sizeof(s_stats.lastError));
+      else
+        s_stats.lastError[0] = 0;
       lockGive();
       vTaskDelay(2000 / portTICK_PERIOD_MS);
       continue;
