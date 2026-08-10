@@ -340,6 +340,13 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <section id="clock" class="tab">
   <div class="card"><h2>Clock face</h2>
    <label>Hour format</label>
+   <label>Face</label>
+   <select id="clockFace">
+    <option value="0">Pixel &mdash; the classic blocky digits</option>
+    <option value="1">Sans &mdash; real type, bold</option>
+    <option value="2">Seven-segment &mdash; alarm-clock digits</option>
+   </select>
+   <label style="margin-top:10px">Hours</label>
    <select id="clockMode12h"><option value="false">24-hour</option><option value="true">12-hour</option></select>
    <div class="chk" style="margin-top:10px"><input id="clockShowSeconds" type="checkbox"><label>Seconds sweep bar</label></div>
    <div class="chk"><input id="clockShowDate" type="checkbox"><label>Date</label></div>
@@ -556,6 +563,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('tz',ck.tz||''); sc('nightEnabled',!!ck.nightEnabled); sc('nightMining',!!ck.nightMining);
  sv('nightStart',ck.nightStart||'22:00'); sv('nightEnd',ck.nightEnd||'07:00');
  sv('clockMode12h',ck.mode12h?'true':'false');
+ sv('clockFace',String(ck.face||0));
  sc('clockShowSeconds',ck.showSeconds!==false); sc('clockShowDate',ck.showDate!==false);
  sv('nightLevel',ck.nightLevel!=null?ck.nightLevel:0); $('nlVal')&&($('nlVal').textContent=(ck.nightLevel!=null?ck.nightLevel:0));
  $('mode').value=c.mode||'stocks'; modeChanged();
@@ -715,7 +723,7 @@ function collect(){
   o.clock={tz:_tzn,tzPosix:_tzp,
   nightEnabled:gc('nightEnabled'),nightStart:gv('nightStart')||'22:00',
   nightEnd:gv('nightEnd')||'07:00',nightLevel:parseInt(gv('nightLevel'))||0,nightMining:gc('nightMining'),
-  mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
+  face:parseInt(gv('clockFace'))||0,mode12h:gv('clockMode12h')==='true',showSeconds:gc('clockShowSeconds'),showDate:gc('clockShowDate')};}
  // ambient slice
  if($('ambientDwell')){o.ambient={dwellSec:parseInt(gv('ambientDwell'))||180,
   patternSec:parseInt(gv('ambientPattern'))||0,shuffle:gc('ambientShuffle'),

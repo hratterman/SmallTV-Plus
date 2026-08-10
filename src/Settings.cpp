@@ -172,6 +172,7 @@ void ClockSettings::setDefaults() {
   nightEndMin   = DEFAULT_NIGHT_END_MIN;
   nightLevel    = DEFAULT_NIGHT_LEVEL;
   nightMining   = false;
+  face          = CLOCK_FACE_PIXEL;
   mode12h       = false;
   showSeconds   = true;
   showDate      = true;
@@ -185,6 +186,7 @@ void ClockSettings::toJson(JsonObject o) const {
   o["nightEnd"]     = minToHhmm(nightEndMin);
   o["nightLevel"]   = nightLevel;
   o["nightMining"]  = nightMining;
+  o["face"]         = face;
   o["mode12h"]      = mode12h;
   o["showSeconds"]  = showSeconds;
   o["showDate"]     = showDate;
@@ -197,6 +199,7 @@ void ClockSettings::fromJson(JsonObjectConst o) {
   if (o["nightStart"].is<const char*>())  nightStartMin = hhmmToMin(o["nightStart"], nightStartMin);
   if (o["nightEnd"].is<const char*>())    nightEndMin   = hhmmToMin(o["nightEnd"], nightEndMin);
   if (o["nightLevel"].is<int>())          nightLevel = constrain((int)o["nightLevel"], 0, 100);
+  if (o["face"].is<int>())                face = (uint8_t)constrain((int)o["face"], 0, 2);
   if (o["nightMining"].is<bool>())        nightMining = o["nightMining"];
   if (o["mode12h"].is<bool>())            mode12h = o["mode12h"];
   if (o["showSeconds"].is<bool>())        showSeconds = o["showSeconds"];

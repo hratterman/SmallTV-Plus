@@ -12,6 +12,7 @@
 
 #define TFT_WIDTH 240
 #include "../../src/features/clock/ClockLayout.h"
+#include "../../src/features/clock/ClockFaces.h"
 
 static int failures = 0;
 static void ck(bool cond, const char* what) {
@@ -103,6 +104,49 @@ int main() {
     // The clear band is fillRect(0, digitsY-4, w, digitsH+8) in ClockMode; the
     // seconds bar starts at y=128, so the two must not collide.
     ck(L.digitsY + L.digitsH + 4 <= 128, "the cleared band does not reach the seconds bar");
+  }
+
+  printf("\n--- the seven-segment tables --------------------------------\n");
+  {
+    // A wrong bit here is a clock that reads 5 when it is 6 — worse than a
+    // crash, because nothing reports it. Check by segment count and by the
+    // pairs people actually confuse.
+    static const int kCounts[10] = {6, 2, 5, 5, 4, 5, 6, 3, 7, 6};
+    bool counts = true;
+    for (int d = 0; d <= 9; d++) {
+      int n = 0;
+      for (int b = 0; b < 7; b++) if (kSevenSeg[d] & (1 << b)) n++;
+      if (n != kCounts[d]) counts = false;
+    }
+    ck(counts, "every digit lights the textbook number of segments");
+    ck(kSevenSeg[6] == (kSevenSeg[5] | SEG_E), "6 is 5 plus the lower-left");
+    ck(kSevenSeg[9] == (kSevenSeg[4] | SEG_A | SEG_D), "9 is 4 plus top and bottom");
+    ck(kSevenSeg[8] == 0x7F, "8 lights everything");
+    ck(kSevenSeg[1] == (SEG_B | SEG_C), "1 is the right-hand pair");
+    bool distinct = true;
+    for (int a = 0; a < 10; a++)
+      for (int b = a + 1; b < 10; b++)
+        if (kSevenSeg[a] == kSevenSeg[b]) distinct = false;
+    ck(distinct, "no two digits share a shape");
+  }
+  {
+    // The geometry: segments must stay inside the cell and never overlap.
+    const int w = 46, h = 92, th = 9;
+    bool inside = true, disjoint = true;
+    SegRect r[7];
+    for (int b = 0; b < 7; b++) {
+      if (!segRect((uint8_t)(1 << b), w, h, th, r[b])) { inside = false; continue; }
+      if (r[b].x < 0 || r[b].y < 0 || r[b].x + r[b].w > w || r[b].y + r[b].h > h)
+        inside = false;
+    }
+    for (int a = 0; a < 7; a++)
+      for (int b = a + 1; b < 7; b++) {
+        const bool overlap = r[a].x < r[b].x + r[b].w && r[b].x < r[a].x + r[a].w &&
+                             r[a].y < r[b].y + r[b].h && r[b].y < r[a].y + r[a].h;
+        if (overlap) disjoint = false;
+      }
+    ck(inside, "every segment stays inside its cell");
+    ck(disjoint, "no two segments overlap");
   }
 
   printf("\n-------------------------------------------------------------\n");

@@ -87,6 +87,7 @@ struct ClockSettings {
   bool     nightMining;
 
   // Clock mode presentation (the night-mode fields above are device-wide)
+  uint8_t  face;          // CLOCK_FACE_* — pixel, sans, seven-segment
   bool     mode12h;
   bool     showSeconds;   // seconds sweep bar under the time
   bool     showDate;

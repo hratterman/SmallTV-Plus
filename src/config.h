@@ -137,6 +137,12 @@
 #endif
 #endif
 
+// Clock faces. The sans face is a rasterised LiberationSans-Bold subset
+// (tools/gen_font.py); the seven-segment face is drawn from rectangles.
+#define CLOCK_FACE_PIXEL 0
+#define CLOCK_FACE_SANS  1
+#define CLOCK_FACE_7SEG  2
+
 #define DEFAULT_CALENDAR_POLL_SEC 300   // meetings do not move that fast
 #define CAL_MAX_EVENTS 6                // shown: 1 big + 3 small; 2 spare for filtering
 #define CAL_TITLE_LEN  64
