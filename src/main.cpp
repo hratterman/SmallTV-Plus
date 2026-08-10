@@ -464,9 +464,32 @@ void loop() {
     return;  // crashed last boot: web UI stays up for OTA recovery, no rendering
   }
 
-  if (netMode() == NET_AP) {
-    delay(5);
-    return;  // setup mode: AP info stays on screen
+  // Setup mode holds the screen on the join-the-hotspot card and runs nothing
+  // else — right when there is no connection, and wrong the moment a cable is
+  // supplying one. A tethered cube has internet; it should behave like it,
+  // whatever its radio is doing.
+  {
+#if WITH_TETHER
+    const bool tethered = tetherActive();
+#else
+    const bool tethered = false;
+#endif
+    static bool s_ranTethered = false;
+    if (netMode() == NET_AP && !tethered) {
+      // Coming back from a tether that has gone away: put the setup card back,
+      // otherwise the last rendered frame sits there looking operational.
+      if (s_ranTethered) {
+        s_ranTethered = false;
+        gfxApInfo(g_settings.apSsid.c_str(), g_settings.apPass.c_str(), netIP().c_str());
+      }
+      delay(5);
+      return;
+    }
+    if (netMode() == NET_AP && tethered && !s_ranTethered) {
+      s_ranTethered = true;
+      Serial.println("[tether] no WiFi, but the cable works - running normally");
+      appInvalidate();     // the setup card is on the glass; repaint over it
+    }
   }
 
 #if WITH_CAPTIVE

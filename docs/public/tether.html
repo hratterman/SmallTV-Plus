@@ -202,10 +202,15 @@ class Decoder{
     return null;
   }
   _text(bytes){
+    // The port is usually opened part-way through a frame, so the first thing
+    // the decoder sees is a fragment that fails its CRC — correctly discarded,
+    // but it used to be printed as a line of mush. Keep printable bytes only;
+    // real log lines are ASCII and survive, binary remains does not.
     for(const b of bytes){
       if(b===10){ const s=new TextDecoder().decode(new Uint8Array(this.text)).replace(/\r$/,'');
                   this.text=[]; if(s.trim()) this.onText(s); }
-      else if(this.text.length<400) this.text.push(b);
+      else if(b===9||(b>=32&&b<127)){ if(this.text.length<400) this.text.push(b); }
+      else { this.text=[]; }        // binary: this was never a log line
     }
   }
   _finish(){
@@ -323,7 +328,7 @@ async function readLoop(){
           log('cube says hello: '+who,'log-ok');
           await send(HELLO_ACK,f.id);
           await sendTime();
-          if(!cfgDoc && !cfgWaiting) await requestCfg();
+          if(!cfgDoc && !cfgWaiting) await requestCfg(true);
         } else if(f.type===HTTP_REQ){
           await handleRequest(f.id,f.payload);
         } else if(f.type===0x41){            // SF_CFG_DATA
@@ -428,15 +433,32 @@ function collectCfg(){
   return out;
 }
 
-async function requestCfg(){
+let cfgTries=0, cfgTimer=null;
+
+async function requestCfg(first){
+  if(first){ cfgTries=0; }
   cfgChunks=[]; cfgWaiting=true;
-  $('cfgMsg').textContent='reading settings from the cube…';
-  await send(0x40,0);              // SF_CFG_GET
+  $('cfgCard').hidden=false;                 // show it *now*: the status is in it
+  $('cfgMsg').textContent = cfgTries ? `reading settings… (attempt ${cfgTries+1})`
+                                     : 'reading settings from the cube…';
+  await send(0x40,0);                        // SF_CFG_GET
+
+  // A frame can be corrupted by a log line landing inside it, and the CRC
+  // correctly throws it away — which leaves this waiting forever unless it
+  // asks again. Corruption is occasional, so simply retrying wins.
+  clearTimeout(cfgTimer);
+  cfgTimer=setTimeout(()=>{
+    if(!cfgWaiting) return;
+    if(++cfgTries<4){ requestCfg(false); }
+    else { cfgWaiting=false;
+           $('cfgMsg').textContent='the cube did not send its settings — press Reload to try again'; }
+  }, 4000);
 }
 
 function cfgReceived(){
+  clearTimeout(cfgTimer);
   const text=new TextDecoder().decode(new Uint8Array(cfgChunks.flatMap(a=>[...a])));
-  cfgChunks=[]; cfgWaiting=false;
+  cfgChunks=[]; cfgWaiting=false; cfgTries=0;
   try{ cfgDoc=JSON.parse(text); }
   catch(e){ $('cfgMsg').textContent='the settings did not parse: '+e.message; return; }
   const box=$('cfg'); box.textContent='';
@@ -454,7 +476,7 @@ async function saveCfg(){
   await send(0x44,0);                                                            // SF_CFG_APPLY
 }
 
-$('cfgReload').onclick=requestCfg;
+$('cfgReload').onclick=()=>requestCfg(true);
 $('cfgSave').onclick=saveCfg;
 
 $('disconnect').onclick=()=>{ keepReading=false; teardown(); $('cfgCard').hidden=true; };
