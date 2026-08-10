@@ -84,7 +84,12 @@ void TickerSettings::fromJson(JsonObjectConst o) {
 
   if (o["webhookUrl"].is<const char*>()) webhookUrl = o["webhookUrl"].as<String>();
   if (o["range"].is<const char*>())      range = o["range"].as<String>();
-  if (o["points"].is<int>())             points = constrain((int)o["points"], 0, MAX_SPARK_POINTS);
+  // The low bound is 2, not 0: below 2 no source can draw a line, so every
+  // chart silently vanishes with nothing anywhere saying why — which happened.
+  // A web-UI save with the points field empty stored ||0, and "points":0 then
+  // gated off every history request while the quotes carried on fine. Turning
+  // the chart off is showChart's job; points is only ever "how many".
+  if (o["points"].is<int>())             points = constrain((int)o["points"], 2, MAX_SPARK_POINTS);
   if (o["pollSec"].is<int>())            pollSec = max(10, (int)o["pollSec"]);
   if (o["rotateSec"].is<int>())          rotateSec = max(2, (int)o["rotateSec"]);
   if (o["colorInverted"].is<bool>())     colorInverted = o["colorInverted"];

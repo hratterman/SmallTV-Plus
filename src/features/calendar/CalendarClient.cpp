@@ -283,6 +283,12 @@ static bool fetchEvents(uint8_t provider, uint16_t timeoutMs) {
 // ---------------------------------------------------------------------------
 // The task
 // ---------------------------------------------------------------------------
+// The link flow lives with the other public surface below; the task only needs
+// these three names.
+static volatile bool s_linkReq = false;
+static void linkSet(CalLinkPhase ph, const char* code, const char* url, const char* msg);
+static void runLinkFlow(const String& cid, uint16_t timeoutMs);
+
 static void calendarTask(void*) {
   uint32_t myEpoch = 0;
   uint32_t lastPoll = 0;
@@ -309,6 +315,16 @@ static void calendarTask(void*) {
       s_accessToken = "";
       s_tokenDiesMs = 0;
       lastPoll = 0;
+    }
+
+    // A link request runs regardless of enabled/token state — linking is how
+    // those come to exist in the first place. It only needs a route and an id.
+    if (s_linkReq) {
+      s_linkReq = false;
+      if (!cid.length())       linkSet(CAL_LINK_FAILED, 0, 0, "set the client ID first");
+      else if (!netHaveRoute()) linkSet(CAL_LINK_FAILED, 0, 0, "no network route");
+      else                      runLinkFlow(cid, timeoutMs);
+      continue;
     }
 
     // netHaveRoute, not the radio: tethered there is no station connection and
@@ -382,6 +398,111 @@ String calendarTakeRotatedToken() {
   s_rotatedToken = "";
   lockGive();
   return t;
+}
+
+// ---------------------------------------------------------------------------
+// On-device linking (Microsoft device-code flow)
+// ---------------------------------------------------------------------------
+static CalLinkState   s_link = {};
+
+void calendarLinkStart() { s_linkReq = true; }
+
+void calendarLinkState(CalLinkState& out) {
+  lockTake();
+  out = s_link;
+  lockGive();
+}
+
+static void linkSet(CalLinkPhase ph, const char* code, const char* url,
+                    const char* msg) {
+  lockTake();
+  s_link.phase = ph;
+  strlcpy(s_link.code, code ? code : "", sizeof(s_link.code));
+  strlcpy(s_link.url, url ? url : "", sizeof(s_link.url));
+  strlcpy(s_link.msg, msg ? msg : "", sizeof(s_link.msg));
+  lockGive();
+}
+
+// Runs on the calendar task, synchronously — a link attempt takes as long as
+// the user takes to type the code, and the task has nothing better to do while
+// it waits. Fifteen minutes is Microsoft's own expiry on the code.
+static void runLinkFlow(const String& cid, uint16_t timeoutMs) {
+  linkSet(CAL_LINK_STARTING, nullptr, nullptr, nullptr);
+
+  String body = "client_id=";
+  urlEnc(cid.c_str(), body);
+  body += "&scope=Calendars.Read%20offline_access";
+
+  String raw;
+  NetFetchResult res = netFetchToString(
+      MS_DEVICE_URL, true, "Content-Type: application/x-www-form-urlencoded",
+      (const uint8_t*)body.c_str(), (uint16_t)body.length(), raw, 4096, timeoutMs);
+  if (!res.ok || res.status != 200) {
+    linkSet(CAL_LINK_FAILED, nullptr, nullptr,
+            res.ok ? "Microsoft refused - check the client ID" : res.error);
+    return;
+  }
+
+  char devCode[420];        // device_code is long; it never leaves this stack
+  uint32_t interval = 5, expires = 900;
+  {
+    JsonDocument doc;
+    if (deserializeJson(doc, raw)) { linkSet(CAL_LINK_FAILED, 0, 0, "bad JSON"); return; }
+    const char* dc = doc["device_code"] | "";
+    const char* uc = doc["user_code"] | "";
+    const char* vu = doc["verification_uri"] | "microsoft.com/devicelogin";
+    if (!dc[0] || !uc[0]) {
+      linkSet(CAL_LINK_FAILED, 0, 0,
+              (const char*)(doc["error_description"] | "no code returned"));
+      return;
+    }
+    strlcpy(devCode, dc, sizeof(devCode));
+    interval = doc["interval"] | 5;
+    expires = doc["expires_in"] | 900;
+    // Strip the scheme: the screen is 240 px wide and everyone knows it is a URL.
+    if (!strncmp(vu, "https://", 8)) vu += 8;
+    linkSet(CAL_LINK_CODE, uc, vu, nullptr);
+  }
+
+  String poll = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code"
+                "&client_id=";
+  urlEnc(cid.c_str(), poll);
+  poll += "&device_code=";
+  poll += devCode;          // opaque base64url; nothing in it needs escaping
+
+  const uint32_t deadline = millis() + expires * 1000UL;
+  while ((int32_t)(millis() - deadline) < 0) {
+    vTaskDelay(pdMS_TO_TICKS(interval * 1000));
+
+    raw = "";
+    res = netFetchToString(MS_TOKEN_URL, true,
+                           "Content-Type: application/x-www-form-urlencoded",
+                           (const uint8_t*)poll.c_str(), (uint16_t)poll.length(),
+                           raw, 8192, timeoutMs);
+    if (!res.ok) continue;                       // transient; the code still stands
+
+    JsonDocument doc;
+    if (deserializeJson(doc, raw)) continue;
+    const char* err = doc["error"] | "";
+    if (!strcmp(err, "authorization_pending")) continue;
+    if (!strcmp(err, "slow_down")) { interval += 5; continue; }
+    if (err[0]) {
+      linkSet(CAL_LINK_FAILED, 0, 0,
+              (const char*)(doc["error_description"] | err));
+      return;
+    }
+    const char* rt = doc["refresh_token"] | "";
+    if (!rt[0]) { linkSet(CAL_LINK_FAILED, 0, 0, "no refresh token granted"); return; }
+
+    // Delivered exactly like a rotated token: main.cpp persists it, and the
+    // epoch bump from that save restarts the poll with the new credentials.
+    lockTake();
+    s_rotatedToken = rt;
+    lockGive();
+    linkSet(CAL_LINK_DONE, nullptr, nullptr, nullptr);
+    return;
+  }
+  linkSet(CAL_LINK_FAILED, 0, 0, "the code expired before it was entered");
 }
 
 #endif  // WITH_CALENDAR

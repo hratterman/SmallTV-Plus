@@ -113,10 +113,30 @@ void CalendarMode::render(const Settings& s) {
     gfx->drawFastHLine(TEXT_X, HDR_Y + 14, TEXT_W, C_FAINT);
   }
 
+  // A link in progress owns the screen: the whole point of the device-code
+  // flow is that the code is right here, not buried in a terminal.
+  {
+    CalLinkState link;
+    calendarLinkState(link);
+    if (link.phase == CAL_LINK_CODE) {
+      gfxDrawCentered("go to", 60, 1, C_DIMTX);
+      gfxDrawCentered(link.url, 76, 1, C_WHITE);
+      gfxDrawCentered("and enter", 100, 1, C_DIMTX);
+      gfxDrawCentered(link.code, 122, 3, C_ACCENT);
+      gfxDrawCentered("waiting...", 170, 1, C_FAINT);
+      return;
+    }
+    if (link.phase == CAL_LINK_FAILED && !s.calendar.refreshToken.length()) {
+      gfxDrawCentered("linking failed", 96, 1, C_SOON);
+      gfxDrawCentered(link.msg, 116, 1, C_DIMTX);
+      return;
+    }
+  }
+
   if (!s.calendar.enabled || !s.calendar.refreshToken.length()) {
     gfxDrawCentered("calendar not linked", 100, 1, C_DIMTX);
-    gfxDrawCentered("run tools/calendar_auth.py, then", 120, 1, C_FAINT);
-    gfxDrawCentered("paste the token in the web UI", 132, 1, C_FAINT);
+    gfxDrawCentered("web UI -> Calendar -> Link,", 120, 1, C_FAINT);
+    gfxDrawCentered("or run tools/calendar_auth.py", 132, 1, C_FAINT);
     return;
   }
   if (!snap.ok) {
@@ -199,8 +219,16 @@ void CalendarMode::service(const Settings& s) {
   bool repaint = needFull_;
 
   // Repaint when "next" changes (an event ended, or the first fetch landed),
-  // and once a minute so the countdown ticks.
+  // and once a minute so the countdown ticks. While a link flow is running,
+  // once a second — the code has to appear the moment Microsoft issues it.
   if (!repaint && nowMs - lastDrawMs_ >= 60000UL) repaint = true;
+  {
+    static uint8_t s_lastLink = 0;
+    CalLinkState link;
+    calendarLinkState(link);
+    if (link.phase != s_lastLink) { s_lastLink = (uint8_t)link.phase; repaint = true; }
+    else if (link.phase == CAL_LINK_CODE && nowMs - lastDrawMs_ >= 1000UL) repaint = true;
+  }
   if (!repaint) {
     CalSnapshot snap;
     calendarSnapshot(snap);

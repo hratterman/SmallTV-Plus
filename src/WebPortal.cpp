@@ -28,6 +28,9 @@
 #include "SpotifyClient.h"
 #include "AlbumArt.h"
 #endif
+#if WITH_CALENDAR
+#include "CalendarClient.h"
+#endif
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
 extern void appInvalidate();
@@ -520,6 +523,24 @@ void webPortalBegin(Settings& settings) {
   g_updateMsg = otaTakeBootResult();
 
   server.on("/", HTTP_GET, handleRoot);
+#if WITH_CALENDAR
+  // On-device Microsoft linking. POST starts the device-code flow; GET reports
+  // where it is, and the page polls it while the user types the code.
+  server.on("/api/calendar/link", HTTP_POST, []() {
+    calendarLinkStart();
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+  server.on("/api/calendar/link", HTTP_GET, []() {
+    CalLinkState st;
+    calendarLinkState(st);
+    JsonDocument doc;
+    doc["phase"] = (int)st.phase;
+    doc["code"]  = st.code;
+    doc["url"]   = st.url;
+    doc["msg"]   = st.msg;
+    sendJson(doc);
+  });
+#endif
   server.on("/api/config", HTTP_GET, handleGetConfig);
   server.on("/api/config", HTTP_POST, handlePostConfig);
   server.on("/api/status", HTTP_GET, handleStatus);

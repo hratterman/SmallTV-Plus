@@ -152,6 +152,7 @@
 #define GOOGLE_TOKEN_URL "https://oauth2.googleapis.com/token"
 #define GOOGLE_CAL_URL   "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 #define MS_TOKEN_URL     "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+#define MS_DEVICE_URL    "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode"
 #define MS_CAL_URL       "https://graph.microsoft.com/v1.0/me/calendarview"
 
 // Largest album cover accepted when it has to be held whole (the tether route).

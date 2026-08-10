@@ -31,10 +31,14 @@ BlackjackMode g_blackjackMode;
 #define HAND_X    8
 #define HAND_MAX  (TFT_WIDTH - 2 * HAND_X)
 
-#define DEALER_Y  40
-#define PLAYER_Y  100
-#define RESULT_Y  156
-#define MENU_Y    176
+// The record line sits at y=10, not 4: the housing overhangs the panel's top
+// few rows on these units, and 4 put the tops of the digits under the bezel.
+// Every mode that learned this lesson starts at y >= 8.
+#define REC_Y     10
+#define DEALER_Y  44
+#define PLAYER_Y  104
+#define RESULT_Y  158
+#define MENU_Y    178
 #define MENU_H    18
 
 #define DEALER_STEP_MS 450   // pace of the dealer's draw; nothing waits on input
@@ -267,7 +271,7 @@ void BlackjackMode::render(const Settings& s) {
   char line[40];
   snprintf(line, sizeof(line), "W %u   L %u   P %u",
            (unsigned)won_, (unsigned)lost_, (unsigned)pushed_);
-  gfxDrawCentered(line, 4, 1, C_LABEL);
+  gfxDrawCentered(line, REC_Y, 1, C_LABEL);
 
   const bool hideHole = (state_ == ST_PLAYER);
 

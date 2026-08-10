@@ -48,7 +48,31 @@ static inline int calSnapshotNext(const CalSnapshot& s, int64_t nowUtc) {
 }
 
 // Microsoft handed back a replacement refresh token; empty when none pending.
-// Reading it clears it, so a persisted token is not persisted twice.
+// Reading it clears it, so a persisted token is not persisted twice. The
+// device-code link below delivers its token through the same channel.
 String calendarTakeRotatedToken();
+
+// ---- on-device linking (Microsoft only) -------------------------------------
+// The device-code flow needs no browser on the cube and no secret anywhere:
+// the cube asks Microsoft for a short code, shows it, and polls until the user
+// has typed it into microsoft.com/devicelogin on any machine. Google's device
+// flow does not offer calendar scopes, so Google keeps the helper script.
+enum CalLinkPhase : uint8_t {
+  CAL_LINK_IDLE = 0,
+  CAL_LINK_STARTING,   // asking Microsoft for a code
+  CAL_LINK_CODE,       // code issued; waiting for the user to enter it
+  CAL_LINK_DONE,       // refresh token obtained and handed to main.cpp
+  CAL_LINK_FAILED,
+};
+
+struct CalLinkState {
+  CalLinkPhase phase;
+  char code[20];       // what the user types
+  char url[64];        // where they type it
+  char msg[64];        // failure reason
+};
+
+void calendarLinkStart();               // uses the configured client id
+void calendarLinkState(CalLinkState& out);
 
 #endif  // WITH_CALENDAR
