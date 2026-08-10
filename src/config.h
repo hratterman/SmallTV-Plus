@@ -212,7 +212,11 @@
 // accordingly: a failure here is reported, never fatal.
 #define SA_QUOTE_URL "https://stockanalysis.com/api/quotes/s/"
 #define SA_HIST_URL  "https://stockanalysis.com/api/symbol/s/"
-#define SA_HIST_TAIL "/history?range=1Y"
+// Daily bars, so ask for just enough of them: 3M is 64 rows in ~6 KB, against
+// MAX_SPARK_POINTS of 60. A year is 252 rows in ~25 KB, which overran the read
+// buffer and failed the parse with no hint of why — and 192 of those rows were
+// then thrown away.
+#define SA_HIST_TAIL "/history?range=3M"
 
 #define CASH_GQL_HOST   "www.cash.ch"
 #define CASH_GQL_PATH   "/_/api/graphql/prod"

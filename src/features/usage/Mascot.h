@@ -21,8 +21,11 @@ void mascotReset();                     // restart from frame 0 (on entering the
 void mascotSample(float sessionPct);    // feed the burn-rate tracker (per usage update)
 bool mascotTick();                      // advance frames/anim; true if something changed
 
-// Current frame, for the renderer.
-const uint8_t*  mascotCells();          // 400 cells (20x20) in PROGMEM — read with pgm_read_byte
+// Current frame, for the renderer. The frame data is run-length encoded in
+// flash; these return a decoded 400-cell grid in RAM, so index it directly —
+// no pgm_read_byte. The buffer is reused, so draw from it before the frame
+// advances rather than holding the pointer.
+const uint8_t*  mascotCells();          // MASCOT_GRID^2 palette indices (RAM)
 const uint16_t* mascotPalette();        // MASCOT_PALETTE_SIZE RGB565 entries (RAM, index directly)
 
 // A fixed calm idle pose, for the small header logo on the stats screen. Lets

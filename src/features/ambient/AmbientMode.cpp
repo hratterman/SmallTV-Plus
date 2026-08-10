@@ -9,6 +9,34 @@
 
 AmbientMode g_ambientMode;
 
+// The pattern buffers — see the note in AmbientMode.h for why these are here
+// rather than in the class. Zero-initialised statics, so .bss rather than .data.
+//
+// Life keeps two grids, one byte per cell: bitpacking would save 6 KB but makes
+// the neighbour count the expensive part, and the RAM is there.
+static uint8_t cells_[AMB_CELLS][AMB_CELLS];
+static uint8_t next_[AMB_CELLS][AMB_CELLS];
+
+struct Star { int16_t x, y; uint8_t z, px, py; bool drawn; };
+static Star stars_[AMB_STARS];
+
+// Matrix rain: one head position and speed per column; the tail is drawn by
+// simply not erasing behind it until the head wraps.
+static int16_t rainY_[AMB_COLS];
+static uint8_t rainSpd_[AMB_COLS];
+
+// Fireworks. Position and velocity are 8.8 fixed point — 32-bit for position
+// because 240<<8 does not fit int16_t, which is what made the first version's
+// shells vanish on their opening frame.
+struct Spark {
+  int32_t  x, y;
+  int16_t  vx, vy;
+  int16_t  px, py;       // last drawn pixel, -1 = nothing to erase
+  uint8_t  life, age;
+  uint16_t col;
+};
+static Spark sparks_[AMB_SPARKS];
+
 #define AMB_PATTERNS 5
 #define PAT_LIFE   0
 #define PAT_PLASMA 1
@@ -26,6 +54,8 @@ static inline uint32_t xr(uint32_t* s) {
   return *s = v;
 }
 
+// invalidate() raises needFull_, which is what the zero-initialised members
+// above rely on: nothing draws until the first startPattern() has run.
 void AmbientMode::begin(const Settings& s) { invalidate(s); }
 
 // Repaint, but stay on the pattern that is running. Resetting to Life here

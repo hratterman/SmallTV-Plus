@@ -49,39 +49,19 @@ class AmbientMode : public DisplayMode {
   void stepSparks();
   void nextPattern(const Settings& s);
 
+  // The pattern buffers are ~9.5 KB and every byte of them starts at zero. They
+  // are deliberately NOT members: this class is polymorphic, so its vtable
+  // pointer is a non-zero initialiser, which puts the whole object in .data —
+  // and the flash image then carries a literal copy of 9.5 KB of zeroes. At
+  // file scope in the .cpp they are plain zero-initialised statics, land in
+  // .bss, and cost the same RAM for none of the flash. There is exactly one
+  // AmbientMode, so nothing is lost by not scoping them to the instance.
   uint8_t  pattern_ = 0;
   bool     needFull_ = true;
   uint32_t lastMs_ = 0;
   uint32_t rng_ = 22695477u;
   uint16_t gen_ = 0;
-
-  // Life. Two grids, one byte per cell: bitpacking would save 6 KB but makes
-  // the neighbour count the expensive part, and the heap has room.
-  uint8_t  cells_[AMB_CELLS][AMB_CELLS] = {};
-  uint8_t  next_[AMB_CELLS][AMB_CELLS] = {};
-
-  struct Star { int16_t x, y; uint8_t z, px, py; bool drawn; };
-  Star     stars_[AMB_STARS] = {};
-
-  // Matrix rain: one head position and speed per column, and the tail is drawn
-  // by simply not erasing behind it until the head wraps.
-  int16_t  rainY_[AMB_COLS] = {};
-  uint8_t  rainSpd_[AMB_COLS] = {};
-
-  // Position and velocity are 8.8 fixed point. Integer pixels-per-frame made
-  // the slowest non-zero particle cross 30 px/s and the fastest 210, which is
-  // why the old bursts looked like a handful of darting specks: there was no
-  // room between "barely moves" and "gone in three frames".
-  struct Spark {
-    int32_t  x, y;         // 8.8 position — 32-bit: 240<<8 does not fit int16_t
-    int16_t  vx, vy;       // 8.8 velocity, px per frame
-    int16_t  px, py;       // last drawn pixel (whole pixels), -1 = not drawn
-    uint8_t  life, age;    // frames remaining, frames lived
-    uint16_t col;
-  };
-  Spark    sparks_[AMB_SPARKS] = {};
   uint16_t sparkTimer_ = 0;
-
   uint32_t patternSince_ = 0;
   uint16_t phase_ = 0;
 };

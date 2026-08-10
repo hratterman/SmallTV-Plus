@@ -424,8 +424,7 @@ static bool parseCashQuote(const Settings& s, StockData& d, Stream& stream) {
 // {"status":200,"data":{"p":710.71,"c":4.31,"cp":0.61,"cl":706.4, ...}}
 //   p  last price      c  change in currency
 //   cp change percent  cl previous close
-template <typename SRC>
-static bool parseSaQuote(const Settings& s, StockData& d, SRC&& src) {
+static bool parseSaQuote(const Settings& s, StockData& d, Stream& src) {
   JsonDocument filter;
   JsonObject fd = filter["data"].to<JsonObject>();
   fd["p"] = true; fd["c"] = true; fd["cp"] = true; fd["cl"] = true;
@@ -453,13 +452,21 @@ static bool parseSaQuote(const Settings& s, StockData& d, SRC&& src) {
     if (prev > 0) { d.change = price - prev; d.changePct = d.change / prev * 100.0f; }
   }
   d.hasChange = true;
+  // The span the chart covers is decided by the history parse below, not here.
+  // Clear it so a label left over from a different source cannot outlive it.
+  d.rangeLabel[0] = 0;
+
+  // Without these the symbol never leaves "loading...", however well the parse
+  // went. Every other quote parser ends exactly here; this one did not.
+  d.valid = true;
+  d.error = false;
+  d.lastOkMs = millis();
   return true;
 }
 
 // {"status":200,"data":[{"t":"2026-08-07","c":710.71}, ...]} newest first, so
 // the sparkline is filled backwards.
-template <typename SRC>
-static bool parseSaHist(const Settings& s, StockData& d, SRC&& src) {
+static bool parseSaHist(const Settings& s, StockData& d, Stream& src) {
   JsonDocument filter;
   filter["data"][0]["c"] = true;
   filter["status"] = true;
@@ -488,6 +495,16 @@ static bool parseSaHist(const Settings& s, StockData& d, SRC&& src) {
 
   d.sparkCount = 0;
   for (uint16_t i = 0; i < n; i++) d.spark[d.sparkCount++] = tmp[n - 1 - i];
+
+  // This source ignores the range setting, so the only honest label is one
+  // derived from the bars that actually got drawn: ~21 trading days to the
+  // month, rounded to nearest. Hardcoding it would be the same bug this
+  // codebase keeps producing — one fact written in two places, one of which
+  // stops being true the moment `points` changes.
+  const unsigned days   = d.sparkCount;
+  const unsigned months = (days + 10) / 21;
+  if (months) snprintf(d.rangeLabel, sizeof(d.rangeLabel), "%uM", months);
+  else        snprintf(d.rangeLabel, sizeof(d.rangeLabel), "%uD", days);
   return true;
 }
 
@@ -544,6 +561,22 @@ enum ParseKind : uint8_t { PARSE_WEBHOOK, PARSE_YAHOO, PARSE_CASH_QUOTE, PARSE_C
 // cash.ch is the only host we let negotiate ECDHE, and only the first handshake
 // pays for it: this session resumes the rest for ~23 h.
 static TlsSession g_cashSession;
+
+// The one place that maps a kind to a parser. It is deliberately not inlined:
+// the tether path and the WiFi path both dispatch, and at -Os the compiler
+// happily pastes all six parsers into each of them — about 3 KB of flash to say
+// the same thing twice. Both callers hand it a Stream, so there is nothing to
+// specialise on either.
+static __attribute__((noinline)) bool parseInto(ParseKind kind, const Settings& s, StockData& d, Stream& src) {
+  switch (kind) {
+    case PARSE_YAHOO:      return parseYahoo(s, d, src);
+    case PARSE_SA_QUOTE:   return parseSaQuote(s, d, src);
+    case PARSE_SA_HIST:    return parseSaHist(s, d, src);
+    case PARSE_CASH_QUOTE: return parseCashQuote(s, d, src);
+    case PARSE_CASH_CHART: return parseCashChart(s, d, src);
+    default:               return parseWebhook(s, d, src);
+  }
+}
 
 static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, StockData& d) {
   bool https = url.startsWith("https://");
@@ -605,16 +638,8 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
         stocksSetNote(r.error);
       return false;
     }
-    stocksSetNote("");
     StringStream ss(raw);
-    switch (kind) {
-      case PARSE_YAHOO:      return parseYahoo(s, d, ss);
-      case PARSE_SA_QUOTE:   return parseSaQuote(s, d, ss);
-      case PARSE_SA_HIST:    return parseSaHist(s, d, ss);
-      case PARSE_CASH_QUOTE: return parseCashQuote(s, d, ss);
-      case PARSE_CASH_CHART: return parseCashChart(s, d, ss);
-      default:               return parseWebhook(s, d, ss);
-    }
+    return parseInto(kind, s, d, ss);
   }
 #endif
 
@@ -642,15 +667,8 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     return false;
   }
 
-  bool ok;
-  switch (kind) {
-    case PARSE_YAHOO:      ok = parseYahoo(s, d, http.getStream());     break;
-    case PARSE_SA_QUOTE:   ok = parseSaQuote(s, d, http.getStream());   break;
-    case PARSE_SA_HIST:    ok = parseSaHist(s, d, http.getStream());    break;
-    case PARSE_CASH_QUOTE: ok = parseCashQuote(s, d, http.getStream()); break;
-    case PARSE_CASH_CHART: ok = parseCashChart(s, d, http.getStream()); break;
-    default:               ok = parseWebhook(s, d, http.getStream());   break;  // webhook + github: same JSON
-  }
+  // PARSE_GITHUB falls to parseWebhook inside parseInto: same JSON shape.
+  const bool ok = parseInto(kind, s, d, http.getStream());
   http.end();
   return ok;
 }

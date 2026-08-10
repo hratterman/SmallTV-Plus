@@ -107,10 +107,49 @@ def check(html):
         fail("JavaScript does not parse:\n" + (r.stderr or r.stdout).strip())
 
 
+def minify(html):
+    """Strip what the browser does not need, without moving any code.
+
+    Deliberately line-preserving. A real minifier joins statements, and
+    JavaScript without semicolons then changes meaning through automatic
+    semicolon insertion — a class of bug that would show up as a dead page on
+    the device and nowhere else. Dropping comments and leading indentation is
+    safe by construction and gets most of the win, because what compresses
+    badly here is prose: the hint text and the explanatory comments.
+
+    Whatever this returns is handed to the same syntax check as the original,
+    so a bad strip fails the build rather than the device.
+    """
+    # HTML comments, except the deployment note the file carries for whoever
+    # hosts a copy of it.
+    html = re.sub(r"<!--(?!\s*SmallTV tether).*?-->", "", html, flags=re.S)
+
+    out = []
+    in_script = False
+    for line in html.split("\n"):
+        if "<script>" in line:
+            in_script = True
+        elif "</script>" in line:
+            in_script = False
+        s = line.strip()
+        if not s:
+            continue
+        # Whole-line // comments inside the script. Only whole-line ones: a
+        # trailing comment can sit inside a string or a regex literal.
+        if in_script and s.startswith("//"):
+            continue
+        out.append(s)
+    return "\n".join(out) + "\n"
+
+
 def generate():
     with open(SRC, "rb") as f:
         raw = f.read()
-    check(raw.decode("utf-8"))
+    source = raw.decode("utf-8")
+    check(source)
+    small = minify(source)
+    check(small)                 # the stripped page must parse too
+    raw = small.encode("utf-8")
     # mtime=0 so the output is byte-identical for identical input, which keeps
     # incremental builds from relinking on every run.
     packed = gzip.compress(raw, compresslevel=9, mtime=0)

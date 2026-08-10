@@ -109,10 +109,6 @@ void gfxDrawCentered(const char* s, int y, uint8_t size, uint16_t color) {
 // ---- Marquee --------------------------------------------------------------
 // The phase arithmetic lives in GfxMarqueeStep.h so it can be checked on a
 // host; what is left here is the drawing.
-bool gfxMarqueeScrolls(const char* s, int w, uint8_t size) {
-  return s && gfxTextW(s, size) > w;
-}
-
 bool gfxMarqueeDraw(const GfxMarquee& m, const char* s, uint32_t phaseMs) {
   if (!gfx || !s) return false;
   const int h = 8 * m.size;

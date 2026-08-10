@@ -1,5 +1,6 @@
 #include "Mascot.h"
 #include "mascot_frames.h"
+#include "MascotUnpack.h"
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
@@ -133,8 +134,35 @@ bool mascotTick() {
   return changed;
 }
 
-const uint8_t*  mascotCells()   { return mascot_anims[s_curAnim].frames[s_curFrame]; }
+// ---- frame unpacking -------------------------------------------------------
+// The frames are run-length encoded in flash (see mascot_frames.h). Callers want
+// a plain 400-cell grid, so expand into a RAM buffer and hand that back.
+// Unpacking is a few microseconds and only runs when the frame actually changes.
+#define MASCOT_CELLS (MASCOT_GRID * MASCOT_GRID)
+
+const uint8_t* mascotCells() {
+  static uint8_t  cells[MASCOT_CELLS];
+  static uint8_t  haveAnim  = 0xFF;
+  static uint16_t haveFrame = 0xFFFF;
+  if (haveAnim != s_curAnim || haveFrame != s_curFrame) {
+    const MascotAnim& a = mascot_anims[s_curAnim];
+    mascotUnpack(a.rle, a.lens, s_curFrame, cells, MASCOT_CELLS);
+    haveAnim  = s_curAnim;
+    haveFrame = s_curFrame;
+  }
+  return cells;
+}
 const uint16_t* mascotPalette() { return mascot_anims[s_curAnim].palette; }
 
-const uint8_t*  mascotIdleCells()   { return mascot_anims[0].frames[0]; }
+// The header logo is always the same pose, so it is unpacked once and kept.
+// It needs its own buffer: the two are drawn in the same repaint.
+const uint8_t* mascotIdleCells() {
+  static uint8_t cells[MASCOT_CELLS];
+  static bool    done = false;
+  if (!done) {
+    mascotUnpack(mascot_anims[0].rle, mascot_anims[0].lens, 0, cells, MASCOT_CELLS);
+    done = true;
+  }
+  return cells;
+}
 const uint16_t* mascotIdlePalette() { return mascot_anims[0].palette; }

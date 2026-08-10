@@ -46,9 +46,6 @@ struct GfxMarquee {
 // scrolling, so the caller knows this band needs to keep being redrawn.
 bool gfxMarqueeDraw(const GfxMarquee& m, const char* s, uint32_t phaseMs);
 
-// True if `s` would scroll in a band `w` wide, without drawing anything.
-bool gfxMarqueeScrolls(const char* s, int w, uint8_t size);
-
 // ---- Shared boot / status / diagnostic screens ----------------------------
 void gfxBoot(const char* line1, const char* line2);
 void gfxApInfo(const char* ssid, const char* pass, const char* ip);

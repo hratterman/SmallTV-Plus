@@ -21,7 +21,6 @@ static uint32_t s_nextProbe = 0;
 static bool     s_forced = false;
 
 CaptiveState captiveStateNow() { return s_state; }
-bool         captiveOnline()   { return s_state == CAP_ONLINE; }
 const char*  captiveDetail()   { return s_detail; }
 const char*  captivePortalUrl(){ return s_portal; }
 uint8_t      captiveAttempts() { return s_attempts; }

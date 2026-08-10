@@ -4,12 +4,24 @@
 Source: clawdmeter-win/firmware/src/splash_animations.h (13 animations, generated
 for an ESP32-S3 / LVGL build with the frame data in RAM-resident `static const`).
 
-This pulls out just the few animations we show on the SmallTV and re-emits them
-with PROGMEM so the ~33 KB of frame data lives in flash instead of the ESP8266's
-~40 KB heap. The renderer reads cells/palette/holds back with pgm_read_*.
+This pulls out just the few animations we show on the SmallTV, run-length encodes
+them, and emits them as PROGMEM so the frame data lives in flash instead of the
+ESP8266's ~40 KB heap.
+
+The encoding matters. Upstream stores one byte per cell, which is 400 bytes a
+frame and was 33 KB of the image for 83 frames — more flash than the whole mining
+core. But the art is flat-shaded pixel art: nearly every frame is long runs of
+background and long runs of body. One byte of (palette index << 4 | run-1) packs
+the same 83 frames into 5.8 KB, and the decoder is a dozen lines. The 4-bit run
+field caps a run at 16 cells, which costs a few bytes on the longest spans and
+keeps the whole thing byte-aligned; a 5/3 split tested worse on this art.
+
+Frames are variable length once packed, so each animation carries its frames back
+to back in one array plus a table of per-frame byte lengths. Those lengths are
+uint8_t (the longest frame packs to 85) so the table can live in PROGMEM too.
 
 Run from the repo root:  python tools/extract_mascot.py
-Output: src/mascot_frames.h  (do not hand-edit — re-run this instead)
+Output: src/features/usage/mascot_frames.h  (do not hand-edit — re-run this)
 """
 
 import re
@@ -17,7 +29,10 @@ import sys
 from pathlib import Path
 
 SRC = Path("../clawdmeter-win/firmware/src/splash_animations.h")
-OUT = Path("src/mascot_frames.h")
+OUT = Path("src/features/usage/mascot_frames.h")
+
+CELLS = 400          # 20x20
+MAX_RUN = 16         # 4-bit run field, stored as run-1
 
 # (display name, source variable prefix, burn-rate group 0=idle..3=heavy)
 CHOSEN = [
@@ -36,57 +51,97 @@ def grab(text: str, pattern: str, name: str) -> str:
     return m.group(0)
 
 
-def main() -> None:
-    if not SRC.exists():
-        sys.exit(f"ERROR: source not found: {SRC.resolve()}")
-    text = SRC.read_text()
+def rle_encode(cells):
+    """400 palette indices -> bytes of (index << 4 | run-1)."""
+    if len(cells) != CELLS:
+        sys.exit(f"ERROR: frame has {len(cells)} cells, expected {CELLS}")
+    if any(c > 15 for c in cells):
+        sys.exit("ERROR: a palette index exceeds 15 and will not fit the high nibble")
+    out = []
+    i = 0
+    while i < CELLS:
+        v = cells[i]
+        run = 1
+        while i + run < CELLS and cells[i + run] == v and run < MAX_RUN:
+            run += 1
+        out.append((v << 4) | (run - 1))
+        i += run
+    if len(out) > 255:
+        sys.exit("ERROR: a frame packs to more than 255 bytes; lens[] can no longer be uint8_t")
+    return out
 
+
+def rle_decode(packed):
+    """Inverse of rle_encode, so the generator can prove its own output."""
+    out = []
+    for b in packed:
+        out.extend([b >> 4] * ((b & 0x0F) + 1))
+    return out
+
+
+def carray(name, values, ctype, per_line, progmem=True):
+    pm = " PROGMEM" if progmem else ""
+    lines = [f"static const {ctype} {name}[{len(values)}]{pm} = {{"]
+    for i in range(0, len(values), per_line):
+        chunk = values[i:i + per_line]
+        lines.append("    " + "".join(f"0x{v:02x}," for v in chunk))
+    lines.append("};")
+    return "\n".join(lines)
+
+
+def build(frames_by_prefix, palettes, holds):
+    """Emit the header. frames_by_prefix maps dst_prefix -> list of 400-cell lists."""
     blocks = []
     table = []
+    packed_total = 0
     for disp, src_prefix, group in CHOSEN:
-        dst_prefix = src_prefix.replace("splash_", "mascot_", 1)
+        dst = src_prefix.replace("splash_", "mascot_", 1)
+        frames = frames_by_prefix[dst]
 
-        palette = grab(text, rf"static const uint16_t {src_prefix}_palette\[10\] = \{{.*?\}};",
-                       f"{src_prefix}_palette")
-        frames = grab(text, rf"static const uint8_t {src_prefix}_frames\[(\d+)\]\[400\] = \{{.*?\n\}};",
-                      f"{src_prefix}_frames")
-        holds = grab(text, rf"static const uint16_t {src_prefix}_holds\[\d+\] = \{{.*?\}};",
-                     f"{src_prefix}_holds")
+        rle, lens = [], []
+        for cells in frames:
+            enc = rle_encode(cells)
+            if rle_decode(enc) != cells:
+                sys.exit(f"ERROR: {dst} does not survive a round trip through the encoder")
+            rle.extend(enc)
+            lens.append(len(enc))
+        packed_total += len(rle)
 
-        frame_count = int(re.search(rf"{src_prefix}_frames\[(\d+)\]", frames).group(1))
-
-        # Rename splash_ -> mascot_. Only the big frame arrays go in PROGMEM (read
-        # one byte at a time with pgm_read_byte). The 16-bit palette/holds tables
-        # stay in RAM: on the ESP8266 a 16-bit load (l16ui) from flash/irom faults,
-        # so reading uint16_t PROGMEM via pgm_read_word crashes — keep them in RAM
-        # and index them directly.
-        def rename(s: str) -> str:
-            return s.replace(src_prefix, dst_prefix)
-        def progmem(s: str) -> str:
-            return re.sub(r"\] = \{", "] PROGMEM = {", rename(s), count=1)
-
-        blocks.append(rename(palette))    # RAM (uint16_t)
-        blocks.append(progmem(frames))    # PROGMEM (uint8_t, pgm_read_byte)
-        blocks.append(rename(holds))      # RAM (uint16_t)
+        # The 16-bit palette/holds tables stay in RAM: on the ESP8266 a 16-bit
+        # load (l16ui) from flash/irom faults, so pgm_read_word on them crashes.
+        blocks.append(palettes[dst])
+        blocks.append(carray(f"{dst}_rle", rle, "uint8_t", 16))
+        blocks.append(carray(f"{dst}_lens", lens, "uint8_t", 16))
+        blocks.append(holds[dst])
         blocks.append("")
 
         table.append(
-            f'    {{"{disp}", {group}, {frame_count}, '
-            f"{dst_prefix}_palette, {dst_prefix}_frames, {dst_prefix}_holds}},"
+            f'    {{"{disp}", {group}, {len(frames)}, '
+            f"{dst}_palette, {dst}_rle, {dst}_lens, {dst}_holds}},"
         )
 
+    total_frames = sum(len(f) for f in frames_by_prefix.values())
     header = f"""// mascot_frames.h - GENERATED by tools/extract_mascot.py. Do not edit by hand.
 //
-// Curated subset of the claudepix 20x20 pixel-art creature animations for the
-// ESP8266. The big frame arrays live in PROGMEM (flash, read with pgm_read_byte);
-// the small 16-bit palette/holds tables stay in RAM (a 16-bit load from flash
-// faults on this chip).
+// Curated subset of the claudepix 20x20 pixel-art creature animations.
 // Source: clawdmeter-win/firmware/src/splash_animations.h (https://claudepix.vercel.app)
-// Each animation: a 10-entry RGB565 palette, N frames of 20x20 cells (values 0..9
-// index the palette), and N per-frame hold times in ms.
+//
+// Frames are run-length encoded, one byte per run: the high nibble is the
+// palette index, the low nibble is (run length - 1), so a byte covers up to 16
+// cells. The {total_frames} frames of flat-shaded pixel art pack from
+// {total_frames * CELLS} bytes down to {packed_total}. Mascot.cpp unpacks the current frame
+// into a RAM buffer when it changes; nothing reads this data directly.
+//
+// The packed frames and their length tables are PROGMEM (byte reads only). The
+// 16-bit palette and hold tables stay in RAM — a 16-bit load from flash faults
+// on the ESP8266.
 #pragma once
 #include <stdint.h>
+#ifdef ARDUINO
 #include <pgmspace.h>
+#else
+#define PROGMEM       // host tools include this to check the packed data
+#endif
 
 // These mirror the constants in Mascot.h (guarded so either include order works).
 #ifndef MASCOT_PALETTE_SIZE
@@ -101,7 +156,8 @@ typedef struct {{
     uint8_t         group;        // burn-rate tier: 0 idle, 1 normal, 2 active, 3 heavy
     uint16_t        frame_count;
     const uint16_t *palette;      // RAM, MASCOT_PALETTE_SIZE entries (16-bit irom reads fault)
-    const uint8_t (*frames)[400]; // PROGMEM, frame_count x 400 cells (read via pgm_read_byte)
+    const uint8_t  *rle;          // PROGMEM, frames packed back to back
+    const uint8_t  *lens;         // PROGMEM, frame_count packed sizes in bytes
     const uint16_t *holds;        // RAM, frame_count hold times (ms)
 }} MascotAnim;
 
@@ -111,11 +167,33 @@ static const MascotAnim mascot_anims[MASCOT_ANIM_COUNT] = {{
 {chr(10).join(table)}
 }};
 """
-
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(header)
-    size = OUT.stat().st_size
-    print(f"Wrote {OUT} ({size//1024} KB, {len(CHOSEN)} animations)")
+    print(f"Wrote {OUT}: {total_frames} frames, "
+          f"{total_frames * CELLS} bytes of cells -> {packed_total} packed")
+
+
+def main() -> None:
+    if not SRC.exists():
+        sys.exit(f"ERROR: source not found: {SRC.resolve()}")
+    text = SRC.read_text()
+
+    frames_by_prefix, palettes, holds = {}, {}, {}
+    for _disp, src_prefix, _group in CHOSEN:
+        dst = src_prefix.replace("splash_", "mascot_", 1)
+        body = grab(text,
+                    rf"static const uint8_t {src_prefix}_frames\[\d+\]\[400\] = \{{.*?\n\}};",
+                    f"{src_prefix}_frames")
+        frames_by_prefix[dst] = [[int(x) for x in f.split(",")]
+                                 for f in re.findall(r"\{([\d,\s]+)\}", body)]
+        palettes[dst] = grab(
+            text, rf"static const uint16_t {src_prefix}_palette\[10\] = \{{.*?\}};",
+            f"{src_prefix}_palette").replace(src_prefix, dst)
+        holds[dst] = grab(
+            text, rf"static const uint16_t {src_prefix}_holds\[\d+\] = \{{.*?\}};",
+            f"{src_prefix}_holds").replace(src_prefix, dst)
+
+    build(frames_by_prefix, palettes, holds)
 
 
 if __name__ == "__main__":

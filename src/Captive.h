@@ -30,7 +30,6 @@ enum CaptiveState : uint8_t {
 void         captiveBegin(const Settings& s);
 void         captiveService(const Settings& s);   // self-paced; call from the loop
 CaptiveState captiveStateNow();
-bool         captiveOnline();          // CAP_ONLINE — the only state that means working
 const char*  captiveDetail();          // human-readable last result
 const char*  captivePortalUrl();       // where the portal answered from, "" if none
 uint8_t      captiveAttempts();        // accept attempts since association

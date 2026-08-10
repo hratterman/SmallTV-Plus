@@ -18,10 +18,19 @@ static uint16_t probeMfln(const char* host) {
 #endif
 
 // "a.b.c" -> a*10000 + b*100 + c, for a simple newer-than comparison.
+// Hand-rolled rather than sscanf: this and one time-of-day parse were the only
+// two scanf calls in the firmware, and between them they pulled 16 KB of
+// formatted-input machinery into an image with 70 KB of headroom left. Reading
+// three numbers separated by dots does not need it.
 static long verNum(const char* v) {
-  int a = 0, b = 0, c = 0;
-  sscanf(v, "%d.%d.%d", &a, &b, &c);
-  return (long)a * 10000 + (long)b * 100 + c;
+  long part[3] = {0, 0, 0};
+  int i = 0;
+  for (const char* p = v; *p && i < 3; p++) {
+    if (*p >= '0' && *p <= '9') part[i] = part[i] * 10 + (*p - '0');
+    else if (*p == '.')         i++;
+    else if (part[i] || i)      break;   // a suffix like "-rc1" ends it
+  }
+  return part[0] * 10000 + part[1] * 100 + part[2];
 }
 
 OtaLatest otaCheckLatest(const Settings& s) {

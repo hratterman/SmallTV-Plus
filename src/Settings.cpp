@@ -141,10 +141,19 @@ void UsageSettings::fromJson(JsonObjectConst o) {
 // ===========================================================================
 // Clock / night mode slice
 // ===========================================================================
+// "HH:MM" -> minutes since midnight. Hand-rolled for the same reason as the
+// version parse in OtaUpdate.cpp: sscanf costs 16 KB of flash and this needs
+// two integers and a colon.
 static uint16_t hhmmToMin(const char* s, uint16_t fallback) {
   if (!s || !s[0]) return fallback;
-  int h = 0, m = 0;
-  if (sscanf(s, "%d:%d", &h, &m) != 2) return fallback;
+  int h = 0, m = 0, seen = 0;
+  const char* p = s;
+  while (*p >= '0' && *p <= '9') { h = h * 10 + (*p++ - '0'); seen++; }
+  if (!seen || *p != ':') return fallback;
+  p++;
+  seen = 0;
+  while (*p >= '0' && *p <= '9') { m = m * 10 + (*p++ - '0'); seen++; }
+  if (!seen) return fallback;
   if (h < 0 || h > 23 || m < 0 || m > 59) return fallback;
   return (uint16_t)(h * 60 + m);
 }

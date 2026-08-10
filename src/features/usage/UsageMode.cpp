@@ -27,13 +27,14 @@ static void loadPalette(const uint16_t* palette, uint16_t* out) {
     out[k] = (uint16_t)(pgm_read_byte(p + 2 * k) | (pgm_read_byte(p + 2 * k + 1) << 8));
 }
 
-// Draw a 20x20 mascot frame at (x0,y0), cellPx per cell. Reads PROGMEM frame data.
+// Draw a 20x20 mascot frame at (x0,y0), cellPx per cell. Mascot.cpp hands back
+// an already-decoded grid in RAM, so the cells are read directly.
 static void blitMascot(Arduino_GFX* gfx, const uint8_t* cells, const uint16_t* palette,
                        int x0, int y0, int cellPx) {
   uint16_t pal[MASCOT_PALETTE_SIZE];
   loadPalette(palette, pal);
   for (int i = 0; i < MASCOT_GRID * MASCOT_GRID; i++) {
-    uint8_t code = pgm_read_byte(&cells[i]);
+    uint8_t code = cells[i];
     uint16_t color = (code < MASCOT_PALETTE_SIZE) ? pal[code] : 0;
     int gx = i % MASCOT_GRID, gy = i / MASCOT_GRID;
     gfx->fillRect(x0 + gx * cellPx, y0 + gy * cellPx, cellPx, cellPx, color);
