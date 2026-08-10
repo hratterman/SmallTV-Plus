@@ -52,6 +52,10 @@
 #if WITH_GAME
 #include "BlackjackMode.h"
 #endif
+#if WITH_CALENDAR
+#include "CalendarMode.h"
+#include "CalendarClient.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -83,6 +87,9 @@ static DisplayMode* kModes[] = {
 #endif
 #if WITH_GAME
   &g_blackjackMode,
+#endif
+#if WITH_CALENDAR
+  &g_calendarMode,
 #endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);
@@ -530,6 +537,24 @@ void loop() {
   // A no-op now: the poll lives on its own task so it can neither block a frame
   // nor need permission from whatever is on screen.
   spotifyService(g_settings);
+#endif
+
+#if WITH_CALENDAR
+  // The poll lives on its own task (calendarInit). What the loop does is
+  // persist Microsoft's rotated refresh tokens — without this a reboot months
+  // from now would hold a token the provider has since retired.
+  {
+    static uint32_t s_calChk = 0;
+    if (millis() - s_calChk > 5000) {
+      s_calChk = millis();
+      String rot = calendarTakeRotatedToken();
+      if (rot.length()) {
+        g_settings.calendar.refreshToken = rot;
+        if (saveSettings(g_settings))
+          Serial.println("[calendar] stored the rotated refresh token");
+      }
+    }
+  }
 #endif
 
   // A pushed banner owns the screen while it lasts, then the mode repaints.

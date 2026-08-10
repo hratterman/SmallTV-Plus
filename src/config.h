@@ -70,6 +70,7 @@
 //   6 = spotify now-playing (ESP32 targets only)
 //   7 = ambient patterns (no network, nothing to report)
 //   8 = blackjack, played with the lid pad
+//   9 = calendar: the next obligation, from Google or Outlook
 // ---------------------------------------------------------------------------
 #define MODE_STOCKS    0
 #define MODE_USAGE     1
@@ -80,6 +81,7 @@
 #define MODE_SPOTIFY   6
 #define MODE_AMBIENT   7
 #define MODE_BLACKJACK 8
+#define MODE_CALENDAR  9
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -123,6 +125,28 @@
 #endif
 
 #define DEFAULT_SPOTIFY_POLL_SEC 10
+
+// Calendar needs the same TLS + JSON stack as Spotify, so it lives on the same
+// targets. Both providers are readable from a browser (their token endpoints
+// included — measured, see docs/tether-limits.md), so it works over the tether.
+#ifndef WITH_CALENDAR
+#if defined(SMALLTV_ESP32)
+#define WITH_CALENDAR 1
+#else
+#define WITH_CALENDAR 0
+#endif
+#endif
+
+#define DEFAULT_CALENDAR_POLL_SEC 300   // meetings do not move that fast
+#define CAL_MAX_EVENTS 6                // shown: 1 big + 3 small; 2 spare for filtering
+#define CAL_TITLE_LEN  64
+#define CAL_LOOKAHEAD_SEC (48UL * 3600UL)  // two days is "next obligation" territory
+#define CAL_GOOGLE    0
+#define CAL_MICROSOFT 1
+#define GOOGLE_TOKEN_URL "https://oauth2.googleapis.com/token"
+#define GOOGLE_CAL_URL   "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+#define MS_TOKEN_URL     "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+#define MS_CAL_URL       "https://graph.microsoft.com/v1.0/me/calendarview"
 
 // Largest album cover accepted when it has to be held whole (the tether route).
 // Spotify's 300 px JPEGs run 15-25 KB; this leaves room for a dense one without

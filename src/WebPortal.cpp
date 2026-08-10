@@ -83,6 +83,7 @@ static void handleGetConfig() {
   feat["spotify"] = (bool)WITH_SPOTIFY;
   feat["ambient"] = (bool)WITH_AMBIENT;
   feat["blackjack"] = (bool)WITH_GAME;
+  feat["calendar"]  = (bool)WITH_CALENDAR;
   // Which chip this build runs on (the UI warns about per-chip limitations).
 #if defined(SMALLTV_ESP32C2)
   root["chip"] = "esp32c2";

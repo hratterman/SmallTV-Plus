@@ -57,6 +57,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="radar">Radar</button>
  <button data-t="clock">Clock</button>
  <button data-t="spotify">Spotify</button>
+ <button data-t="calendar">Calendar</button>
  <button data-t="miner">Miner</button>
  <button data-t="touch">Touch</button>
  <button data-t="update">Update</button>
@@ -126,6 +127,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="miner">Bitcoin miner</option>
     <option value="clock">Clock</option>
     <option value="spotify">Spotify now playing</option>
+    <option value="calendar">Calendar</option>
     <option value="ambient">Ambient patterns</option>
     <option value="blackjack">Blackjack</option>
     <option value="carousel">Carousel (rotate modes)</option>
@@ -140,6 +142,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="carouselMiner" type="checkbox"><label>Bitcoin miner</label></div>
    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
+   <div class="chk"><input id="carouselCalendar" type="checkbox"><label>Calendar</label></div>
    <div class="chk"><input id="carouselAmbient" type="checkbox"><label>Ambient</label></div>
    <div class="chk"><input id="carouselBlackjack" type="checkbox"><label>Blackjack</label></div>
    <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
@@ -361,6 +364,34 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   </div>
  </section>
 
+ <!-- CALENDAR (feature) -->
+ <section id="calendar" class="tab">
+  <div class="card"><h2>Next obligation</h2>
+   <div class="chk"><input id="calEnabled" type="checkbox"><label>Enabled</label></div>
+   <label>Provider</label>
+   <select id="calProvider">
+    <option value="google">Google Calendar</option>
+    <option value="microsoft">Outlook / Microsoft 365</option>
+   </select>
+   <label>Client ID</label><input id="calClientId" type="text" placeholder="your own OAuth client">
+   <label>Client secret <span class="muted">&mdash; Google only</span></label>
+   <input id="calClientSecret" type="password" placeholder="(unchanged)">
+   <label>Refresh token</label><input id="calRefreshToken" type="password" placeholder="(unchanged)">
+   <label>Poll every (s)</label><input id="calPollSec" type="number" min="60" max="3600">
+   <small class="hint"><b>Linking, once.</b> The cube reads your next two days and shows the
+    nearest event with a countdown. Recurring events are expanded by the provider, not the cube.
+    <br><b>Google:</b> <a href="https://console.cloud.google.com/apis/credentials" target="_blank">console.cloud.google.com</a>
+    &rarr; OAuth client, type <i>Desktop app</i>; enable the Calendar API; then
+    <code>python3 tools/calendar_auth.py google --id &lt;ID&gt; --secret &lt;SECRET&gt;</code>
+    <br><b>Microsoft:</b> <a href="https://portal.azure.com" target="_blank">portal.azure.com</a>
+    &rarr; App registration, enable <i>Allow public client flows</i>; then
+    <code>python3 tools/calendar_auth.py microsoft --id &lt;ID&gt;</code> and follow the code it prints.
+    <br>Only read access is requested (<code>calendar.readonly</code> / <code>Calendars.Read</code>).
+    Works over the tether too &mdash; both providers answer a browser. Secrets are never sent back to
+    this page once saved; leave them blank to keep what is stored.</small>
+  </div>
+ </section>
+
  <!-- TOUCH (device-wide input) -->
  <section id="touch" class="tab">
   <div class="card"><h2>Lid button</h2>
@@ -490,7 +521,8 @@ var FEATURES={
  clock  :{mode:'clock'  ,car:'carouselClock'},
  spotify:{mode:'spotify',car:'carouselSpotify'},
  ambient:{mode:'ambient',car:'carouselAmbient'},
- blackjack:{mode:'blackjack',car:'carouselBlackjack'}};
+ blackjack:{mode:'blackjack',car:'carouselBlackjack'},
+ calendar:{mode:'calendar',car:'carouselCalendar'}};
 var TOUCHGPIOS=[4,0,12,27,33,32];
 function hideFeat(name){
  var b=document.querySelector('nav button[data-t="'+name+'"]'); if(b)b.remove();
@@ -573,6 +605,12 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('spotifyClientId',sp.clientId); sv('spotifyPollSec',sp.pollSec||10);
  var scs=$('spotifyClientSecret'); if(scs)scs.placeholder=sp.secretSet?'(unchanged)':'paste the client secret';
  var srt=$('spotifyRefreshToken'); if(srt)srt.placeholder=sp.tokenSet?'(unchanged)':'paste the refresh token';
+ // calendar slice
+ var cal=c.calendar||{};
+ sc('calEnabled',!!cal.enabled); sv('calProvider',cal.provider||'google');
+ sv('calClientId',cal.clientId); sv('calPollSec',cal.pollSec||300);
+ var ccs=$('calClientSecret'); if(ccs)ccs.placeholder=cal.secretSet?'(unchanged)':'paste the client secret';
+ var crt=$('calRefreshToken'); if(crt)crt.placeholder=cal.tokenSet?'(unchanged)':'paste the refresh token';
  // work mode slice
  var wk=c.work||{};
  sc('workEnabled',!!wk.enabled); sc('workNoMining',wk.noMining!==false);
@@ -702,6 +740,9 @@ function collect(){
  if($('spotify')) o.spotify={enabled:gc('spotifyEnabled'),autoShow:gc('spotifyAutoShow'),
   clientId:gv('spotifyClientId').trim(), clientSecret:gv('spotifyClientSecret').trim(),
   refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
+ if($('calEnabled')) o.calendar={enabled:gc('calEnabled'),provider:gv('calProvider'),
+  clientId:gv('calClientId').trim(), clientSecret:gv('calClientSecret').trim(),
+  refreshToken:gv('calRefreshToken').trim(), pollSec:parseInt(gv('calPollSec'))||300};
  if($('workEnabled')) o.work={enabled:gc('workEnabled'),noMining:gc('workNoMining'),
   hideExplicit:gc('workHideExplicit'),blocklist:gv('workBlocklist').trim()};
  if($('captiveAuto')) o.captive={autoAccept:gc('captiveAuto'),

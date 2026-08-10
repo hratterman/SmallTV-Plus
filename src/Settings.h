@@ -154,6 +154,24 @@ struct SpotifySettings {
   void fromJson(JsonObjectConst o);
 };
 
+// ---- Calendar slice ---------------------------------------------------------
+// Same OAuth shape as Spotify: a client the user registers themselves, a
+// refresh token obtained once with tools/calendar_auth.py, and the cube
+// renewing its own access tokens from then on. Google needs the client secret
+// too (its "Desktop" clients are issued one); Microsoft public clients do not.
+struct CalendarSettings {
+  bool     enabled;
+  uint8_t  provider;       // CAL_GOOGLE / CAL_MICROSOFT
+  String   clientId;
+  String   clientSecret;   // Google only; blank for Microsoft
+  String   refreshToken;
+  uint16_t pollSec;
+
+  void setDefaults();
+  void toJson(JsonObject o, bool includeSecrets) const;
+  void fromJson(JsonObjectConst o);
+};
+
 // ---- Ambient patterns slice -------------------------------------------------
 struct AmbientSettings {
   uint16_t dwellSec;     // carousel time for ambient; it is meant to be dwelt on
@@ -250,6 +268,7 @@ struct Settings {
   RadarSettings  radar;
   MinerSettings   miner;
   SpotifySettings spotify;
+  CalendarSettings calendar;
   AmbientSettings ambient;
   WorkSettings    work;
   CaptiveSettings captive;
