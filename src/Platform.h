@@ -34,6 +34,7 @@ static inline void platformMdnsUpdate() { /* ESP32 mDNS answers from a backgroun
 static inline void platformAnalogWriteInit(uint8_t pin) { (void)pin; /* analogWrite defaults to 8-bit (0..255) */ }
 static inline bool platformScanIsOpen(int i) { return WiFi.encryptionType(i) == WIFI_AUTH_OPEN; }
 static inline String platformUpdateError() { return String(Update.errorString()); }
+static inline void platformUpdateAbort() { Update.abort(); }
 static inline uint32_t platformChipId() { return (uint32_t)ESP.getEfuseMac(); }
 
 // Reset / crash info. The ESP32 Arduino API exposes no exception PC (on the C2
@@ -99,6 +100,9 @@ static inline void platformMdnsUpdate() { MDNS.update(); }
 static inline void platformAnalogWriteInit(uint8_t pin) { (void)pin; analogWriteRange(255); }
 static inline bool platformScanIsOpen(int i) { return WiFi.encryptionType(i) == ENC_TYPE_NONE; }
 static inline String platformUpdateError() { return Update.getErrorString(); }
+// No abort() on this core. end() without evenIfRemaining refuses to finalise a
+// partial image and resets the updater, which is what abort() is for.
+static inline void platformUpdateAbort() { Update.end(); }
 static inline uint32_t platformChipId() { return ESP.getChipId(); }
 
 // Reset / crash info from the ESP8266 boot ROM (Xtensa exception PC + fault addr).

@@ -422,10 +422,48 @@ static void handleNotify() {
 }
 
 // ---- OTA ------------------------------------------------------------------
+// An app image starts with this. A full-flash image (firmware.factory.bin, the
+// one you flash over USB at 0x0) starts with padding instead, because the ESP32
+// bootloader does not live at offset 0.
+#define OTA_IMAGE_MAGIC 0xE9
+
+// Set when we can name the problem better than the Update library can. See
+// otaRejectReason() below for why that is worth doing at all.
+static const char* s_otaReject = nullptr;
+// Whether the header check has run yet. Deliberately our own flag rather than
+// a test on up.totalSize: both WebServer cores happen to increment that after
+// calling us, so "first chunk" would read correctly today and silently stop
+// meaning that on a framework bump.
+static bool s_otaSawFirst = false;
+
+// Uploading the wrong file is the most likely way this fails, and left to
+// itself the Update library reports it as "Decryption error" — which sends you
+// looking for a signing key that was never involved. It defaults to
+// U_AES_DECRYPT_AUTO, so a first byte that is not the magic number is taken to
+// mean "this image must be encrypted" rather than "this is not an image"
+// (Updater.cpp: the _cryptMode test before the magic-byte test). Diagnose it
+// here, where the difference between the two files is still obvious.
+static const char* otaRejectReason(const uint8_t* buf, size_t len) {
+  if (len == 0) return "the upload was empty";
+  if (buf[0] == OTA_IMAGE_MAGIC) return nullptr;
+#if defined(SMALLTV_ESP8266)
+  // This core inflates a gzipped image on the way in (Updater.cpp accepts 0x1f
+  // alongside the magic byte). The ESP32 core has no such path, so this stays
+  // guarded rather than being waved through everywhere.
+  if (len >= 2 && buf[0] == 0x1F && buf[1] == 0x8B) return nullptr;
+#endif
+  if (buf[0] == 0xFF)
+    return "that looks like firmware.factory.bin, which is the whole-flash "
+           "image for USB. Upload firmware.bin instead.";
+  return "that is not a firmware image (it does not start with 0xE9)";
+}
+
 static void handleUpdateDone() {
-  bool ok = !Update.hasError();
+  const bool ok = !Update.hasError() && !s_otaReject;
+  const String err = s_otaReject ? String(s_otaReject) : platformUpdateError();
+  s_otaReject = nullptr;
   server.sendHeader("Connection", "close");
-  server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : platformUpdateError().c_str());
+  server.send(ok ? 200 : 500, "text/plain", ok ? "OK" : err.c_str());
   if (ok) scheduleReboot(1200);
 }
 
@@ -435,11 +473,24 @@ static void handleUpdateUpload() {
 #if defined(SMALLTV_ESP8266)
     WiFiUDP::stopAll();   // free UDP sockets so the OTA has max contiguous flash/heap
 #endif
+    s_otaReject = nullptr;
+    s_otaSawFirst = false;
     uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSpace)) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (s_otaReject) return;                     // already rejected; drain the rest quietly
+    if (!s_otaSawFirst) {                        // first chunk: check what we were handed
+      s_otaSawFirst = true;
+      s_otaReject = otaRejectReason(up.buf, up.currentSize);
+      if (s_otaReject) {
+        Serial.printf("[ota] rejected upload: %s\n", s_otaReject);
+        platformUpdateAbort();
+        return;
+      }
+    }
     if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_END) {
+    if (s_otaReject) return;
     if (!Update.end(true)) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     Update.end();
