@@ -9,6 +9,7 @@
 #include <HTTPClient.h>
 #include <esp32/rom/tjpgd.h>
 #include "SpotifyClient.h"
+#include "NetFetch.h"
 #include "Platform.h"          // platformMaxFreeBlock()
 #if WITH_MINER
 #include "MinerCore.h"
@@ -21,7 +22,14 @@
 namespace {
 
 struct ArtCtx {
-  WiFiClient* stream;
+  // Two ways in, one way out. Over WiFi the decoder pulls straight off the
+  // socket and the picture fills in as it downloads. Over the tether the bytes
+  // arrive pushed, a frame at a time, and a pull-driven decoder cannot be fed
+  // that way — so they are collected first and the decoder reads the buffer.
+  // Same callback, same decode, one branch at the top of it.
+  WiFiClient* stream;    // null when reading from memory
+  const uint8_t* mem;
+  uint32_t memLen, memPos;
   int32_t  remaining;    // bytes the server said are left, -1 if chunked
   int16_t  ox, oy;       // where the top-left of the image lands on screen
   uint32_t deadline;
@@ -53,7 +61,14 @@ const char* artJdErr(int r) {
 // which for a socket is a read into nowhere rather than a seek.
 UINT artIn(JDEC* jd, BYTE* buff, UINT nbyte) {
   ArtCtx* c = (ArtCtx*)jd->device;
-  if (!c->stream) return 0;
+
+  if (!c->stream) {                     // buffered: the tether path
+    const uint32_t left = c->memLen - c->memPos;
+    const UINT take = nbyte < left ? nbyte : (UINT)left;
+    if (buff && take) memcpy(buff, c->mem + c->memPos, take);
+    c->memPos += take;                  // buff == nullptr means skip, same cost
+    return take;
+  }
 
   UINT done = 0;
   while (done < nbyte) {
@@ -134,6 +149,91 @@ const char* albumArtStatus() { return s_status; }
 // there. Refuse below the threshold instead of trying anyway.
 #define ART_MIN_HEAP 60000
 
+// Shared by both routes: hand a prepared context to the decoder and paint.
+static bool artDecode(ArtCtx& ctx, int16_t x, int16_t y) {
+  void* work = malloc(ART_WORK_SZ);
+  if (!work) {
+    strlcpy(s_status, "no heap for the decoder", sizeof(s_status));
+    return false;
+  }
+  JDEC jd;
+  bool ok = false;
+  const JRESULT pr = jd_prepare(&jd, artIn, work, ART_WORK_SZ, &ctx);
+  if (pr != JDR_OK) {
+    snprintf(s_status, sizeof(s_status), "%s (%02x%02x)", artJdErr((int)pr),
+             ctx.magic[0], ctx.magic[1]);
+  } else {
+    const AlbumArtFit fit = albumArtFit((int)jd.width);
+    if (fit.px < SPOTIFY_ART_PX) {
+      ctx.ox = (int16_t)(x + (SPOTIFY_ART_PX - fit.px) / 2);
+      ctx.oy = (int16_t)(y + (SPOTIFY_ART_PX - fit.px) / 2);
+    }
+    const JRESULT dr = jd_decomp(&jd, artOut, fit.scale);
+    ok = (dr == JDR_OK);
+    if (ok) snprintf(s_status, sizeof(s_status), "ok %dx%d /%d",
+                     (int)jd.width, (int)jd.height, 1 << fit.scale);
+    else    snprintf(s_status, sizeof(s_status), "decode: %s", artJdErr((int)dr));
+  }
+  free(work);
+  return ok;
+}
+
+#if WITH_TETHER
+namespace {
+struct ArtBuf { uint8_t* p; uint32_t len, cap; };
+
+bool artCollect(void* ctx, const uint8_t* data, uint16_t len) {
+  ArtBuf* b = (ArtBuf*)ctx;
+  if (b->len + len > b->cap) return false;    // over the cap: stop, do not grow
+  memcpy(b->p + b->len, data, len);
+  b->len += len;
+  return true;
+}
+}  // namespace
+
+// Over the cable the bytes are pushed at us, and a pull-driven decoder cannot
+// be fed that way without a second task to block in. Holding the file instead
+// is far simpler and costs one allocation the length of a cover — Spotify's
+// 300 px JPEGs run 15-25 KB, which this device has when the miner is paused.
+static bool albumArtDrawTethered(const char* url, int16_t x, int16_t y) {
+  uint8_t* buf = (uint8_t*)malloc(ART_MAX_BYTES);
+  if (!buf) {
+    snprintf(s_status, sizeof(s_status), "no heap for a cover, blk %uk",
+             (unsigned)(platformMaxFreeBlock() / 1024));
+    s_retryAt = millis() + 15000;
+    return false;
+  }
+  ArtBuf b{buf, 0, ART_MAX_BYTES};
+  const NetFetchResult r = netFetch(url, false, "Accept: image/jpeg", nullptr, 0,
+                                    artCollect, &b, 15000);
+  if (!r.ok || !b.len) {
+    if (b.len >= ART_MAX_BYTES)
+      snprintf(s_status, sizeof(s_status), "cover over %u KB", ART_MAX_BYTES / 1024);
+    else
+      snprintf(s_status, sizeof(s_status), "tether: %.28s", r.error);
+    free(buf);
+    s_retryAt = millis() + 15000;
+    return false;
+  }
+
+  ArtCtx ctx = {};
+  ctx.stream = nullptr;
+  ctx.mem = buf;
+  ctx.memLen = b.len;
+  ctx.memPos = 0;
+  ctx.ox = x;
+  ctx.oy = y;
+  ctx.magicLen = 2;
+  ctx.magic[0] = b.len > 0 ? buf[0] : 0;
+  ctx.magic[1] = b.len > 1 ? buf[1] : 0;
+
+  const bool ok = artDecode(ctx, x, y);
+  free(buf);
+  s_retryAt = ok ? 0 : millis() + 15000;
+  return ok;
+}
+#endif  // WITH_TETHER
+
 bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   if (!url || !url[0]) { strlcpy(s_status, "no art url", sizeof(s_status)); return false; }
 
@@ -168,6 +268,10 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   // off. Park them for the second this takes.
   minerCorePause();
   struct MinerRelease { ~MinerRelease() { minerCoreResume(); } } minerRelease;
+#endif
+
+#if WITH_TETHER
+  if (netFetchTethered()) return albumArtDrawTethered(url, x, y);
 #endif
 
   WiFiClientSecure client;
@@ -208,36 +312,7 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   ctx.magicLen = 0;
   ctx.magic[0] = ctx.magic[1] = 0;
 
-  void* work = malloc(ART_WORK_SZ);
-  if (!work) {
-    strlcpy(s_status, "no heap for the decoder", sizeof(s_status));
-    http.end();
-    s_retryAt = millis() + 15000;
-    return false;
-  }
-
-  JDEC jd;
-  bool ok = false;
-  const JRESULT pr = jd_prepare(&jd, artIn, work, ART_WORK_SZ, &ctx);
-  if (pr != JDR_OK) {
-    snprintf(s_status, sizeof(s_status), "%s (%02x%02x)", artJdErr((int)pr),
-             ctx.magic[0], ctx.magic[1]);
-  } else {
-    const AlbumArtFit fit = albumArtFit((int)jd.width);
-    // Centre whatever size that lands on, so a cover a couple of pixels under
-    // the box sits in the middle rather than against the top-left corner.
-    if (fit.px < SPOTIFY_ART_PX) {
-      ctx.ox = (int16_t)(x + (SPOTIFY_ART_PX - fit.px) / 2);
-      ctx.oy = (int16_t)(y + (SPOTIFY_ART_PX - fit.px) / 2);
-    }
-    const JRESULT dr = jd_decomp(&jd, artOut, fit.scale);
-    ok = (dr == JDR_OK);
-    if (ok) snprintf(s_status, sizeof(s_status), "ok %dx%d /%d",
-                     (int)jd.width, (int)jd.height, 1 << fit.scale);
-    else    snprintf(s_status, sizeof(s_status), "decode: %s", artJdErr((int)dr));
-  }
-
-  free(work);
+  const bool ok = artDecode(ctx, x, y);
   http.end();
   // 15 s is long enough that a spiral cannot form and short enough that a
   // transient failure fixes itself within one track.

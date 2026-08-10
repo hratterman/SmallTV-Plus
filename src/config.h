@@ -113,6 +113,11 @@
 
 #define DEFAULT_SPOTIFY_POLL_SEC 10
 
+// Largest album cover accepted when it has to be held whole (the tether route).
+// Spotify's 300 px JPEGs run 15-25 KB; this leaves room for a dense one without
+// letting a surprise take the heap.
+#define ART_MAX_BYTES 40960
+
 // Ambient patterns. Only the grid buffers cost anything (~7 KB) and there is no
 // network path at all, so this is on everywhere the display is.
 #ifndef WITH_AMBIENT
