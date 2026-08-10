@@ -56,6 +56,9 @@ enum SerialFrameType : uint8_t {
   SF_CFG_SET     = 0x43,   // host: a slice of new settings
   SF_CFG_APPLY   = 0x44,   // host: that was all of it, apply and save
   SF_CFG_OK      = 0x45,   // device: applied (payload: "ok" or the reason not)
+  SF_ICS_DATA    = 0x46,   // host: a slice of a calendar (.ics) file
+  SF_ICS_END     = 0x47,   // host: that was all of it; device replies with the same
+                           // type carrying "ok: N events" or the reason not
 };
 
 // CRC-16/CCITT-FALSE. Chosen for being three lines rather than for pedigree —

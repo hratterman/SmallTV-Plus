@@ -205,6 +205,40 @@ details>div{margin-top:12px}
         </div>
       </div>
     </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2>Calendar over the cable</h2>
+      <div class="body">
+        <p class="msg" style="margin-top:0">The secret iCal link cannot be read by this page
+          directly &mdash; the providers block scripts from it. Two ways around that:</p>
+        <div class="row">
+          <label>Drop in the file <span class="hint">&mdash; works for any calendar, any provider</span></label>
+          <p class="msg">Your browser may <i>download</i> what scripts may not read: open the
+            secret link, and a <code>.ics</code> file lands in Downloads. Hand it over and the
+            cube shows the next two days from it.</p>
+          <input id="icsFile" type="file" accept=".ics,text/calendar">
+          <p class="msg" id="icsMsg" style="margin-top:6px"></p>
+        </div>
+        <details>
+          <summary>Or make the link itself work: a 10-line Google bridge</summary>
+          <div>
+            <p class="msg">Google's own Apps Script serves pages a browser may read. Paste this at
+              <a href="https://script.google.com" target="_blank" rel="noopener">script.google.com</a>
+              (New project), put your secret link in, then Deploy &rarr; New deployment &rarr;
+              Web app, access: <b>Anyone</b>. Use the deployment URL as the cube's calendar link
+              &mdash; it then updates itself over the cable, no file dropping.</p>
+            <textarea readonly rows="6" onclick="this.select()" style="font-family:var(--mono);font-size:12px">function doGet() {
+  var url = 'PASTE YOUR SECRET ICAL LINK HERE';
+  return ContentService
+    .createTextOutput(UrlFetchApp.fetch(url).getContentText())
+    .setMimeType(ContentService.MimeType.TEXT);
+}</textarea>
+            <p class="msg" style="margin-top:6px">The deployment URL is a capability like the
+              secret link itself: whoever holds it can read the calendar. Treat both the same.</p>
+          </div>
+        </details>
+      </div>
+    </div>
   </div>
 
   <div>
@@ -659,6 +693,10 @@ async function readLoop(){
           cfgChunks.push(f.payload);
         } else if(f.type===0x42){            // SF_CFG_END
           cfgReceived();
+        } else if(f.type===0x47){            // SF_ICS_END: the import verdict
+          const m=new TextDecoder().decode(f.payload);
+          $('icsMsg').textContent=m;
+          log('calendar import: '+m, m.startsWith('ok')?'l-ok':'l-err');
         } else if(f.type===0x45){            // SF_CFG_OK
           const m=new TextDecoder().decode(f.payload);
           const ok = m==='ok';
@@ -799,6 +837,21 @@ if(!('serial' in navigator) || !window.isSecureContext){
   $('unsupported').classList.remove('hide');
   $('btnConnect').disabled=true;
 }
+
+// ---- calendar file import ---------------------------------------------------
+// SF_ICS_DATA (0x46) carries the bytes; SF_ICS_END (0x47) closes, and the cube
+// answers on the same type with "ok: N events" or the reason not.
+$('icsFile').onchange=async(e)=>{
+  const f=e.target.files && e.target.files[0];
+  if(!f) return;
+  if(!writer){ $('icsMsg').textContent='connect the cube first'; return; }
+  const bytes=new Uint8Array(await f.arrayBuffer());
+  $('icsMsg').textContent='sending '+fmtBytes(bytes.length)+'...';
+  for(let o=0;o<bytes.length;o+=CHUNK) await send(0x46,0,bytes.subarray(o,o+CHUNK));
+  await send(0x47,0);
+  log('calendar file sent ('+fmtBytes(bytes.length)+') — waiting for the cube','l-req');
+  e.target.value='';
+};
 
 // Chrome fires this when the cable is physically pulled.
 if(navigator.serial && navigator.serial.addEventListener)

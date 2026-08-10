@@ -145,7 +145,8 @@ console.log('\n--- the page itself -----------------------------------------');
   // they are written as bare hex in the page's dispatch.
   for (const [name, val] of [['SF_CFG_GET', 0x40], ['SF_CFG_DATA', 0x41],
                              ['SF_CFG_END', 0x42], ['SF_CFG_SET', 0x43],
-                             ['SF_CFG_APPLY', 0x44], ['SF_CFG_OK', 0x45]]) {
+                             ['SF_CFG_APPLY', 0x44], ['SF_CFG_OK', 0x45],
+                             ['SF_ICS_DATA', 0x46], ['SF_ICS_END', 0x47]]) {
     const hdr = readFileSync(join(root, 'src/SerialFrame.h'), 'utf8');
     const m = hdr.match(new RegExp(name + '\\s*=\\s*(0x[0-9a-fA-F]+)'));
     ck(m && parseInt(m[1], 16) === val, `${name} matches the firmware (0x${val.toString(16)})`);

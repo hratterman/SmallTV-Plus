@@ -29,9 +29,24 @@ inferred from documentation. Re-run it before trusting it; these headers change.
 | **`graph.microsoft.com/v1.0`** | **`*`** | **works** |
 | **`login.microsoftonline.com`** | **`*`** | **works** |
 | `query1/2.finance.yahoo.com` | none, on 200 and on 429 | blocked |
-| `calendar.google.com/.../basic.ics` | none | blocked |
+| `calendar.google.com/.../basic.ics` | none | blocked as a fetch — but see below |
 | `opendata.adsb.fi` (radar) | none | blocked |
 | Stooq | none | blocked |
+
+## The ICS feed and the cable: blocked as a fetch, not as a whole
+
+CORS restricts what *scripts* may read, not what the *browser* may do. Two
+working routes follow from that:
+
+- **Downloads are navigations, not fetches.** Opening the secret link downloads
+  the `.ics` file with no CORS involved — the bytes go to the user, not to a
+  script. The tether page accepts that file (SF_ICS frames) and the cube runs
+  it through its own RRULE expander. Works for any provider, snapshot-style.
+- **Google Apps Script serves with `Access-Control-Allow-Origin: *`.** A
+  ten-line script re-serving the secret feed gives it a URL a page may read,
+  running as the user on Google's own infrastructure. The cube's ICS provider
+  then works over the cable unchanged, live. The deployment URL is a
+  capability, same as the secret link.
 
 ## Calendar: use the API, not the ICS feed
 

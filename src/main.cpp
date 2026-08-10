@@ -407,6 +407,11 @@ void setup() {
   // could not join it is the only thing that can reach it at all. Same JSON the
   // web portal uses, same apply path — a second contract here would be a second
   // thing to keep in step, and this codebase has paid for that mistake enough.
+#if WITH_CALENDAR
+  // A .ics file dropped on the tether page: the one calendar form that always
+  // crosses the cable, because browsers may download what scripts may not read.
+  tetherOnIcs(calendarImportFeed, calendarImportDone);
+#endif
   tetherOnConfig(
       [](String& out) {
         JsonDocument doc;

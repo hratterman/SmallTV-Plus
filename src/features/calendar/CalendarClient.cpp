@@ -346,6 +346,55 @@ static bool fetchIcs(const String& url, uint16_t timeoutMs) {
 }
 
 // ---------------------------------------------------------------------------
+// Calendar-file import. Its own parser instance: the fetch parser above belongs
+// to the calendar task, and these calls arrive on whichever task is pumping the
+// tether link. The publish at the end goes through the same lock as everything
+// else touching the snapshot.
+// ---------------------------------------------------------------------------
+static IcsParser s_icsImport;
+static bool      s_importOpen = false;
+
+void calendarImportFeed(const uint8_t* data, uint16_t len) {
+  if (!s_importOpen) {
+    if (!clockSynced()) return;              // "next" needs a trusted now
+    const int64_t now = (int64_t)time(nullptr);
+    s_icsImport.begin(now, now + (int64_t)CAL_LOOKAHEAD_SEC, localOffsetMin());
+    s_importOpen = true;
+  }
+  s_icsImport.feed((const char*)data, len);
+}
+
+const char* calendarImportDone() {
+  static char msg[48];
+  if (!s_importOpen) return clockSynced() ? "no data arrived" : "clock not set yet";
+  s_icsImport.end();
+  s_importOpen = false;
+
+  lockTake();
+  s_snap.count = 0;
+  for (uint8_t i = 0; i < s_icsImport.count() && s_snap.count < CAL_MAX_EVENTS; i++) {
+    const IcsOut& e = s_icsImport.get(i);
+    CalEvent& d = s_snap.events[s_snap.count++];
+    d.startUtc = e.start;
+    d.endUtc = e.end;
+    d.allDay = e.allDay;
+    memcpy(d.title, e.title, sizeof(d.title));
+  }
+  s_snap.ok = true;
+  s_snap.error[0] = 0;
+  s_okAtMs = millis();
+  const uint8_t n = s_snap.count;
+  lockGive();
+
+  if (s_icsImport.skippedRules())
+    snprintf(msg, sizeof(msg), "ok: %u events (%u repeats skipped)",
+             (unsigned)n, (unsigned)s_icsImport.skippedRules());
+  else
+    snprintf(msg, sizeof(msg), "ok: %u events for the next 2 days", (unsigned)n);
+  return msg;
+}
+
+// ---------------------------------------------------------------------------
 // The task
 // ---------------------------------------------------------------------------
 // The link flow lives with the other public surface below; the task only needs
@@ -410,14 +459,6 @@ static void calendarTask(void*) {
     }
     lastPoll = now;
 
-    // The secret address is the one route a browser may not read for us:
-    // neither provider sends CORS on it (measured; docs/tether-limits.md).
-    if (provider == CAL_ICS && netFetchTethered()) {
-      setError("secret link can't cross the cable - use Link Google/Microsoft");
-      vTaskDelay(5000 / portTICK_PERIOD_MS);
-      continue;
-    }
-
 #if WITH_SPOTIFY
     // One TLS operation at a time across the firmware — the same rule the art
     // fetch already obeys, for the same heap.
@@ -437,9 +478,18 @@ static void calendarTask(void*) {
 #endif
 
     if (!ok) {
-      // Retry sooner than the poll period, but never hammer a refusing
-      // provider: 30 s floor.
-      lastPoll = now - (uint32_t)pollSec * 1000UL + 30000UL;
+      if (provider == CAL_ICS && netFetchTethered()) {
+        // The raw secret feed sends no CORS header, so a browser cannot read
+        // it for us and this failure is expected. It is still attempted,
+        // because an Apps Script bridge URL works fine — and if this was the
+        // raw link, say what the two ways out are.
+        setError("link blocked on the cable - use a bridge, or drop the .ics on the page");
+        lastPoll = now;                       // full poll period, not the fast retry
+      } else {
+        // Retry sooner than the poll period, but never hammer a refusing
+        // provider: 30 s floor.
+        lastPoll = now - (uint32_t)pollSec * 1000UL + 30000UL;
+      }
       vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
   }

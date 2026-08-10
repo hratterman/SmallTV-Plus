@@ -133,10 +133,12 @@ void CalendarMode::render(const Settings& s) {
     }
   }
 
+  // An imported calendar file fills the snapshot without anything being
+  // "linked", so a good snapshot outranks the setup hints.
   const bool linked = s.calendar.provider == CAL_ICS
                           ? s.calendar.icsUrl.length() > 0
                           : s.calendar.refreshToken.length() > 0;
-  if (!s.calendar.enabled || !linked) {
+  if ((!s.calendar.enabled || !linked) && !snap.ok) {
     gfxDrawCentered("calendar not linked", 100, 1, C_DIMTX);
     gfxDrawCentered("easiest: paste the calendar's", 120, 1, C_FAINT);
     gfxDrawCentered("secret link in the web UI", 132, 1, C_FAINT);

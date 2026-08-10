@@ -36,6 +36,13 @@ static uint8_t s_req[SF_MAX_PAYLOAD];
 // does not grow a dependency on the settings layer.
 static void (*s_cfgSerialise)(String&) = nullptr;
 static const char* (*s_cfgApply)(const String&) = nullptr;
+static void        (*s_icsFeed)(const uint8_t*, uint16_t) = nullptr;
+static const char* (*s_icsDone)() = nullptr;
+
+void tetherOnIcs(void (*feed)(const uint8_t*, uint16_t), const char* (*done)()) {
+  s_icsFeed = feed;
+  s_icsDone = done;
+}
 static String s_cfgIn;          // accumulates SF_CFG_SET chunks
 
 void tetherOnConfig(void (*serialise)(String& out),
@@ -117,6 +124,17 @@ static bool handleAside(uint8_t type, const uint8_t* p, uint16_t n) {
       const char* reply = err ? err : "ok";
       writeFrame(SF_CFG_OK, 0, (const uint8_t*)reply, (uint16_t)strlen(reply));
       Serial.printf("[tether] settings %s\n", err ? err : "applied");
+      return true;
+    }
+    case SF_ICS_DATA:
+      s_lastHeard = millis();
+      if (s_icsFeed) s_icsFeed(p, n);
+      return true;
+    case SF_ICS_END: {
+      s_lastHeard = millis();
+      const char* r = s_icsDone ? s_icsDone() : "calendar not compiled in";
+      writeFrame(SF_ICS_END, 0, (const uint8_t*)r, (uint16_t)strlen(r));
+      Serial.printf("[tether] calendar import: %s\n", r);
       return true;
     }
     case SF_HELLO_ACK:

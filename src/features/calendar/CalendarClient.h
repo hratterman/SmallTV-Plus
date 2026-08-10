@@ -75,4 +75,14 @@ struct CalLinkState {
 void calendarLinkStart();               // uses the configured client id
 void calendarLinkState(CalLinkState& out);
 
+// ---- calendar-file import (any provider) ------------------------------------
+// A .ics dropped on the tether page arrives here byte by byte. It goes through
+// the same RRULE expander as the ICS provider and lands in the same snapshot,
+// so the screen cannot tell an imported calendar from a fetched one. Exists
+// because a browser may DOWNLOAD the secret feed freely — CORS restricts
+// scripts, not navigations — so the file is the one form of the feed a
+// tethered cube can always be handed.
+void        calendarImportFeed(const uint8_t* data, uint16_t len);
+const char* calendarImportDone();   // returns "ok: N events" or the reason not
+
 #endif  // WITH_CALENDAR

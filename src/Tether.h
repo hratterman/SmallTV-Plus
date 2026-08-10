@@ -33,6 +33,13 @@ void tetherBegin();
 // by the application because Tether has no business knowing what a Setting is.
 //   serialise: write the current settings as JSON into `out`
 //   apply:     take JSON, apply and persist it; return an error or nullptr
+// A calendar file pushed down the cable (SF_ICS_DATA/END). feed() receives the
+// bytes as they arrive; done() finishes the parse and returns a short status
+// string for the host ("ok: 3 events" / why not). Registered by main.cpp only
+// when the calendar feature is compiled in.
+void tetherOnIcs(void (*feed)(const uint8_t* data, uint16_t len),
+                 const char* (*done)());
+
 void tetherOnConfig(void (*serialise)(String& out),
                     const char* (*apply)(const String& json));
 
