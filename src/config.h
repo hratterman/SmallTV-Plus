@@ -83,6 +83,17 @@
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
+// The ambient patterns, and which of them the user has ticked. Here rather than
+// in AmbientMode.h because Settings.cpp needs them too, and AmbientMode.h
+// cannot be included from there without a cycle through Mode.h.
+#define AMB_PAT_LIFE      0
+#define AMB_PAT_PLASMA    1
+#define AMB_PAT_STARS     2
+#define AMB_PAT_RAIN      3
+#define AMB_PAT_SPARKS    4
+#define AMB_PATTERNS      5
+#define AMB_PATTERN_ALL   ((uint8_t)((1u << AMB_PATTERNS) - 1))
+
 // ---------------------------------------------------------------------------
 // Compile-time feature toggles. All shipping features are on by default; a lean
 // build drops one by setting e.g. -D WITH_RADAR=0 in a PlatformIO env, which

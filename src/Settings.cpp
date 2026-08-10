@@ -371,22 +371,53 @@ void SpotifySettings::fromJson(JsonObjectConst o) {
 // ===========================================================================
 // Ambient slice
 // ===========================================================================
+// One row per pattern: the bit, and the key it is saved under. Adding a pattern
+// means adding a row here and a tick in the web UI — the same shape as the
+// carousel table above, for the same reason.
+static const struct { uint8_t pat; const char* key; } kAmbientPatterns[] = {
+    {AMB_PAT_LIFE,   "life"},
+    {AMB_PAT_PLASMA, "plasma"},
+    {AMB_PAT_STARS,  "stars"},
+    {AMB_PAT_RAIN,   "rain"},
+    {AMB_PAT_SPARKS, "fireworks"},
+};
+static_assert(sizeof(kAmbientPatterns) / sizeof(kAmbientPatterns[0]) == AMB_PATTERNS,
+              "every ambient pattern needs a row here or it can never be turned on");
+
 void AmbientSettings::setDefaults() {
-  dwellSec   = DEFAULT_AMBIENT_DWELL_SEC;
-  patternSec = DEFAULT_AMBIENT_PATTERN_SEC;
-  shuffle    = true;
+  dwellSec    = DEFAULT_AMBIENT_DWELL_SEC;
+  patternSec  = DEFAULT_AMBIENT_PATTERN_SEC;
+  shuffle     = true;
+  patternMask = AMB_PATTERN_ALL;      // everything on, as before this was settable
 }
 
 void AmbientSettings::toJson(JsonObject o) const {
   o["dwellSec"]   = dwellSec;
   o["patternSec"] = patternSec;
   o["shuffle"]    = shuffle;
+  JsonObject pats = o["patterns"].to<JsonObject>();
+  for (const auto& r : kAmbientPatterns) pats[r.key] = patternOn(r.pat);
 }
 
 void AmbientSettings::fromJson(JsonObjectConst o) {
   if (o["dwellSec"].is<int>())   dwellSec = constrain((int)o["dwellSec"], 10, 3600);
   if (o["patternSec"].is<int>()) patternSec = (uint16_t)constrain((int)o["patternSec"], 0, 3600);
   if (o["shuffle"].is<bool>())   shuffle = o["shuffle"];
+
+  if (o["patterns"].is<JsonObjectConst>()) {
+    JsonObjectConst pats = o["patterns"].as<JsonObjectConst>();
+    uint8_t m = patternMask;
+    for (const auto& r : kAmbientPatterns) {
+      if (pats[r.key].is<bool>()) {
+        if (pats[r.key].as<bool>()) m |= (uint8_t)(1u << r.pat);
+        else                       m &= (uint8_t)~(1u << r.pat);
+      }
+    }
+    // Every pattern off would leave a black screen with nothing to explain it,
+    // and "I want no ambient" is already sayable by unticking it in the
+    // carousel. Refuse the empty set rather than honour it.
+    patternMask = m ? m : AMB_PATTERN_ALL;
+  }
 }
 
 // ===========================================================================

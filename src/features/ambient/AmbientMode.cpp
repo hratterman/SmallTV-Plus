@@ -2,6 +2,7 @@
 #if WITH_AMBIENT
 
 #include "AmbientMode.h"
+#include "AmbientPick.h"
 #include <Arduino_GFX_Library.h>
 #include "Gfx.h"
 #include "Settings.h"
@@ -37,12 +38,14 @@ struct Spark {
 };
 static Spark sparks_[AMB_SPARKS];
 
-#define AMB_PATTERNS 5
-#define PAT_LIFE   0
-#define PAT_PLASMA 1
-#define PAT_STARS  2
-#define PAT_RAIN   3
-#define PAT_SPARKS 4
+// AMB_PAT_* and AMB_PATTERNS live in config.h — Settings.cpp needs them too.
+#define PAT_LIFE   AMB_PAT_LIFE
+#define PAT_PLASMA AMB_PAT_PLASMA
+#define PAT_STARS  AMB_PAT_STARS
+#define PAT_RAIN   AMB_PAT_RAIN
+#define PAT_SPARKS AMB_PAT_SPARKS
+
+// Pattern selection lives in AmbientPick.h so it can be run on a host.
 
 // A cell's colour by how long it has been alive: new cells are bright, settled
 // ones cool off. Turns a binary automaton into something with depth.
@@ -56,7 +59,13 @@ static inline uint32_t xr(uint32_t* s) {
 
 // invalidate() raises needFull_, which is what the zero-initialised members
 // above rely on: nothing draws until the first startPattern() has run.
-void AmbientMode::begin(const Settings& s) { invalidate(s); }
+void AmbientMode::begin(const Settings& s) {
+  // Don't always open on Life. Shuffle is the existing "I want variety" switch,
+  // so honour it at the start of the run too rather than only between patterns.
+  rng_ = ((uint32_t)millis() * 2654435761u) | 1u;
+  pattern_ = ambFirst(s.ambient.patternMask, s.ambient.shuffle, xr(&rng_));
+  invalidate(s);
+}
 
 // Repaint, but stay on the pattern that is running. Resetting to Life here
 // meant every unrelated save — a ticker symbol, a WiFi password — yanked the
@@ -72,26 +81,27 @@ uint16_t AmbientMode::dwellSec(const Settings& s) const {
 // Long-press always steps in order: when you ask for the next one you want the
 // next one, not a coin flip.
 void AmbientMode::onContextAction(Settings& s) {
-  pattern_ = (uint8_t)((pattern_ + 1) % AMB_PATTERNS);
+  pattern_ = ambNextOn(s.ambient.patternMask, pattern_);
   needFull_ = true;
 }
 
 // The automatic advance inside a long block can shuffle, so a three-minute
 // stretch does not always run the patterns in the same order.
 void AmbientMode::nextPattern(const Settings& s) {
-  if (s.ambient.shuffle && AMB_PATTERNS > 1) {
-    uint8_t n = pattern_;
-    while (n == pattern_) n = (uint8_t)(xr(&rng_) % AMB_PATTERNS);
-    pattern_ = n;
-  } else {
-    pattern_ = (uint8_t)((pattern_ + 1) % AMB_PATTERNS);
-  }
+  pattern_ = s.ambient.shuffle
+                 ? ambShuffleNext(s.ambient.patternMask, pattern_, xr(&rng_))
+                 : ambNextOn(s.ambient.patternMask, pattern_);
   needFull_ = true;
 }
 
 void AmbientMode::startPattern(const Settings& s) {
   Arduino_GFX* gfx = gfxDev();
   if (!gfx) return;
+
+  // The running pattern can have been unticked while it was on screen, and the
+  // random start above does not know the mask either.
+  if (!ambPatternOn(s.ambient.patternMask, pattern_))
+    pattern_ = ambNextOn(s.ambient.patternMask, pattern_);
   gfx->fillScreen(C_BLACK);
   rng_ = (uint32_t)millis() | 1u;
   gen_ = 0;

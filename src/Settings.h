@@ -159,6 +159,11 @@ struct AmbientSettings {
   uint16_t dwellSec;     // carousel time for ambient; it is meant to be dwelt on
   uint16_t patternSec;   // auto-advance within a long block, 0 = stay put
   bool     shuffle;      // random next pattern instead of in order
+  uint8_t  patternMask;  // which patterns may be shown, bit per AMB_PAT_*
+
+  bool patternOn(uint8_t pat) const {
+    return (patternMask & (uint8_t)(1u << pat)) != 0;
+  }
 
   void setDefaults();
   void toJson(JsonObject o) const;
