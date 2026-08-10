@@ -137,7 +137,12 @@ static String buildYahooUrl(const Settings& s, const char* host, const char* sym
 
 // Short, display-safe currency prefix. The built-in bitmap font has no glyphs
 // for symbols like €, so non-USD currencies are shown as their ISO code.
-static void yahooCurrency(const char* code, char* out, size_t n) {
+//
+// EVERY source must run its currency through here rather than storing the raw
+// code. Not doing so is what put "USD724.48" on the screen: the stockanalysis
+// parser knew its listings were all US and wrote "USD" straight into the field,
+// so the one place that turns a code into a symbol never saw it.
+static void currencyPrefix(const char* code, char* out, size_t n) {
   if (!code || !code[0]) { out[0] = 0; return; }
   if (!strcmp(code, "USD")) { strlcpy(out, "$", n); return; }
   snprintf(out, n, "%s ", code);     // "CHF 79.73", "EUR 1.08", ...
@@ -234,7 +239,7 @@ static bool parseWebhook(const Settings& s, StockData& d, Stream& stream) {
 
   if (!d.userNamed && doc["name"].is<const char*>())
     strlcpy(d.name, doc["name"].as<const char*>(), MAX_NAME_LEN);
-  strlcpy(d.currency, doc["currency"] | "", sizeof(d.currency));
+  currencyPrefix(doc["currency"] | "", d.currency, sizeof(d.currency));
 
   const char* rng = doc["range"] | s.ticker.range.c_str();
   strlcpy(d.rangeLabel, rng, sizeof(d.rangeLabel));
@@ -297,7 +302,7 @@ static bool parseYahoo(const Settings& s, StockData& d, Stream& stream) {
   if (isnan(price)) return false;
   d.price = price;
 
-  yahooCurrency(meta["currency"] | "", d.currency, sizeof(d.currency));
+  currencyPrefix(meta["currency"] | "", d.currency, sizeof(d.currency));
 
   if (!d.userNamed) {
     const char* nm = meta["shortName"] | (meta["longName"] | (const char*)d.symbol);
@@ -388,7 +393,7 @@ static bool parseCashQuote(const Settings& s, StockData& d, Stream& stream) {
   if (isnan(price) || price <= 0) return false;
   d.price = price;
 
-  yahooCurrency(n["mCur"] | "", d.currency, sizeof(d.currency));
+  currencyPrefix(n["mCur"] | "", d.currency, sizeof(d.currency));
 
   if (!d.userNamed) {
     const char* nm = n["mShortName"] | (const char*)d.symbol;
@@ -441,7 +446,7 @@ static bool parseSaQuote(const Settings& s, StockData& d, Stream& src) {
   d.price = price;
 
   // US listings only, which is the whole of what this source covers.
-  strlcpy(d.currency, "USD", sizeof(d.currency));
+  currencyPrefix("USD", d.currency, sizeof(d.currency));
 
   if (q["c"].is<float>() || q["c"].is<int>())   d.change    = q["c"].as<float>();
   if (q["cp"].is<float>() || q["cp"].is<int>()) d.changePct = q["cp"].as<float>();

@@ -4,6 +4,7 @@
 #include <Arduino_GFX_Library.h>
 #include "Gfx.h"
 #include "Clock.h"
+#include "ClockLayout.h"
 
 ClockMode g_clockMode;
 
@@ -61,17 +62,20 @@ void ClockMode::render(const Settings& s, bool full) {
     char hhmm[8];
     snprintf(hhmm, sizeof(hhmm), s.clock.mode12h ? "%d:%02d" : "%02d:%02d", hour, t.tm_min);
 
-    // Auto-size so both "9:05" and "23:45" fill the width nicely.
-    uint8_t sz = gfxFitSize(hhmm, TFT_WIDTH - 24, 8);
-    const int th = 8 * sz;
-    const int ty = 78 - th / 2;
-    gfx->fillRect(0, ty - 4, TFT_WIDTH, th + 8, C_BLACK);
-    gfxDrawCentered(hhmm, ty, sz, C_WHITE);
+    // Auto-sized so both "9:05" and "23:45" fill the width, with the AM/PM
+    // budgeted for up front rather than painted over the top. See ClockLayout.h.
+    const ClockLayout L = clockLayout((int)strlen(hhmm), suffix ? 2 : 0,
+                                      TFT_WIDTH, 78);
+    gfx->fillRect(0, L.digitsY - 4, TFT_WIDTH, L.digitsH + 8, C_BLACK);
+    gfx->setTextSize(L.size);
+    gfx->setTextColor(C_WHITE);
+    gfx->setCursor(L.digitsX, L.digitsY);
+    gfx->print(hhmm);
 
     if (suffix) {
-      gfx->setTextSize(2);
+      gfx->setTextSize(CLOCK_SUFFIX_SIZE);
       gfx->setTextColor(C_DIM);
-      gfx->setCursor(TFT_WIDTH - gfxTextW(suffix, 2) - 10, ty + th - 16);
+      gfx->setCursor(L.suffixX, L.suffixY);
       gfx->print(suffix);
     }
   }
