@@ -39,6 +39,12 @@ NetFetchResult netFetchToString(const char* url, bool post, const char* headers,
                                 const uint8_t* body, uint16_t bodyLen,
                                 String& out, uint32_t maxBytes, uint32_t timeoutMs);
 
+// True when a request has somewhere to go at all: a joined network, or a
+// tether. Anything gating work on connectivity should ask this rather than the
+// radio — the radio is one of two answers, and treating it as the only one is
+// what left Spotify silent on a cube that had a perfectly good cable.
+bool netHaveRoute();
+
 // Which route the next call would take. Worth surfacing: "the ticker is blank"
 // has a very different cause on each.
 bool netFetchTethered();

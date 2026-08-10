@@ -22,7 +22,12 @@ class StringStream : public Stream {
 // tether path so far, where the reason is a fixed property of the source rather
 // than a transient network problem.
 static char s_note[64] = "";
-void stocksSetNote(const char* n) { strlcpy(s_note, n ? n : "", sizeof(s_note)); }
+void stocksSetNote(const char* n) {
+  const char* v = n ? n : "";
+  if (!strcmp(s_note, v)) return;          // once per change, not once per poll
+  strlcpy(s_note, v, sizeof(s_note));
+  if (s_note[0]) Serial.printf("[ticker] %s\n", s_note);
+}
 const char* stocksNote() { return s_note; }
 
 #include "Platform.h"
@@ -489,6 +494,14 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   // tuned for the ESP8266's heap, and a generic client would undo that work.
 #if WITH_TETHER
   if (netFetchTethered()) {
+    // Yahoo sends no access-control-allow-origin, on any response, so a page
+    // may not read it however willing — measured, not assumed. Asking anyway
+    // produced six doomed requests per poll cycle and a wall of failures in
+    // the tether log. Fail here instead and say what to change.
+    if (kind == PARSE_YAHOO) {
+      stocksSetNote("Yahoo can't be read by a browser - use the GitHub source");
+      return false;
+    }
     const char* hdrs =
         (kind == PARSE_YAHOO)  ? "Accept: application/json\nUser-Agent: " YAHOO_USER_AGENT :
         (kind == PARSE_GITHUB) ? "Accept: application/json\nUser-Agent: " FW_NAME :

@@ -305,7 +305,10 @@ static void spotifyTask(void*) {
       lastPoll = 0;
     }
 
-    if (!enabled || !rtok.length() || WiFi.status() != WL_CONNECTED) {
+    // Not WiFi.status(): a tethered cube has no station connection and a
+    // working route, and asking the radio gets the wrong answer for exactly
+    // the case the cable exists to serve.
+    if (!enabled || !rtok.length() || !netHaveRoute()) {
       vTaskDelay(1000 / portTICK_PERIOD_MS);
       continue;
     }

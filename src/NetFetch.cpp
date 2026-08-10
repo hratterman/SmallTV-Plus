@@ -15,6 +15,8 @@
 #include <HTTPClient.h>
 #endif
 
+bool netHaveRoute() { return netFetchTethered() || netConnected(); }
+
 bool netFetchTethered() {
 #if WITH_TETHER
   return tetherActive();

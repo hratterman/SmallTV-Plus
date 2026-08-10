@@ -375,6 +375,9 @@ static void stratumTask(void*) {
       backoffMs = 2000;
     }
 
+    // Deliberately the radio and not netHaveRoute(): stratum is a long-lived
+    // raw TCP socket, and the tether carries HTTP requests, not sockets. There
+    // is no mining over the cable.
     if (!configured || WiFi.status() != WL_CONNECTED) {
       if (subscribed) { client.stop(); subscribed = false; clearJob(); }
       lockTake();

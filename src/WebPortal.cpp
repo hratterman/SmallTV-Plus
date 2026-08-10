@@ -158,6 +158,7 @@ static void handleStatus() {
   }
 
 #if WITH_TICKER
+  if (stocksNote()[0]) o["tickerNote"] = stocksNote();
   JsonArray arr = o["tickers"].to<JsonArray>();
   for (uint8_t i = 0; i < stocksCount(); i++) {
     const StockData& d = stockAt(i);
