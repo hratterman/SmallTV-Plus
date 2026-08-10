@@ -380,10 +380,13 @@ void SpotifySettings::fromJson(JsonObjectConst o) {
 // ===========================================================================
 // Calendar slice
 // ===========================================================================
-static const char* calProvToStr(uint8_t v) { return v == CAL_MICROSOFT ? "microsoft" : "google"; }
+static const char* calProvToStr(uint8_t v) {
+  return v == CAL_MICROSOFT ? "microsoft" : v == CAL_ICS ? "ics" : "google";
+}
 static uint8_t calProvFromStr(const String& s) {
-  return s.equalsIgnoreCase("microsoft") || s.equalsIgnoreCase("outlook")
-             ? CAL_MICROSOFT : CAL_GOOGLE;
+  if (s.equalsIgnoreCase("microsoft") || s.equalsIgnoreCase("outlook")) return CAL_MICROSOFT;
+  if (s.equalsIgnoreCase("ics")) return CAL_ICS;
+  return CAL_GOOGLE;
 }
 
 void CalendarSettings::setDefaults() {
@@ -392,6 +395,7 @@ void CalendarSettings::setDefaults() {
   clientId     = "";
   clientSecret = "";
   refreshToken = "";
+  icsUrl       = "";
   pollSec      = DEFAULT_CALENDAR_POLL_SEC;
 }
 
@@ -401,12 +405,15 @@ void CalendarSettings::toJson(JsonObject o, bool includeSecrets) const {
   o["clientId"] = clientId;
   o["pollSec"]  = pollSec;
   // The web API learns whether these are set, never their values — the same
-  // rule as the WiFi passwords and the Spotify secrets.
+  // rule as the WiFi passwords and the Spotify secrets. The ICS "secret
+  // address" is exactly that — it grants read access to whoever holds it.
   o["secretSet"] = clientSecret.length() > 0;
   o["tokenSet"]  = refreshToken.length() > 0;
+  o["icsSet"]    = icsUrl.length() > 0;
   if (includeSecrets) {
     o["clientSecret"] = clientSecret;
     o["refreshToken"] = refreshToken;
+    o["icsUrl"]       = icsUrl;
   }
 }
 
@@ -423,6 +430,12 @@ void CalendarSettings::fromJson(JsonObjectConst o) {
   if (o["refreshToken"].is<const char*>()) {
     String v = o["refreshToken"].as<String>(); v.trim();
     if (v.length()) refreshToken = v;
+  }  if (o["icsUrl"].is<const char*>()) {
+    String v = o["icsUrl"].as<String>(); v.trim();
+    // Both providers offer the link as webcal://, which is HTTPS wearing a
+    // protocol-handler costume. Accept it as pasted.
+    if (v.startsWith("webcal://")) v = "https://" + v.substring(9);
+    if (v.length()) icsUrl = v;
   }
 }
 

@@ -3,6 +3,10 @@
 
 #include "CalendarClient.h"
 #include "CalendarTime.h"
+#include "Ics.h"
+
+static_assert(ICS_TITLE_LEN == CAL_TITLE_LEN,
+              "the ICS parser and the calendar events must agree on title size");
 #include "NetFetch.h"
 #include "Clock.h"
 #include <ArduinoJson.h>
@@ -29,7 +33,7 @@ static struct {
   volatile uint32_t epoch;
   bool     enabled;
   uint8_t  provider;
-  String   clientId, clientSecret, refreshToken;
+  String   clientId, clientSecret, refreshToken, icsUrl;
   uint16_t pollSec;
   uint16_t httpTimeout;
 } s_cfg;
@@ -281,6 +285,67 @@ static bool fetchEvents(uint8_t provider, uint16_t timeoutMs) {
 }
 
 // ---------------------------------------------------------------------------
+// The ICS route: the calendar's secret address, streamed through the RRULE
+// expander in Ics.h. No tokens anywhere. Static because the parser is ~2.5 KB
+// and only this task ever touches it.
+// ---------------------------------------------------------------------------
+static IcsParser s_ics;
+
+static bool icsSink(void* ctx, const uint8_t* data, uint16_t len) {
+  ((IcsParser*)ctx)->feed((const char*)data, len);
+  return true;
+}
+
+static bool fetchIcs(const String& url, uint16_t timeoutMs) {
+  const int64_t now = (int64_t)time(nullptr);
+  s_ics.begin(now, now + (int64_t)CAL_LOOKAHEAD_SEC, localOffsetMin());
+
+  // A generous timeout of its own: Google's feed is the calendar's entire
+  // history and can run to megabytes, all of which must stream past even
+  // though only the next two days are kept.
+  (void)timeoutMs;
+  const NetFetchResult res =
+      netFetch(url.c_str(), false, "Accept: text/calendar", nullptr, 0,
+               icsSink, &s_ics, 30000);
+  if (!res.ok) {
+    char m[64];
+    snprintf(m, sizeof(m), "ics: %.52s", res.error);
+    setError(m);
+    return false;
+  }
+  if (res.status != 200) {
+    char m[40];
+    snprintf(m, sizeof(m), "ics: HTTP %d - check the link", res.status);
+    setError(m);
+    return false;
+  }
+  s_ics.end();
+
+  s_stageN = 0;
+  for (uint8_t i = 0; i < s_ics.count() && s_stageN < CAL_MAX_EVENTS; i++) {
+    const IcsOut& e = s_ics.get(i);
+    CalEvent& d = s_stage[s_stageN++];
+    d.startUtc = e.start;
+    d.endUtc = e.end;
+    d.allDay = e.allDay;
+    memcpy(d.title, e.title, sizeof(d.title));
+  }
+  sortStage();                        // the keep-list is sorted, but cheap proof
+  if (s_ics.skippedRules())
+    Serial.printf("[calendar] %u repeating event(s) use rules this parser "
+                  "does not know\n", (unsigned)s_ics.skippedRules());
+
+  lockTake();
+  memcpy(s_snap.events, s_stage, sizeof(s_snap.events));
+  s_snap.count = s_stageN;
+  s_snap.ok = true;
+  s_snap.error[0] = 0;
+  s_okAtMs = millis();
+  lockGive();
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // The task
 // ---------------------------------------------------------------------------
 // The link flow lives with the other public surface below; the task only needs
@@ -296,7 +361,7 @@ static void calendarTask(void*) {
   uint8_t  provider = CAL_GOOGLE;
   uint16_t pollSec = DEFAULT_CALENDAR_POLL_SEC;
   uint16_t timeoutMs = 10000;
-  String   cid, csec, rtok;
+  String   cid, csec, rtok, ics;
 
   for (;;) {
     if (myEpoch != s_cfg.epoch) {
@@ -308,6 +373,7 @@ static void calendarTask(void*) {
       cid      = s_cfg.clientId;
       csec     = s_cfg.clientSecret;
       rtok     = s_cfg.refreshToken;
+      ics      = s_cfg.icsUrl;
       timeoutMs = s_cfg.httpTimeout;
       s_snap.ok = false;                 // a new account's events, not the old one's
       s_snap.count = 0;
@@ -328,9 +394,11 @@ static void calendarTask(void*) {
     }
 
     // netHaveRoute, not the radio: tethered there is no station connection and
-    // a perfectly good route. "Next" also needs a clock that has been set.
-    if (!enabled || !rtok.length() || !cid.length() ||
-        !netHaveRoute() || !clockSynced()) {
+    // a perfectly good route. "Next" also needs a clock that has been set. The
+    // ICS route needs only its URL; the OAuth routes need their credentials.
+    const bool ready = (provider == CAL_ICS) ? ics.length() > 0
+                                             : (rtok.length() && cid.length());
+    if (!enabled || !ready || !netHaveRoute() || !clockSynced()) {
       vTaskDelay(1000 / portTICK_PERIOD_MS);
       continue;
     }
@@ -342,15 +410,28 @@ static void calendarTask(void*) {
     }
     lastPoll = now;
 
+    // The secret address is the one route a browser may not read for us:
+    // neither provider sends CORS on it (measured; docs/tether-limits.md).
+    if (provider == CAL_ICS && netFetchTethered()) {
+      setError("secret link can't cross the cable - use Link Google/Microsoft");
+      vTaskDelay(5000 / portTICK_PERIOD_MS);
+      continue;
+    }
+
 #if WITH_SPOTIFY
     // One TLS operation at a time across the firmware — the same rule the art
     // fetch already obeys, for the same heap.
     if (!spotifyNetLock(10000)) { vTaskDelay(500 / portTICK_PERIOD_MS); continue; }
 #endif
-    bool ok = true;
-    if (!s_accessToken.length() || (int32_t)(now - s_tokenDiesMs) >= 0)
-      ok = refreshAccessToken(provider, cid, csec, rtok, timeoutMs);
-    if (ok) ok = fetchEvents(provider, timeoutMs);
+    bool ok;
+    if (provider == CAL_ICS) {
+      ok = fetchIcs(ics, timeoutMs);
+    } else {
+      ok = true;
+      if (!s_accessToken.length() || (int32_t)(now - s_tokenDiesMs) >= 0)
+        ok = refreshAccessToken(provider, cid, csec, rtok, timeoutMs);
+      if (ok) ok = fetchEvents(provider, timeoutMs);
+    }
 #if WITH_SPOTIFY
     spotifyNetUnlock();
 #endif
@@ -375,6 +456,7 @@ void calendarInit(const Settings& s) {
   s_cfg.clientId     = s.calendar.clientId;
   s_cfg.clientSecret = s.calendar.clientSecret;
   s_cfg.refreshToken = s.calendar.refreshToken;
+  s_cfg.icsUrl       = s.calendar.icsUrl;
   s_cfg.pollSec      = s.calendar.pollSec;
   s_cfg.httpTimeout  = s.httpTimeout;
   s_cfg.epoch = s_cfg.epoch + 1;

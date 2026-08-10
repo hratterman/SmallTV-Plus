@@ -133,10 +133,13 @@ void CalendarMode::render(const Settings& s) {
     }
   }
 
-  if (!s.calendar.enabled || !s.calendar.refreshToken.length()) {
+  const bool linked = s.calendar.provider == CAL_ICS
+                          ? s.calendar.icsUrl.length() > 0
+                          : s.calendar.refreshToken.length() > 0;
+  if (!s.calendar.enabled || !linked) {
     gfxDrawCentered("calendar not linked", 100, 1, C_DIMTX);
-    gfxDrawCentered("web UI -> Calendar -> Link,", 120, 1, C_FAINT);
-    gfxDrawCentered("or run tools/calendar_auth.py", 132, 1, C_FAINT);
+    gfxDrawCentered("easiest: paste the calendar's", 120, 1, C_FAINT);
+    gfxDrawCentered("secret link in the web UI", 132, 1, C_FAINT);
     return;
   }
   if (!snap.ok) {

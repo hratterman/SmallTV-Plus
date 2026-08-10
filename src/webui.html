@@ -377,9 +377,12 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="calEnabled" type="checkbox"><label>Enabled</label></div>
    <label>Provider</label>
    <select id="calProvider">
-    <option value="google">Google Calendar</option>
-    <option value="microsoft">Outlook / Microsoft 365</option>
+    <option value="ics">Calendar link (ICS) &mdash; easiest, no account setup</option>
+    <option value="google">Google Calendar (OAuth)</option>
+    <option value="microsoft">Outlook / Microsoft 365 (OAuth)</option>
    </select>
+   <label>Calendar link <span class="muted">&mdash; ICS provider only</span></label>
+   <input id="calIcsUrl" type="password" placeholder="https://... or webcal://...">
    <label>Client ID</label><input id="calClientId" type="text" placeholder="your own OAuth client">
    <label>Client secret <span class="muted">&mdash; Google only</span></label>
    <input id="calClientSecret" type="password" placeholder="(unchanged)">
@@ -387,7 +390,16 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <label>Poll every (s)</label><input id="calPollSec" type="number" min="60" max="3600">
    <div style="margin-top:12px"><button class="btn" id="calLinkBtn" onclick="calLink()">Link with Microsoft</button>
     <span class="muted" id="calLinkMsg"></span></div>
-   <small class="hint"><b>Linking, once.</b> The cube reads your next two days and shows the
+   <small class="hint"><b>The plug-and-play way:</b> pick <i>Calendar link</i> and paste your
+    calendar's secret address &mdash; nothing to register anywhere.
+    Google: calendar.google.com &rarr; gear &rarr; Settings &rarr; your calendar &rarr;
+    <i>Integrate calendar</i> &rarr; <b>Secret address in iCal format</b>.
+    Outlook: outlook.com &rarr; Settings &rarr; Calendar &rarr; <i>Shared calendars</i> &rarr;
+    Publish &rarr; copy the <b>ICS</b> link. Anyone holding this link can read the calendar, so the
+    cube treats it like a password. One limit: it works on WiFi but not over the USB tether
+    (neither provider lets a browser read it) &mdash; use an OAuth provider below if the cube
+    lives on the cable.
+    <br><b>Linking with OAuth.</b> The cube reads your next two days and shows the
     nearest event with a countdown. Recurring events are expanded by the provider, not the cube.
     <br><b>Google, the easy way:</b> open the hosted tether page and use its <i>Link Google
     Calendar</i> card &mdash; the consent runs in the browser and the token lands on the cube over
@@ -646,6 +658,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  sv('calClientId',cal.clientId); sv('calPollSec',cal.pollSec||300);
  var ccs=$('calClientSecret'); if(ccs)ccs.placeholder=cal.secretSet?'(unchanged)':'paste the client secret';
  var crt=$('calRefreshToken'); if(crt)crt.placeholder=cal.tokenSet?'(unchanged)':'paste the refresh token';
+ var cics=$('calIcsUrl'); if(cics)cics.placeholder=cal.icsSet?'(unchanged)':'https://... or webcal://...';
  // work mode slice
  var wk=c.work||{};
  sc('workEnabled',!!wk.enabled); sc('workNoMining',wk.noMining!==false);
@@ -780,7 +793,8 @@ function collect(){
   refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
  if($('calEnabled')) o.calendar={enabled:gc('calEnabled'),provider:gv('calProvider'),
   clientId:gv('calClientId').trim(), clientSecret:gv('calClientSecret').trim(),
-  refreshToken:gv('calRefreshToken').trim(), pollSec:parseInt(gv('calPollSec'))||300};
+  refreshToken:gv('calRefreshToken').trim(), icsUrl:gv('calIcsUrl').trim(),
+  pollSec:parseInt(gv('calPollSec'))||300};
  if($('workEnabled')) o.work={enabled:gc('workEnabled'),noMining:gc('workNoMining'),
   hideExplicit:gc('workHideExplicit'),blocklist:gv('workBlocklist').trim()};
  if($('captiveAuto')) o.captive={autoAccept:gc('captiveAuto'),

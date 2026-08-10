@@ -149,6 +149,7 @@
 #define CAL_LOOKAHEAD_SEC (48UL * 3600UL)  // two days is "next obligation" territory
 #define CAL_GOOGLE    0
 #define CAL_MICROSOFT 1
+#define CAL_ICS       2   // secret iCal URL: no OAuth, no registration, WiFi only
 #define GOOGLE_TOKEN_URL "https://oauth2.googleapis.com/token"
 #define GOOGLE_CAL_URL   "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 #define MS_TOKEN_URL     "https://login.microsoftonline.com/common/oauth2/v2.0/token"

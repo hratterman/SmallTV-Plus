@@ -166,6 +166,7 @@ struct CalendarSettings {
   String   clientId;
   String   clientSecret;   // Google only; blank for Microsoft
   String   refreshToken;
+  String   icsUrl;         // CAL_ICS: the calendar's secret address; no OAuth at all
   uint16_t pollSec;
 
   void setDefaults();
