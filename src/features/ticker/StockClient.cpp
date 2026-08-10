@@ -186,6 +186,19 @@ static String buildCashChartUrl(const Settings& s, const char* symbol) {
 
 // ---- URL builder: GitHub static quotes ------------------------------------
 // The per-symbol file published by the quotes workflow. Same JSON as a webhook.
+static String buildSaQuoteUrl(const char* symbol) {
+  String url = F(SA_QUOTE_URL);
+  url += urlEncode(symbol);
+  return url;
+}
+
+static String buildSaHistUrl(const char* symbol) {
+  String url = F(SA_HIST_URL);
+  url += urlEncode(symbol);
+  url += F(SA_HIST_TAIL);
+  return url;
+}
+
 static String buildGithubUrl(const char* symbol) {
   String url = F(GH_QUOTES_BASE);
   url += urlEncode(symbol);
@@ -408,6 +421,76 @@ static bool parseCashQuote(const Settings& s, StockData& d, Stream& stream) {
 // {"data":{"integration":{"solid":{"chart":{"timeserie":{"prices":
 //  [{"close":998.45},...]}}}}}} — closes are real JSON numbers here (unlike
 // the quote), oldest -> newest. Downsampling mirrors the Yahoo parser.
+// {"status":200,"data":{"p":710.71,"c":4.31,"cp":0.61,"cl":706.4, ...}}
+//   p  last price      c  change in currency
+//   cp change percent  cl previous close
+template <typename SRC>
+static bool parseSaQuote(const Settings& s, StockData& d, SRC&& src) {
+  JsonDocument filter;
+  JsonObject fd = filter["data"].to<JsonObject>();
+  fd["p"] = true; fd["c"] = true; fd["cp"] = true; fd["cl"] = true;
+  filter["status"] = true;
+
+  JsonDocument doc;
+  if (deserializeJson(doc, src, DeserializationOption::Filter(filter))) return false;
+  if ((doc["status"] | 0) != 200) return false;          // 404 for a bad symbol
+
+  JsonObjectConst q = doc["data"];
+  if (q.isNull() || !(q["p"].is<float>() || q["p"].is<int>())) return false;
+  const float price = q["p"].as<float>();
+  if (isnan(price) || price <= 0) return false;
+  d.price = price;
+
+  // US listings only, which is the whole of what this source covers.
+  strlcpy(d.currency, "USD", sizeof(d.currency));
+
+  if (q["c"].is<float>() || q["c"].is<int>())   d.change    = q["c"].as<float>();
+  if (q["cp"].is<float>() || q["cp"].is<int>()) d.changePct = q["cp"].as<float>();
+  // Prefer deriving the pair from the previous close when it is offered: it
+  // keeps change and percent consistent with each other and with the price.
+  if (q["cl"].is<float>() || q["cl"].is<int>()) {
+    const float prev = q["cl"].as<float>();
+    if (prev > 0) { d.change = price - prev; d.changePct = d.change / prev * 100.0f; }
+  }
+  d.hasChange = true;
+  return true;
+}
+
+// {"status":200,"data":[{"t":"2026-08-07","c":710.71}, ...]} newest first, so
+// the sparkline is filled backwards.
+template <typename SRC>
+static bool parseSaHist(const Settings& s, StockData& d, SRC&& src) {
+  JsonDocument filter;
+  filter["data"][0]["c"] = true;
+  filter["status"] = true;
+
+  JsonDocument doc;
+  if (deserializeJson(doc, src, DeserializationOption::Filter(filter))) return false;
+  if ((doc["status"] | 0) != 200) return false;
+
+  JsonArrayConst bars = doc["data"];
+  if (bars.isNull()) return false;
+
+  uint16_t want = s.ticker.points;
+  if (want > MAX_SPARK_POINTS) want = MAX_SPARK_POINTS;
+  if (want < 2) return true;                    // chart not wanted; quote stands
+
+  // Newest first: take the most recent `want` and write them in reverse, so the
+  // sparkline reads left-to-right in time like every other source's.
+  float tmp[MAX_SPARK_POINTS];
+  uint16_t n = 0;
+  for (JsonObjectConst b : bars) {
+    if (n >= want) break;
+    if (!b["c"].is<float>() && !b["c"].is<int>()) continue;
+    tmp[n++] = b["c"].as<float>();
+  }
+  if (n < 2) return false;                      // keep whatever was there
+
+  d.sparkCount = 0;
+  for (uint16_t i = 0; i < n; i++) d.spark[d.sparkCount++] = tmp[n - 1 - i];
+  return true;
+}
+
 static bool parseCashChart(const Settings& s, StockData& d, Stream& stream) {
   JsonDocument filter;
   filter["data"]["integration"]["solid"]["chart"]["timeserie"]["prices"][0]["close"] = true;
@@ -455,7 +538,8 @@ static bool parseCashChart(const Settings& s, StockData& d, Stream& stream) {
 }
 
 // ---- one HTTP(S) GET + parse ----------------------------------------------
-enum ParseKind : uint8_t { PARSE_WEBHOOK, PARSE_YAHOO, PARSE_CASH_QUOTE, PARSE_CASH_CHART, PARSE_GITHUB };
+enum ParseKind : uint8_t { PARSE_WEBHOOK, PARSE_YAHOO, PARSE_CASH_QUOTE, PARSE_CASH_CHART,
+                          PARSE_GITHUB, PARSE_SA_QUOTE, PARSE_SA_HIST };
 
 // cash.ch is the only host we let negotiate ECDHE, and only the first handshake
 // pays for it: this session resumes the rest for ~23 h.
@@ -499,7 +583,9 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     // produced six doomed requests per poll cycle and a wall of failures in
     // the tether log. Fail here instead and say what to change.
     if (kind == PARSE_YAHOO) {
-      stocksSetNote("Yahoo can't be read by a browser - use the GitHub source");
+      // stepSymbol substitutes stockanalysis.com before it gets here, so
+      // reaching this means something asked for Yahoo directly.
+      stocksSetNote("Yahoo can't be read by a browser");
       return false;
     }
     const char* hdrs =
@@ -523,6 +609,8 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     StringStream ss(raw);
     switch (kind) {
       case PARSE_YAHOO:      return parseYahoo(s, d, ss);
+      case PARSE_SA_QUOTE:   return parseSaQuote(s, d, ss);
+      case PARSE_SA_HIST:    return parseSaHist(s, d, ss);
       case PARSE_CASH_QUOTE: return parseCashQuote(s, d, ss);
       case PARSE_CASH_CHART: return parseCashChart(s, d, ss);
       default:               return parseWebhook(s, d, ss);
@@ -557,6 +645,8 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   bool ok;
   switch (kind) {
     case PARSE_YAHOO:      ok = parseYahoo(s, d, http.getStream());     break;
+    case PARSE_SA_QUOTE:   ok = parseSaQuote(s, d, http.getStream());   break;
+    case PARSE_SA_HIST:    ok = parseSaHist(s, d, http.getStream());    break;
     case PARSE_CASH_QUOTE: ok = parseCashQuote(s, d, http.getStream()); break;
     case PARSE_CASH_CHART: ok = parseCashChart(s, d, http.getStream()); break;
     default:               ok = parseWebhook(s, d, http.getStream());   break;  // webhook + github: same JSON
@@ -575,7 +665,37 @@ static uint8_t g_fetchPhase = 0;
 
 // Returns true when this symbol is finished (caller advances to the next).
 static bool stepSymbol(const Settings& s, StockData& d) {
-  if (d.source == SRC_YAHOO) {
+  uint8_t source = d.source;
+
+#if WITH_TETHER
+  // Plug and play rather than a setting to remember: while tethered, requests
+  // go out through a browser tab, and Yahoo sends no access-control-allow-origin
+  // on any response — so it is not merely slow there, it is unreachable. Swap
+  // to the one source that answers a browser, with the same symbol, and put it
+  // back the moment the cable is gone. The saved configuration is untouched.
+  if (source == SRC_YAHOO && netFetchTethered()) {
+    source = SRC_SA;
+    stocksSetNote("tethered: Yahoo blocks browsers, using stockanalysis.com");
+  } else if (source == SRC_YAHOO) {
+    stocksSetNote("");
+  }
+#endif
+
+  if (source == SRC_SA) {
+    if (g_fetchPhase == 0) {            // quote: price and the day's change
+      if (!fetchUrl(s, buildSaQuoteUrl(d.symbol), PARSE_SA_QUOTE, d)) { d.error = true; return true; }
+      g_fetchPhase = 1;
+      return false;
+    }
+    // Sparkline. Non-fatal, exactly as the cash.ch chart is: a stale chart
+    // beside a fresh price beats no price at all.
+    if ((s.ticker.showChart || (s.ticker.changeOnRange && s.ticker.showChange)) &&
+        s.ticker.points >= 2)
+      fetchUrl(s, buildSaHistUrl(d.symbol), PARSE_SA_HIST, d);
+    return true;
+  }
+
+  if (source == SRC_YAHOO) {
     if (g_fetchPhase == 0) {
       if (fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST1, d.symbol), PARSE_YAHOO, d)) return true;
       g_fetchPhase = 1;                 // transient drop: retry the mirror next tick
@@ -585,7 +705,7 @@ static bool stepSymbol(const Settings& s, StockData& d) {
     return true;
   }
 
-  if (d.source == SRC_CASH) {
+  if (source == SRC_CASH) {
     if (g_fetchPhase == 0) {            // quote: price + day change (~200 B)
       if (fetchUrl(s, buildCashQuoteUrl(d.symbol), PARSE_CASH_QUOTE, d)) { g_fetchPhase = 2; return false; }
       g_fetchPhase = 1;                 // retry the quote next tick
@@ -606,7 +726,7 @@ static bool stepSymbol(const Settings& s, StockData& d) {
     return true;
   }
 
-  if (d.source == SRC_GHUB) {           // static per-symbol JSON from the repo
+  if (source == SRC_GHUB) {             // static per-symbol JSON from the repo
     if (!fetchUrl(s, buildGithubUrl(d.symbol), PARSE_GITHUB, d)) d.error = true;
     return true;
   }

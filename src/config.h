@@ -165,6 +165,7 @@
 #define SRC_YAHOO    1
 #define SRC_CASH     2
 #define SRC_GHUB     3   // static JSON published to the repo's data branch (see below)
+#define SRC_SA       4   // stockanalysis.com — the one quote source a browser may read
 #define DEFAULT_SOURCE  SRC_YAHOO            // works out of the box, no server
 
 // Yahoo Finance public chart endpoint. A browser-like User-Agent is required —
@@ -200,6 +201,19 @@
 // record and does not negotiate MFLN, so this path uses a larger TLS buffer.
 #define GH_QUOTES_BASE "https://raw.githubusercontent.com/" REPO_OWNER "/" REPO_NAME "/data/quotes/"
 #define GH_QUOTES_RXBUF 5120
+// stockanalysis.com. The reason this source exists is narrow and worth stating:
+// Yahoo sends no access-control-allow-origin on any response, so while the cube
+// is tethered — fetching through a browser tab — Yahoo is unreachable however
+// willing everyone is. This one answers with `*`, so it works over the cable and
+// over WiFi alike, and the ticker falls back to it automatically when tethered.
+//
+// It is an undocumented endpoint of somebody's website rather than a published
+// API. US stocks and ETFs only; no crypto, no foreign listings. Treated
+// accordingly: a failure here is reported, never fatal.
+#define SA_QUOTE_URL "https://stockanalysis.com/api/quotes/s/"
+#define SA_HIST_URL  "https://stockanalysis.com/api/symbol/s/"
+#define SA_HIST_TAIL "/history?range=1Y"
+
 #define CASH_GQL_HOST   "www.cash.ch"
 #define CASH_GQL_PATH   "/_/api/graphql/prod"
 #define CASH_USER_AGENT "Mozilla/5.0 (SmallTV)"

@@ -10,12 +10,14 @@ static const char* CONFIG_PATH = "/config.json";
 static const char* srcToStr(uint8_t s) {
   return (s == SRC_YAHOO) ? "yahoo"
        : (s == SRC_CASH)  ? "cash"
-       : (s == SRC_GHUB)  ? "github" : "webhook";
+       : (s == SRC_GHUB)  ? "github"
+       : (s == SRC_SA)    ? "sa" : "webhook";
 }
 static uint8_t srcFromStr(const String& s) {
   return s.equalsIgnoreCase("yahoo")  ? SRC_YAHOO
        : s.equalsIgnoreCase("cash")   ? SRC_CASH
-       : s.equalsIgnoreCase("github") ? SRC_GHUB : SRC_WEBHOOK;
+       : s.equalsIgnoreCase("github") ? SRC_GHUB
+       : s.equalsIgnoreCase("sa")     ? SRC_SA : SRC_WEBHOOK;
 }
 
 void TickerSettings::setDefaults() {
