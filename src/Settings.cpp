@@ -84,12 +84,15 @@ void TickerSettings::fromJson(JsonObjectConst o) {
 
   if (o["webhookUrl"].is<const char*>()) webhookUrl = o["webhookUrl"].as<String>();
   if (o["range"].is<const char*>())      range = o["range"].as<String>();
-  // The low bound is 2, not 0: below 2 no source can draw a line, so every
-  // chart silently vanishes with nothing anywhere saying why — which happened.
-  // A web-UI save with the points field empty stored ||0, and "points":0 then
-  // gated off every history request while the quotes carried on fine. Turning
-  // the chart off is showChart's job; points is only ever "how many".
-  if (o["points"].is<int>())             points = constrain((int)o["points"], 2, MAX_SPARK_POINTS);
+  // Below 2 is a HEAL to the default, not a clamp to 2: a legacy config with
+  // "points":0 (the old empty-field save bug) clamped to a 2-point chart -
+  // which drew exactly two straight lines on a screen that used to show a
+  // whole day of movement, while looking configured. An impossible value
+  // means "give me the chart back", not "give me the worst legal chart".
+  if (o["points"].is<int>()) {
+    const int p = (int)o["points"];
+    points = p < 2 ? DEFAULT_POINTS : (p > MAX_SPARK_POINTS ? MAX_SPARK_POINTS : (uint16_t)p);
+  }
   if (o["pollSec"].is<int>())            pollSec = max(10, (int)o["pollSec"]);
   if (o["rotateSec"].is<int>())          rotateSec = max(2, (int)o["rotateSec"]);
   if (o["colorInverted"].is<bool>())     colorInverted = o["colorInverted"];
@@ -204,7 +207,7 @@ void ClockSettings::fromJson(JsonObjectConst o) {
   if (o["nightStart"].is<const char*>())  nightStartMin = hhmmToMin(o["nightStart"], nightStartMin);
   if (o["nightEnd"].is<const char*>())    nightEndMin   = hhmmToMin(o["nightEnd"], nightEndMin);
   if (o["nightLevel"].is<int>())          nightLevel = constrain((int)o["nightLevel"], 0, 100);
-  if (o["face"].is<int>())                face = (uint8_t)constrain((int)o["face"], 0, 2);
+  if (o["face"].is<int>())                face = (uint8_t)constrain((int)o["face"], 0, 4);
   if (o["nightMining"].is<bool>())        nightMining = o["nightMining"];
   if (o["mode12h"].is<bool>())            mode12h = o["mode12h"];
   if (o["showSeconds"].is<bool>())        showSeconds = o["showSeconds"];

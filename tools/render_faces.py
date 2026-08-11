@@ -299,6 +299,41 @@ def clock(face):
                 d.rectangle([x + 2, y + 2 * h // 3 - th // 2, x + th - 1, y + 2 * h // 3 + th // 2 - 3], fill=WHITE)
                 x += colon_w + gap
         px_draw(px, x + 6 - gap, y + h - 16, suffix, 2, DIMU)
+    elif face == "analog":
+        import math
+        cx, cy, r = 120, centerY, 48        # clockAnalogGeom(240, 78)
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=DIMU, width=2)
+        for i in range(12):
+            a = math.radians(i * 30)
+            cardinal = i % 3 == 0
+            o, inn = r - 4, r - (12 if cardinal else 8)
+            col = WHITE if cardinal else DIMU
+            d.line([cx + math.cos(a) * o, cy + math.sin(a) * o,
+                    cx + math.cos(a) * inn, cy + math.sin(a) * inn], fill=col, width=2)
+        def hand(deg, ln, hw, col):
+            a = math.radians(deg)
+            tx, ty = cx + math.cos(a) * ln, cy + math.sin(a) * ln
+            px_, py_ = -math.sin(a) * hw, math.cos(a) * hw
+            d.polygon([(cx + px_, cy + py_), (cx - px_, cy - py_), (tx, ty)], fill=col)
+        hand((12 % 12) * 30 + 34 * 0.5 - 90, r - 22, 3, WHITE)   # hour 12:34
+        hand(34 * 6 - 90, r - 10, 2, WHITE)                      # minute
+        d.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=BLUE)
+        px_draw(px, cx + r + 8, cy + r - 16, suffix, 2, DIMU)
+    elif face == "flip":
+        w_, h_, gap = 104, 96, 12           # clockFlipGeom(240, 78)
+        x0 = (240 - (2 * w_ + gap)) // 2
+        y0 = centerY - h_ // 2
+        dadv = int(re.search(r"CLOCK_SANS_DIGIT_ADV (\d+)",
+                             (ROOT / "src/features/clock/font_clock_sans.h").read_text()).group(1))
+        for cx0, two in ((x0, "12"), (x0 + w_ + gap, "34")):
+            d.rounded_rectangle([cx0, y0, cx0 + w_, y0 + h_], 10, fill=PANEL)
+            dw = dadv * len(two)
+            sans_draw(px, CLK["ClockSans"], cx0 + (w_ - dw) // 2,
+                      y0 + h_ // 2 + CLOCK_ASC // 2, two, WHITE)
+            d.rectangle([cx0, y0 + h_ // 2 - 1, cx0 + w_, y0 + h_ // 2], fill=BLACK)
+            d.rectangle([cx0 - 1, y0 + h_ // 2 - 4, cx0 + 2, y0 + h_ // 2 + 4], fill=BLACK)
+            d.rectangle([cx0 + w_ - 3, y0 + h_ // 2 - 4, cx0 + w_, y0 + h_ // 2 + 4], fill=BLACK)
+        px_draw(px, x0 + w_ + gap + w_ - 6 * len(suffix) - 8, y0 + h_ - 14, suffix, 1, DIMU)
     else:
         size = 6
         w = px_w(hhmm, size)
@@ -425,7 +460,8 @@ def weather_icons():
 
 def sheet(name, variants):
     """Side-by-side comparison sheet with a caption strip, for review at a glance."""
-    caps = {"pixel": "PIXEL", "sans": "SANS", "7seg": "SEVEN-SEGMENT"}
+    caps = {"pixel": "PIXEL", "sans": "SANS", "7seg": "SEVEN-SEGMENT",
+            "analog": "ANALOG", "flip": "FLIP"}
     tiles = [Image.open(OUT / f"{name}_{v}.png") for v in variants]
     tw, th = tiles[0].size
     pad, strip = 12, 48
@@ -448,7 +484,7 @@ if __name__ == "__main__":
         ticker(f)
         usage(f)
         miner(f)
-    for f in ("pixel", "sans", "7seg"):
+    for f in ("pixel", "sans", "7seg", "analog", "flip"):
         clock(f)
     weather("pixel")
     weather("sans")
@@ -456,5 +492,5 @@ if __name__ == "__main__":
     sheet("ticker", ("pixel", "sans"))
     sheet("usage", ("pixel", "sans"))
     sheet("miner", ("pixel", "sans"))
-    sheet("clock", ("pixel", "sans", "7seg"))
+    sheet("clock", ("pixel", "sans", "7seg", "analog", "flip"))
     sheet("weather", ("pixel", "sans"))

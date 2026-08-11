@@ -55,3 +55,25 @@ static inline bool segRect(uint8_t seg, int w, int h, int th, SegRect& r) {
   }
   return false;
 }
+
+// ---------------------------------------------------------------------------
+// Analog and flip face geometry — pure, shared by the panel, the host test
+// and the preview renderer, so what is measured is what is drawn.
+// ---------------------------------------------------------------------------
+struct AnalogGeom { int cx, cy, r; };
+static inline AnalogGeom clockAnalogGeom(int W, int centerY) {
+  // r chosen so the dial bottom stays above the seconds bar at y=128.
+  return {W / 2, centerY, 48};
+}
+// Hand angles in degrees, 0 at 3 o'clock, screen-clockwise positive.
+static inline float clockHourAngleDeg(int h, int m) {
+  return (h % 12) * 30.0f + m * 0.5f - 90.0f;
+}
+static inline float clockMinAngleDeg(int m) { return m * 6.0f - 90.0f; }
+
+struct FlipGeom { int xHH, xMM, y, w, h; };
+static inline FlipGeom clockFlipGeom(int W, int centerY) {
+  const int w = 104, h = 96, gap = 12;
+  const int x0 = (W - (2 * w + gap)) / 2;
+  return {x0, x0 + w + gap, centerY - h / 2, w, h};
+}

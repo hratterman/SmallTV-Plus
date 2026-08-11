@@ -149,6 +149,30 @@ int main() {
     ck(disjoint, "no two segments overlap");
   }
 
+  printf("\n--- analog and flip geometry ---------------------------------\n");
+  {
+    // Both new faces share the screen with the seconds bar at y=128 and the
+    // date band below it; the geometry header is the one place their fit is
+    // decided, so it is the one place to pin it.
+    const AnalogGeom a = clockAnalogGeom(240, 78);
+    ck(a.cy + a.r < 128, "the dial bottom clears the seconds bar");
+    ck(a.cy - a.r >= 8, "the dial top clears the bezel overhang");
+    ck(a.cx - a.r >= 0 && a.cx + a.r < 240, "the dial fits the panel width");
+
+    const FlipGeom f = clockFlipGeom(240, 78);
+    ck(f.y + f.h < 128, "the cards clear the seconds bar");
+    ck(f.y >= 8, "the cards clear the bezel overhang");
+    ck(f.xHH >= 0 && f.xMM + f.w <= 240, "both cards fit the panel width");
+    ck(f.xMM > f.xHH + f.w, "the cards do not overlap");
+    // Two ClockSans digits (42 px advance each, ascent 53) must fit a card.
+    ck(2 * 42 <= f.w - 8, "two sans digits fit a card's width");
+    ck(53 <= f.h - 12, "a sans digit fits a card's height");
+    // Hand angles: noon points straight up, 3:00's hour hand straight right.
+    ck((int)clockMinAngleDeg(0) == -90, "minute hand at :00 points up");
+    ck((int)clockHourAngleDeg(3, 0) == 0, "hour hand at 3:00 points right");
+    ck((int)clockHourAngleDeg(15, 0) == 0, "and 15:00 is the same direction");
+  }
+
   printf("\n-------------------------------------------------------------\n");
   if (failures) { printf("%d check(s) FAILED\n", failures); return 1; }
   printf("all checks passed\n");
