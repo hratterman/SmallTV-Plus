@@ -44,12 +44,13 @@ step through them with a tap on the lid.
 
 ## Beyond the modes
 
-- **The USB tether.** Plug the cube into any computer and open a single static web page: the cube
-  borrows that browser's internet — no WiFi ever needed. The same page is a full control panel
-  (settings, city lookup for weather, calendar file drop) and can **flash firmware updates over the
-  cable**, so a tethered cube is never stranded. It installs as a desktop app, reconnects by itself
-  when replugged, and includes a network health check that tells "cube problem" from "network
-  problem" in one glance. See [docs/tether-hosting.md](docs/tether-hosting.md) for standing it up.
+- **The USB tether.** Plug the cube into any computer and open
+  [**henryratterman.com/tether**](https://henryratterman.com/tether/): the cube borrows that
+  browser's internet — no WiFi ever needed. The same page is a full control panel (settings, city
+  lookup for weather, calendar file drop) and can **flash firmware updates over the cable**, so a
+  tethered cube is never stranded. It installs as a desktop app, reconnects by itself when
+  replugged, and includes a network health check that tells "cube problem" from "network problem"
+  in one glance. Hosting your own copy: [docs/tether-hosting.md](docs/tether-hosting.md).
 - **A typeface setting.** The classic pixel look, or real rasterised type (LiberationSans) across
   the whole system — big numerals, headings, labels, the clock. The fonts are generated,
   self-tested against every screen's layout budget, and previewed pixel-for-pixel before they ever
@@ -113,12 +114,13 @@ Every push also builds all five targets in CI; the images land as a workflow art
 5. Configure any mode in its own tab. The ticker works immediately with a few symbols
    (`AAPL`, `BTC-USD`); weather needs only a city lookup.
 
-No WiFi available at all? Skip everything above and use the
-[USB tether](docs/tether-hosting.md) instead.
+No WiFi available at all? Skip everything above, plug the cube into a computer, and open the
+[USB tether](https://henryratterman.com/tether/) instead.
 
 ## Documentation
 
-- [Hosting & using the USB tether](docs/tether-hosting.md) — the handoff guide
+- [The USB tether, live](https://henryratterman.com/tether/) — open it in Chrome/Edge and press Connect
+- [Hosting & using the tether yourself](docs/tether-hosting.md) — the handoff guide
 - [What works over the tether, measured](docs/tether-limits.md) — per-service CORS findings
 - [Upstream docs](https://giovi321.github.io/smalltv-mod/) — hardware, flashing, recovery, and the
   original three modes in depth

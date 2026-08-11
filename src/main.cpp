@@ -534,7 +534,17 @@ void loop() {
     const bool tethered = false;
 #endif
     static bool s_ranTethered = false;
-    if (netMode() == NET_AP && !tethered) {
+    static uint32_t s_tetherLastUp = 0;
+    if (tethered) s_tetherLastUp = millis();
+    // Once the cable has carried this boot, a gap has to PERSIST before the
+    // setup card comes back. Hosts pause all the time - a backgrounded tab, a
+    // laptop dozing - and flashing the join-the-hotspot card over a working
+    // screen on every hiccup made the cube look broken. Through a short gap
+    // the modes keep rendering from cache; a full minute of silence means the
+    // cable is genuinely gone and the card is genuinely the right screen.
+    const bool holdover =
+        s_ranTethered && (uint32_t)(millis() - s_tetherLastUp) < 60000UL;
+    if (netMode() == NET_AP && !tethered && !holdover) {
       // Coming back from a tether that has gone away: put the setup card back,
       // otherwise the last rendered frame sits there looking operational.
       if (s_ranTethered) {
