@@ -47,13 +47,16 @@ static void buildQuery(const Settings& s, char* out, size_t n) {
 }
 
 // The device-path fetch, hand-rolled on purpose. The field cube sits behind a
-// hotspot whose middlebox kills TLS handshakes by their SNI hostname (fatal
-// alert, ssl=7780) AND intercepts plain http for the same host. What passes:
-// a TLS connection opened to the resolved ADDRESS, so the SNI extension
-// carries only an IP literal with nothing for a hostname blocklist to match -
-// Open-Meteo then routes on the Host header (measured: 200 with the real
-// JSON; it needs HTTP/1.1, so the chunked framing is undone here). Normal
-// networks take this path too - the server accepts it either way.
+// hotspot whose middlebox kills TLS handshakes to this host with a fatal
+// alert (ssl=7780). What passes: a TLS connection opened to the resolved
+// ADDRESS, so the SNI extension carries only an IP literal with nothing for
+// a hostname blocklist to match - Open-Meteo then routes on the Host header
+// (measured: 200 with the real JSON; it needs HTTP/1.1, so the chunked
+// framing is undone here). Normal networks take this path too - the server
+// accepts it either way. Plain http is the caller's fallback when even this
+// TLS is killed: port 80 to this host was measured CLEAN on the field
+// hotspot (the earlier "unexpected reply" was un-decoded chunking, fixed in
+// NetFetch since).
 static bool fetchDirect(const Settings& s, String& raw, char* err, size_t errLen) {
   char path[280];
   buildQuery(s, path, sizeof(path));
@@ -200,6 +203,25 @@ void weatherService(const Settings& s) {
     if (!fetched) strlcpy(ferr, r.error, sizeof(ferr));
   } else {
     fetched = fetchDirect(s, raw, ferr, sizeof(ferr));
+    if (!fetched) {
+      // TLS is being interfered with even without a hostname to match: fall
+      // back to plain http, which netFetch now de-chunks correctly. Public
+      // weather data over port 80 beats a blank screen.
+      char url[300];
+      snprintf(url, sizeof(url), "http://" WEATHER_HOST);
+      char q[280];
+      buildQuery(s, q, sizeof(q));
+      strlcat(url, q, sizeof(url));
+      const NetFetchResult r = netFetchToString(url, false, "Accept: application/json",
+                                                nullptr, 0, raw, 8192, 10000);
+      if (r.ok) {
+        fetched = true;
+      } else {
+        char both[72];
+        snprintf(both, sizeof(both), "%.32s / http: %.28s", ferr, r.error);
+        strlcpy(ferr, both, sizeof(ferr));
+      }
+    }
   }
 
   if (fetched && parseWeather(raw)) {

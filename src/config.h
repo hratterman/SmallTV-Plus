@@ -150,8 +150,10 @@
 // The device path connects to the RESOLVED ADDRESS and routes by Host header
 // (Open-Meteo accepts that with HTTP/1.1 - measured), so the TLS hello's SNI
 // carries only an IP literal: a hotspot middlebox filtering handshakes by
-// hostname has nothing to match. The tether path stays a normal https URL -
-// the browser speaks TLS 1.3 through the same filters.
+// hostname has nothing to match. If even that TLS is killed, the client
+// falls back to plain http (measured clean on the field hotspot; public
+// data). The tether path stays a normal https URL - the browser speaks
+// TLS 1.3 through the same filters.
 #define WEATHER_HOST "api.open-meteo.com"
 #define WEATHER_PATH "/v1/forecast"
 

@@ -1,3 +1,4 @@
+#include "NetChunk.h"
 #include "Platform.h"
 #include "NetFetch.h"
 #include "Net.h"
@@ -93,6 +94,11 @@ static NetFetchResult fetchOverWifi(const char* url, bool post, const char* head
   }
 
   HTTPClient http;
+  // Ask HTTPClient to keep the Transfer-Encoding header: a chunked body read
+  // raw off the stream still carries its size lines, and they must be undone
+  // below or the caller parses framing instead of payload.
+  static const char* kKeep[] = {"Transfer-Encoding"};
+  http.collectHeaders(kKeep, 1);
   const bool began = tls ? http.begin(secure, url) : http.begin(plain, url);
   if (!began) {
     strlcpy(r.error, "could not open the connection", sizeof(r.error));
@@ -143,8 +149,22 @@ static NetFetchResult fetchOverWifi(const char* url, bool post, const char* head
   WiFiClient* st = http.getStreamPtr();
   const uint32_t deadline = millis() + timeoutMs;
   int32_t remaining = http.getSize();          // -1 when chunked
+  const bool chunked =
+      http.header("Transfer-Encoding").indexOf("chunked") >= 0;
+  NetChunkDec chunkDec;
   uint8_t buf[512];
   bool abandoned = false;
+  struct SinkCtx {
+    NetFetchSink sink;
+    void* ctx;
+    bool* abandoned;
+  } sctx = {sink, ctx, &abandoned};
+  auto emit = [](void* c, const uint8_t* p, uint16_t n) {
+    SinkCtx* s = (SinkCtx*)c;
+    if (!*s->abandoned && s->sink && !s->sink(s->ctx, p, n))
+      *s->abandoned = true;
+    return true;
+  };
   while (remaining != 0 && (int32_t)(millis() - deadline) < 0) {
     const int avail = st->available();
     if (avail <= 0) {
@@ -158,7 +178,11 @@ static NetFetchResult fetchOverWifi(const char* url, bool post, const char* head
     if (got <= 0) break;
     r.bytes += got;
     if (remaining > 0) remaining -= got;
-    if (!abandoned && sink && !sink(ctx, buf, (uint16_t)got)) abandoned = true;
+    if (chunked) {
+      if (!netChunkFeed(chunkDec, buf, got, emit, &sctx)) break;  // 0-chunk seen
+    } else if (!abandoned && sink && !sink(ctx, buf, (uint16_t)got)) {
+      abandoned = true;
+    }
   }
 
   http.end();
