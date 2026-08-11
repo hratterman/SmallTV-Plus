@@ -2,6 +2,12 @@
 <!--
   SmallTV tether — a static page. Drop it anywhere and serve it over HTTPS.
 
+  Four optional sibling files make it installable as an app (and openable
+  offline): tether.webmanifest, tether-sw.js, tether-icon-192.png,
+  tether-icon-512.png. Host them next to this file and an "Install as app"
+  button appears; leave them out and the page is exactly the single file it
+  always was. Everything works identically in a plain tab either way.
+
   Four things silently break it, all of which leave the page looking normal
   while the connect button does nothing:
 
@@ -31,6 +37,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SmallTV tether</title>
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="tether.webmanifest">
 <style>
 :root{
   --bg:#0d1117; --panel:#151b23; --panel2:#1c2530; --line:#2a3441;
@@ -141,6 +149,7 @@ details>div{margin-top:12px}
   </div>
   <div class="spacer"></div>
   <span class="pill" id="statePill"><span class="dot"></span><span id="stateText">not connected</span></span>
+  <button class="ghost hide" id="btnInstall" title="Installs this page as its own app window. Everything works the same in a tab.">Install as app</button>
   <button class="primary" id="btnConnect">Connect</button>
   <button class="ghost hide" id="btnDisconnect">Disconnect</button>
 </header>
@@ -149,6 +158,24 @@ details>div{margin-top:12px}
   <b>This browser has no Web Serial.</b> It is Chrome, Edge or Opera on desktop only —
   Safari and Firefox have not implemented it. The page needs to be served over
   <code>https://</code> (or <code>localhost</code>) too.
+</div>
+
+<div class="card" id="hero" style="margin-bottom:18px">
+  <h2>Set up</h2>
+  <div class="body">
+    <p style="margin:0 0 12px;font-size:15px"><b>Three steps and the cube is online:</b></p>
+    <ol style="margin:0 0 14px;padding-left:22px;line-height:2">
+      <li>Plug the cube's USB cable into this computer.</li>
+      <li>Press <b>Connect</b> and pick the USB entry in the list
+        <span class="hint">(it may be called "CP2102", "CH340" or "USB Serial" &mdash; that's the cube)</span>.</li>
+      <li>That's it. The cube borrows this computer's internet while the page stays open.</li>
+    </ol>
+    <div class="bar" style="margin-top:0;padding-top:0;border-top:none">
+      <button class="primary" id="btnConnect2">Connect</button>
+      <span class="msg">Tip: install this page as an app (button above, when offered) and put it in
+        your login items &mdash; then the cube comes online whenever the computer does.</span>
+    </div>
+  </div>
 </div>
 
 <div class="grid">
@@ -165,7 +192,17 @@ details>div{margin-top:12px}
         <div id="log"></div>
         <div class="bar">
           <button id="btnClear">Clear log</button>
+          <label class="tick" style="padding:0"><input id="wakeLock" type="checkbox">
+            <span>Keep this computer awake while connected</span></label>
           <span class="msg" id="linkMsg">Leave this tab open. The cube stops fetching when it closes.</span>
+        </div>
+        <div id="cubeStat" class="hide" style="margin-top:14px">
+          <div class="stats" style="margin-bottom:0">
+            <div class="stat"><div class="k">Firmware</div><div class="v" id="csFw">-</div></div>
+            <div class="stat"><div class="k">Uptime</div><div class="v" id="csUp">-</div></div>
+            <div class="stat"><div class="k">Free memory</div><div class="v" id="csHeap">-</div></div>
+          </div>
+          <p class="hint" id="csNotes" style="margin:8px 0 0"></p>
         </div>
       </div>
     </div>
@@ -239,6 +276,37 @@ details>div{margin-top:12px}
         </details>
       </div>
     </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2>Firmware update</h2>
+      <div class="body">
+        <p class="msg" style="margin-top:0">A cube that lives on this cable never joins WiFi, so
+          this is how it gets updates: drop the <code>firmware.bin</code> here and it flashes over
+          the cable &mdash; about three minutes. The cube keeps its old firmware until the new one
+          arrives whole, so a pulled cable is a do-over, not a brick.</p>
+        <input id="fwFile" type="file" accept=".bin">
+        <div id="fwProg" class="hide" style="margin-top:12px">
+          <div style="background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden">
+            <div id="fwBarFill" style="height:10px;width:0%;background:var(--accent)"></div>
+          </div>
+          <p class="msg" id="fwProgTxt" style="margin:6px 0 0"></p>
+        </div>
+        <p class="msg" id="fwMsg" style="margin:8px 0 0"></p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2>Network health</h2>
+      <div class="body">
+        <p class="msg" style="margin-top:0">Checks, from this computer, every service the cube
+          uses. If a row is red the problem is this network, not the cube.</p>
+        <div id="hcRows" style="font-size:13px"></div>
+        <div class="bar" style="margin-top:12px">
+          <button id="btnHealth">Run the checks</button>
+          <span class="msg" id="hcMsg"></span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div>
@@ -252,6 +320,10 @@ details>div{margin-top:12px}
         <div id="cfgForm" class="hide">
           <fieldset>
             <legend>Display</legend>
+            <div class="row">
+              <label>Show now <span class="hint">one click, saved straight to the cube</span></label>
+              <div id="quickModes" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+            </div>
             <div class="row">
               <label for="mode">Mode</label>
               <select id="mode">
@@ -405,6 +477,9 @@ details>div{margin-top:12px}
           <div class="bar">
             <button class="primary" id="btnSave">Save to cube</button>
             <button id="btnReload">Reload from cube</button>
+            <button id="btnBackup" title="Downloads the cube's settings as a file. Secrets never leave the cube, so a backup carries none.">Back up</button>
+            <button id="btnRestore" title="Load a saved settings file into the form; review, then Save.">Restore...</button>
+            <input id="restoreFile" type="file" accept=".json,application/json" class="hide">
             <span class="msg" id="cfgMsg"></span>
           </div>
         </div>
@@ -750,6 +825,7 @@ function cfgReceived(){
   if(gPending) gDeliver();      // a Google link was waiting for the cube
   $('cfgEmpty').classList.add('hide');
   $('cfgForm').classList.remove('hide');
+  renderQuickModes();
   $('cfgMsg').textContent=`${(text.length/1024).toFixed(1)} KB read over the cable`;
   $('cfgMsg').className='msg';
 }
@@ -792,6 +868,8 @@ async function readLoop(){
           const m=new TextDecoder().decode(f.payload);
           $('icsMsg').textContent=m;
           log('calendar import: '+m, m.startsWith('ok')?'l-ok':'l-err');
+        } else if(waiters[f.type]){          // a reply someone is awaiting (OTA, status)
+          const w=waiters[f.type]; delete waiters[f.type]; w(f.payload);
         } else if(f.type===0x45){            // SF_CFG_OK
           const m=new TextDecoder().decode(f.payload);
           const ok = m==='ok';
@@ -823,6 +901,11 @@ async function teardown(){
   $('cfgEmpty').classList.remove('hide');
   $('cfgEmpty').innerHTML='<b>Not connected.</b> Press Connect and pick the cube.';
   cfgDoc=null;
+  $('hero').classList.remove('hide');
+  $('cubeStat').classList.add('hide');
+  clearInterval(statTimer);
+  statTimer=null;
+  releaseWake();
 }
 
 async function openPort(p){
@@ -835,6 +918,11 @@ async function openPort(p){
   $('btnConnect').classList.add('hide');
   $('btnDisconnect').classList.remove('hide');
   log('port open at 115200 — waiting for the cube to say hello','l-warn');
+  $('hero').classList.add('hide');
+  if($('wakeLock').checked) acquireWake();
+  clearInterval(statTimer);
+  statTimer=setInterval(pollStat,10000);
+  setTimeout(pollStat,3000);
   readLoop();
   return true;
 }
@@ -846,6 +934,67 @@ $('btnConnect').onclick=async()=>{
   await openPort(p);
 };
 
+$('btnConnect2').onclick=()=>$('btnConnect').onclick();
+
+// ---- install as app (optional; the tab works identically) --------------------
+let installEvt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();
+  installEvt=e;
+  if(!matchMedia('(display-mode: standalone)').matches)
+    $('btnInstall').classList.remove('hide');
+});
+$('btnInstall').onclick=async()=>{
+  if(!installEvt) return;
+  installEvt.prompt();
+  await installEvt.userChoice;
+  installEvt=null;
+  $('btnInstall').classList.add('hide');
+};
+// The service worker and manifest are optional siblings: hosted, the page
+// installs and loads offline; absent, this register fails quietly and the
+// page is exactly the single file it always was.
+if('serviceWorker' in navigator && window.isSecureContext){
+  navigator.serviceWorker.register('tether-sw.js').catch(()=>{});
+}
+
+// ---- the cable coming and going ---------------------------------------------
+// A granted port needs no picker, so replugging the cube reconnects by itself.
+if('serial' in navigator){
+  navigator.serial.addEventListener('connect',async e=>{
+    if(port) return;
+    log('cable plugged in - reconnecting','l-warn');
+    await openPort(e.target);
+  });
+  navigator.serial.addEventListener('disconnect',e=>{
+    if(port && e.target===port) log('the cable was unplugged','l-err');
+  });
+}
+
+// ---- keep-awake --------------------------------------------------------------
+// A sleeping computer is a dead tether; the Wake Lock keeps the screen (and so
+// the machine) up while the cube is connected, only when asked to.
+let wakeSentinel=null;
+async function acquireWake(){
+  if(!('wakeLock' in navigator)||wakeSentinel) return;
+  try{
+    wakeSentinel=await navigator.wakeLock.request('screen');
+    wakeSentinel.addEventListener('release',()=>{wakeSentinel=null});
+  }catch(_){}
+}
+function releaseWake(){
+  try{ if(wakeSentinel) wakeSentinel.release(); }catch(_){}
+  wakeSentinel=null;
+}
+$('wakeLock').checked=localStorage.getItem('tetherWake')==='1';
+$('wakeLock').onchange=e=>{
+  localStorage.setItem('tetherWake',e.target.checked?'1':'0');
+  if(e.target.checked&&port) acquireWake(); else releaseWake();
+};
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&port&&$('wakeLock').checked) acquireWake();
+});
+
 // A port the user has already approved can be reopened without the picker, so
 // the page reconnects by itself — which is what makes the Google hop below
 // seamless: consent navigates away, and coming back just picks up the cable.
@@ -854,6 +1003,179 @@ $('btnConnect').onclick=async()=>{
   const ports=await navigator.serial.getPorts();
   if(ports.length===1) await openPort(ports[0]);
 })();
+
+// ---- awaited replies (OTA acks, status) -------------------------------------
+const waiters={};
+function waitFor(type,ms){
+  return new Promise((res,rej)=>{
+    const t=setTimeout(()=>{delete waiters[type];rej(new Error('no reply from the cube'))},ms);
+    waiters[type]=p=>{clearTimeout(t);res(p)};
+  });
+}
+const txt=p=>new TextDecoder().decode(p);
+
+// ---- firmware over the cable -------------------------------------------------
+const OTA_BEGIN=0x48, OTA_DATA=0x49, OTA_END=0x4A, STAT_GET=0x4B;
+let fwBusy=false;
+$('fwFile').onchange=async e=>{
+  const file=e.target.files[0];
+  e.target.value='';
+  if(!file||fwBusy) return;
+  const m=$('fwMsg');
+  if(!writer){ m.textContent='connect the cube first'; m.className='msg err'; return; }
+  const buf=new Uint8Array(await file.arrayBuffer());
+  if(buf.length<4096){ m.textContent='that file is too small to be firmware'; m.className='msg err'; return; }
+  if(buf[0]===0xFF){
+    m.textContent='that looks like firmware.factory.bin (the USB whole-flash image). Use firmware.bin.';
+    m.className='msg err'; return;
+  }
+  if(buf[0]!==0xE9){
+    m.textContent='that is not a firmware image (it does not start with 0xE9)';
+    m.className='msg err'; return;
+  }
+  fwBusy=true;
+  $('fwProg').classList.remove('hide');
+  m.textContent=''; m.className='msg';
+  const prog=(done)=>{
+    const pct=(done/buf.length*100);
+    $('fwBarFill').style.width=pct.toFixed(1)+'%';
+    $('fwProgTxt').textContent=`${fmtBytes(done)} of ${fmtBytes(buf.length)} (${pct.toFixed(0)}%) - keep the cable in`;
+  };
+  try{
+    const sz=new Uint8Array(4);
+    new DataView(sz.buffer).setUint32(0,buf.length,true);
+    await send(OTA_BEGIN,0,sz);
+    const b=txt(await waitFor(OTA_BEGIN,10000));
+    if(b!=='ok') throw new Error(b);
+    log(`firmware update started: ${fmtBytes(buf.length)}`,'l-warn');
+    const CHUNK=1024;
+    for(let o=0;o<buf.length;o+=CHUNK){
+      await send(OTA_DATA,0,buf.subarray(o,Math.min(o+CHUNK,buf.length)));
+      const a=txt(await waitFor(OTA_DATA,20000));
+      if(a) throw new Error(a);
+      if((o/CHUNK)%16===0||o+CHUNK>=buf.length) prog(Math.min(o+CHUNK,buf.length));
+    }
+    await send(OTA_END,0);
+    const v=txt(await waitFor(OTA_END,60000));   // end() verifies the image; allow it time
+    if(v!=='ok') throw new Error(v);
+    $('fwProgTxt').textContent='';
+    m.textContent='flashed! the cube is rebooting and will reconnect by itself.';
+    m.className='msg ok';
+    log('firmware flashed; the cube is rebooting','l-ok');
+  }catch(err){
+    m.textContent='update failed: '+err.message+' - the cube keeps its old firmware.';
+    m.className='msg err';
+    log('firmware update failed: '+err.message,'l-err');
+  }finally{
+    fwBusy=false;
+    setTimeout(()=>$('fwProg').classList.add('hide'),4000);
+  }
+};
+
+// ---- cube status polling -----------------------------------------------------
+let statTimer=null;
+function fmtUp(s){
+  if(s<3600) return Math.floor(s/60)+'m';
+  if(s<86400) return Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m';
+  return Math.floor(s/86400)+'d '+Math.floor(s%86400/3600)+'h';
+}
+async function pollStat(){
+  if(!writer||fwBusy) return;
+  try{
+    await send(STAT_GET,0);
+    const s=JSON.parse(txt(await waitFor(STAT_GET,5000)));
+    $('cubeStat').classList.remove('hide');
+    $('csFw').textContent=s.fw||'-';
+    $('csUp').textContent=fmtUp(s.up||0);
+    $('csHeap').textContent=fmtBytes(s.heap||0);
+    const notes=[];
+    if(s.ticker) notes.push('ticker: '+s.ticker);
+    if(s.weather&&s.weather!=='ok') notes.push('weather: '+s.weather);
+    $('csNotes').textContent=notes.join('  ·  ');
+  }catch(_){/* quiet: the cube may be busy */}
+}
+
+// ---- quick mode switcher -----------------------------------------------------
+function renderQuickModes(){
+  const box=$('quickModes'); box.innerHTML='';
+  if(!cfgDoc) return;
+  for(const o of $('mode').options){
+    const b=document.createElement('button');
+    b.type='button';
+    b.textContent=o.textContent.replace(' (rotate modes)','');
+    b.style.fontSize='13px'; b.style.padding='5px 10px';
+    if(cfgDoc.mode===o.value){ b.classList.add('primary'); }
+    b.onclick=async()=>{ $('mode').value=o.value; await saveCfg(); };
+    box.appendChild(b);
+  }
+}
+
+// ---- backup / restore --------------------------------------------------------
+$('btnBackup').onclick=()=>{
+  if(!cfgDoc){ $('cfgMsg').textContent='nothing loaded to back up'; return; }
+  const d=new Date(), pad=n=>String(n).padStart(2,'0');
+  const name=`smalltv-config-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}.json`;
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([$('raw').value],{type:'application/json'}));
+  a.download=name; a.click();
+  URL.revokeObjectURL(a.href);
+  $('cfgMsg').textContent='backup saved. Secrets never leave the cube, so it carries none.';
+  $('cfgMsg').className='msg';
+};
+$('btnRestore').onclick=()=>$('restoreFile').click();
+$('restoreFile').onchange=async e=>{
+  const f=e.target.files[0]; e.target.value='';
+  if(!f) return;
+  try{
+    const doc=JSON.parse(await f.text());
+    cfgDoc=doc;
+    $('raw').value=JSON.stringify(doc,null,1);
+    fillForm(); renderQuickModes();
+    $('cfgMsg').textContent='backup loaded - review, then Save to cube';
+    $('cfgMsg').className='msg';
+  }catch(err){
+    $('cfgMsg').textContent='not a settings file: '+err.message;
+    $('cfgMsg').className='msg err';
+  }
+};
+
+// ---- network health check ----------------------------------------------------
+const HC=[
+  ['Stocks (stockanalysis.com)','https://stockanalysis.com/api/quotes/s/AAPL','cors'],
+  ['Weather (Open-Meteo)','https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0&current=temperature_2m','cors'],
+  ['City lookup (geocoding)','https://geocoding-api.open-meteo.com/v1/search?name=a&count=1','cors'],
+  ['Google (calendar + OAuth)','https://oauth2.googleapis.com/token','any'],
+  ['Microsoft (Outlook)','https://login.microsoftonline.com/common/oauth2/v2.0/token','any'],
+  ['GitHub (self-update)','https://api.github.com','cors'],
+];
+$('btnHealth').onclick=async()=>{
+  const rows=$('hcRows'); rows.innerHTML='';
+  $('hcMsg').textContent='checking...';
+  let bad=0;
+  for(const [name,url,kind] of HC){
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;gap:8px;align-items:center;padding:4px 0';
+    row.innerHTML=`<span style="width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none"></span><span>${name}</span><span class="hint" style="margin-left:auto">...</span>`;
+    rows.appendChild(row);
+    const dot=row.children[0], res=row.children[2];
+    try{
+      const ctl=new AbortController();
+      const to=setTimeout(()=>ctl.abort(),8000);
+      const r=await fetch(url,{signal:ctl.signal,mode:kind==='cors'?'cors':'no-cors',cache:'no-store'});
+      clearTimeout(to);
+      // any HTTP answer (even a 4xx, even opaque) means the host is reachable
+      dot.style.background='var(--ok)';
+      res.textContent=kind==='cors'&&r.status?('HTTP '+r.status):'reachable';
+    }catch(err){
+      dot.style.background='var(--err)';
+      res.textContent='unreachable';
+      bad++;
+    }
+  }
+  $('hcMsg').textContent=bad?bad+' service(s) unreachable - this network is filtering or offline'
+                            :'all reachable from this computer';
+  $('hcMsg').className='msg '+(bad?'err':'ok');
+};
 
 // ---- Google linking ---------------------------------------------------------
 // The auth-code flow with this page as the redirect target. The token endpoint

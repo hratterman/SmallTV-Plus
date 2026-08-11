@@ -1,0 +1,13 @@
+{
+  "name": "SmallTV Tether",
+  "short_name": "Tether",
+  "description": "Lends this computer's internet to a SmallTV cube over its USB cable, and configures it.",
+  "start_url": "./tether.html",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    { "src": "tether-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "tether-icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

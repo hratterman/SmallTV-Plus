@@ -59,6 +59,15 @@ enum SerialFrameType : uint8_t {
   SF_ICS_DATA    = 0x46,   // host: a slice of a calendar (.ics) file
   SF_ICS_END     = 0x47,   // host: that was all of it; device replies with the same
                            // type carrying "ok: N events" or the reason not
+
+  // Firmware over the same cable: a tethered cube may never join WiFi, and
+  // without this it could never be updated again. Same Update machinery and
+  // wrong-file guard as the web upload; the page paces itself on the per-chunk
+  // acks (empty reply = written, text = the reason it stopped).
+  SF_OTA_BEGIN   = 0x48,   // host: 4-byte LE image size; device replies "ok"/reason
+  SF_OTA_DATA    = 0x49,   // host: a slice; device acks with empty same-type frame
+  SF_OTA_END     = 0x4A,   // host: done; device replies "ok" then reboots, or the reason
+  SF_STAT_GET    = 0x4B,   // host: send a small status JSON; device replies same type
 };
 
 // CRC-16/CCITT-FALSE. Chosen for being three lines rather than for pedigree —

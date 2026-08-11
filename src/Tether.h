@@ -37,6 +37,14 @@ void tetherBegin();
 // bytes as they arrive; done() finishes the parse and returns a short status
 // string for the host ("ok: 3 events" / why not). Registered by main.cpp only
 // when the calendar feature is compiled in.
+// Firmware-over-the-cable sinks (begin gets the total size; data returns
+// nullptr to ack or the reason to stop; done returns nullptr = flashed, and
+// the caller schedules the reboot). And the one-frame status report.
+void tetherOnOta(const char* (*begin)(uint32_t size),
+                 const char* (*data)(const uint8_t* p, uint16_t n),
+                 const char* (*done)());
+void tetherOnStatus(void (*fill)(String& out));
+
 void tetherOnIcs(void (*feed)(const uint8_t* data, uint16_t len),
                  const char* (*done)());
 

@@ -39,6 +39,20 @@ static const char* (*s_cfgApply)(const String&) = nullptr;
 static void        (*s_icsFeed)(const uint8_t*, uint16_t) = nullptr;
 static const char* (*s_icsDone)() = nullptr;
 
+static const char* (*s_otaBegin)(uint32_t) = nullptr;
+static const char* (*s_otaData)(const uint8_t*, uint16_t) = nullptr;
+static const char* (*s_otaDone)() = nullptr;
+static void (*s_statusFill)(String&) = nullptr;
+
+void tetherOnOta(const char* (*begin)(uint32_t), const char* (*data)(const uint8_t*, uint16_t),
+                 const char* (*done)()) {
+  s_otaBegin = begin;
+  s_otaData = data;
+  s_otaDone = done;
+}
+
+void tetherOnStatus(void (*fill)(String&)) { s_statusFill = fill; }
+
 void tetherOnIcs(void (*feed)(const uint8_t*, uint16_t), const char* (*done)()) {
   s_icsFeed = feed;
   s_icsDone = done;
@@ -135,6 +149,43 @@ static bool handleAside(uint8_t type, const uint8_t* p, uint16_t n) {
       const char* r = s_icsDone ? s_icsDone() : "calendar not compiled in";
       writeFrame(SF_ICS_END, 0, (const uint8_t*)r, (uint16_t)strlen(r));
       Serial.printf("[tether] calendar import: %s\n", r);
+      return true;
+    }
+    case SF_OTA_BEGIN: {
+      s_lastHeard = millis();
+      uint32_t sz = 0;
+      if (n >= 4)
+        sz = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+             ((uint32_t)p[3] << 24);
+      const char* r = s_otaBegin ? s_otaBegin(sz) : "updates not compiled in";
+      const char* reply = r ? r : "ok";
+      writeFrame(SF_OTA_BEGIN, 0, (const uint8_t*)reply, (uint16_t)strlen(reply));
+      Serial.printf("[tether] ota begin %lu: %s\n", (unsigned long)sz, reply);
+      return true;
+    }
+    case SF_OTA_DATA: {
+      s_lastHeard = millis();
+      const char* r = s_otaData ? s_otaData(p, n) : "updates not compiled in";
+      // Empty reply is the ack the page paces itself on; text stops it early.
+      writeFrame(SF_OTA_DATA, 0, (const uint8_t*)(r ? r : ""), r ? (uint16_t)strlen(r) : 0);
+      return true;
+    }
+    case SF_OTA_END: {
+      s_lastHeard = millis();
+      const char* r = s_otaDone ? s_otaDone() : "updates not compiled in";
+      const char* reply = r ? r : "ok";
+      writeFrame(SF_OTA_END, 0, (const uint8_t*)reply, (uint16_t)strlen(reply));
+      Serial.flush();          // the reboot follows; the verdict must get out first
+      Serial.printf("[tether] ota end: %s\n", reply);
+      return true;
+    }
+    case SF_STAT_GET: {
+      s_lastHeard = millis();
+      String out;
+      if (s_statusFill) s_statusFill(out);
+      if (!out.length()) out = "{}";
+      uint16_t len = out.length() > SF_MAX_PAYLOAD ? SF_MAX_PAYLOAD : (uint16_t)out.length();
+      writeFrame(SF_STAT_GET, 0, (const uint8_t*)out.c_str(), len);
       return true;
     }
     case SF_HELLO_ACK:

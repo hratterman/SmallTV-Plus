@@ -56,8 +56,12 @@
 #include "CalendarMode.h"
 #include "CalendarClient.h"
 #endif
+#if WITH_TICKER
+#include "StockClient.h"
+#endif
 #if WITH_WEATHER
 #include "WeatherMode.h"
+#include "WeatherClient.h"
 #endif
 #if HAS_TOUCH
 #include "Touch.h"
@@ -200,6 +204,31 @@ static bool nightMiningActive(const Settings& s) {
 }
 
 static Settings g_settings;
+
+#if WITH_TETHER
+// The one-frame status the tether page polls: the diagnostics that until now
+// could only be read off the panel with a phone camera.
+static void tetherStatusFill(String& out) {
+  JsonDocument d;
+  d["fw"] = FW_VERSION;
+  d["up"] = (uint32_t)(millis() / 1000);
+  d["heap"] = (uint32_t)ESP.getFreeHeap();
+  d["blk"] = (uint32_t)platformMaxFreeBlock();
+  d["mode"] = g_settings.mode;
+#if WITH_TICKER
+  if (stocksNote()[0]) d["ticker"] = stocksNote();
+#endif
+#if WITH_WEATHER
+  {
+    const WeatherData& w = weatherGet();
+    if (w.error && w.errMsg[0]) d["weather"] = w.errMsg;
+    else if (w.valid) d["weather"] = "ok";
+  }
+#endif
+  serializeJson(d, out);
+}
+#endif
+
 static String   g_resetReason;        // why the chip last reset (diagnostics)
 static bool     g_safeMode = false;   // last reset was an exception -> don't re-enter the crash
 static char     g_epcStr[16] = "";
@@ -417,6 +446,10 @@ void setup() {
   // A .ics file dropped on the tether page: the one calendar form that always
   // crosses the cable, because browsers may download what scripts may not read.
   tetherOnIcs(calendarImportFeed, calendarImportDone);
+#endif
+#if WITH_TETHER
+  tetherOnOta(otaCableBegin, otaCableWrite, otaCableEnd);
+  tetherOnStatus(tetherStatusFill);
 #endif
   tetherOnConfig(
       [](String& out) {

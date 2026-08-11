@@ -146,11 +146,20 @@ console.log('\n--- the page itself -----------------------------------------');
   for (const [name, val] of [['SF_CFG_GET', 0x40], ['SF_CFG_DATA', 0x41],
                              ['SF_CFG_END', 0x42], ['SF_CFG_SET', 0x43],
                              ['SF_CFG_APPLY', 0x44], ['SF_CFG_OK', 0x45],
-                             ['SF_ICS_DATA', 0x46], ['SF_ICS_END', 0x47]]) {
+                             ['SF_ICS_DATA', 0x46], ['SF_ICS_END', 0x47],
+                             ['SF_OTA_BEGIN', 0x48], ['SF_OTA_DATA', 0x49],
+                             ['SF_OTA_END', 0x4A], ['SF_STAT_GET', 0x4B]]) {
     const hdr = readFileSync(join(root, 'src/SerialFrame.h'), 'utf8');
     const m = hdr.match(new RegExp(name + '\\s*=\\s*(0x[0-9a-fA-F]+)'));
     ck(m && parseInt(m[1], 16) === val, `${name} matches the firmware (0x${val.toString(16)})`);
   }
+
+  // The page's own OTA/status constants, same agreement.
+  const pm = script.match(
+      /OTA_BEGIN=(0x[0-9a-fA-F]+),\s*OTA_DATA=(0x[0-9a-fA-F]+),\s*OTA_END=(0x[0-9a-fA-F]+),\s*STAT_GET=(0x[0-9a-fA-F]+)/);
+  ck(pm && parseInt(pm[1], 16) === 0x48 && parseInt(pm[2], 16) === 0x49 &&
+         parseInt(pm[3], 16) === 0x4A && parseInt(pm[4], 16) === 0x4B,
+     'the page\'s OTA/status frame numbers match the firmware');
 }
 
 

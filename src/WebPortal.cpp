@@ -464,6 +464,61 @@ static const char* otaRejectReason(const uint8_t* buf, size_t len) {
   return "that is not a firmware image (it does not start with 0xE9)";
 }
 
+// ---- OTA over the tether cable --------------------------------------------
+// Same Update machinery and the same wrong-file guard as the web upload; the
+// bytes just arrive as serial frames (see Tether.cpp). A tethered cube may
+// never join WiFi, and without this it could never be updated again.
+static bool s_cableOta = false;
+
+const char* otaCableBegin(uint32_t totalSize) {
+  if (s_cableOta) platformUpdateAbort();       // a fresh start supersedes
+#if defined(SMALLTV_ESP8266)
+  WiFiUDP::stopAll();
+#endif
+  s_otaReject = nullptr;
+  s_otaSawFirst = false;
+  const uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+  if (totalSize == 0) return "empty image";
+  if (totalSize > maxSpace) return "image larger than the OTA space";
+  if (!Update.begin(totalSize)) {
+    Update.printError(Serial);
+    return "could not start the update";
+  }
+  s_cableOta = true;
+  return nullptr;
+}
+
+const char* otaCableWrite(const uint8_t* p, uint16_t n) {
+  if (!s_cableOta) return "no update in progress";
+  if (!s_otaSawFirst) {
+    s_otaSawFirst = true;
+    s_otaReject = otaRejectReason(p, n);
+    if (s_otaReject) {
+      platformUpdateAbort();
+      s_cableOta = false;
+      return s_otaReject;
+    }
+  }
+  if (Update.write((uint8_t*)p, n) != n) {
+    Update.printError(Serial);
+    platformUpdateAbort();
+    s_cableOta = false;
+    return "flash write failed";
+  }
+  return nullptr;
+}
+
+const char* otaCableEnd() {
+  if (!s_cableOta) return "no update in progress";
+  s_cableOta = false;
+  if (!Update.end(true)) {
+    Update.printError(Serial);
+    return "update incomplete";
+  }
+  scheduleReboot(1200);                        // the ack flushes first
+  return nullptr;
+}
+
 static void handleUpdateDone() {
   const bool ok = !Update.hasError() && !s_otaReject;
   const String err = s_otaReject ? String(s_otaReject) : platformUpdateError();
