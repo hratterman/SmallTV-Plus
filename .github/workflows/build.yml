@@ -33,8 +33,17 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
+      # IDF-based envs FIRST. On a fresh checkout the C2 env generates its
+      # sdkconfig and restarts the build in a nested pio invocation, and that
+      # restart wipes the build dirs of envs already built - which silently
+      # deleted the ESP8266 images and failed the staging step on every CI run
+      # (locally the sdkconfig persists, so it never reproduced). With the
+      # ESP8266 envs last, there is nothing behind them to wipe.
       - name: Build firmware (all targets)
-        run: pio run -e smalltv -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_8mb -e smalltv_loader
+        run: pio run -e smalltv_c2 -e smalltv_esp32 -e smalltv_esp32_8mb -e smalltv -e smalltv_loader
+
+      - name: List build products
+        run: ls -la .pio/build/*/firmware*.bin
 
       # One app image per target (web-UI OTA + GitHub self-update), the merged
       # factory images for first-time USB flashing of the ESP32 boards, and the

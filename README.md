@@ -1,135 +1,140 @@
-<p align="center">
-  <img src="docs/src/assets/logo.svg" alt="smalltv-mod" width="96" />
-</p>
-
 <h1 align="center">smalltv-mod</h1>
 
 <p align="center">
-  <a href="https://github.com/giovi321/smalltv-mod/actions/workflows/build.yml"><img src="https://github.com/giovi321/smalltv-mod/actions/workflows/build.yml/badge.svg" alt="Build"></a>
-  <a href="https://github.com/giovi321/smalltv-mod/actions/workflows/docs.yml"><img src="https://github.com/giovi321/smalltv-mod/actions/workflows/docs.yml/badge.svg" alt="Docs"></a>
+  <a href="https://github.com/hratterman/smalltv-mod-claude/actions/workflows/build.yml"><img src="https://github.com/hratterman/smalltv-mod-claude/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-WTFPL-blue.svg" alt="License: WTFPL"></a>
   <img src="https://img.shields.io/badge/platform-ESP8266%20%7C%20ESP32--C2%20%7C%20ESP32-informational" alt="ESP8266, ESP32-C2, and ESP32">
 </p>
 
-<p align="center">
-  <a href="https://giovi321.github.io/smalltv-mod/"><img src="https://img.shields.io/badge/Read_the_docs-2563eb?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Read the documentation"></a>
-</p>
-
-> Not affiliated with GeekMagic or Anthropic. This firmware replaces the stock firmware entirely.
-
-The GeekMagic SmallTV is a cheap desk gadget: a little cube with a 1.54" colour screen, an ESP inside, and a USB-C port. This firmware throws away the stock apps and turns it into three things you actually watch. It shows a **stock and crypto ticker** with prices, change, and a sparkline. It flips into a **Claude usage meter** with an animated mascot and your 5-hour and 7-day usage bars. And it becomes a **live plane radar** centred on your location, pulled from a free public feed. One image carries all three; you switch between them in a built-in web UI, and you update over WiFi.
-
-This firmware builds for five boards from one codebase. The original SmallTV runs an **ESP8266**; the **SmallTV-ultra** is the same ESP-12F hardware and screen, but its stock "Ultra" firmware and flash partitions block a normal OTA of this image, so it takes a two-step loader install (see [Flashing](#flashing)); a second version sold under the same "smart weather clock" look uses an **ESP32-C2 (ESP8684)** instead. A third build targets the **NMMiner NM-TV-154** (PCB marked "NM-TV-Miner"), a classic-ESP32 BTC lottery miner in the same cube with the same screen, confirmed working by a community tester in [issue #1](https://github.com/giovi321/smalltv-mod/issues/1). A fourth build targets the **GeekMagic SmallTV Pro**, a classic ESP32 with 8 MB flash and a touch button, confirmed working on hardware. Pick yours below.
+> A fork of [giovi321/smalltv-mod](https://github.com/giovi321/smalltv-mod) — open firmware for the
+> GeekMagic SmallTV family of desk cubes. The upstream project's three modes grew here into eleven,
+> plus a USB tether that gives the cube internet with no WiFi at all, real typography on the panel,
+> and a bitcoin miner rebuilt in the open. Not affiliated with GeekMagic or Anthropic; this firmware
+> replaces the stock firmware entirely.
 
 <p align="center">
-  <img src="docs/public/assets/screen.svg" alt="The SmallTV running its three modes: stock ticker, Claude usage, and plane radar" width="900" />
+  <img src="docs/public/assets/fork-modes.png" alt="Five of the modes: ticker, Claude usage, clock, miner, weather" width="900" />
 </p>
 
-## Which one do I have
+## What it shows
 
-Check the board before you build, because the variants flash differently.
+One image carries every mode; you pick one in the web UI, rotate through them on a carousel, or
+step through them with a tap on the lid.
+
+- **Stock & crypto ticker** — price, change, sparkline chart, portfolio P/L. Yahoo Finance,
+  stockanalysis.com (with automatic failover between them), cash.ch for Swiss instruments, or your
+  own webhook.
+- **Weather** — current conditions with drawn icons, today's high/low, three-day forecast. Powered
+  by Open-Meteo: no API key, no account; set your location by typing a city name.
+- **Clock** — three faces: classic pixels, real sans type, or seven-segment alarm-clock digits.
+  NTP-synced, 12/24h, seconds bar, night schedule.
+- **Calendar** — your next obligation with a live countdown, then what follows. Easiest setup is
+  pasting a calendar's secret iCal link; Google and Microsoft OAuth are supported too, including an
+  on-device code flow for Outlook.
+- **Claude usage meter** — 5-hour and 7-day usage bars with an animated pixel mascot, fed by the
+  [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon).
+- **Plane radar** — live ADS-B scope centred on your location, from adsb.fi.
+- **Bitcoin miner** — a real solo lottery miner against your own pool, ported from NerdMiner_v2
+  onto this hardware's SHA engine (~375 kH/s hybrid, every optimisation measured on-device).
+- **Spotify now playing** — art, track, artist, progress; can take the screen automatically while
+  music plays.
+- **Ambient patterns** — Conway's Life, plasma, starfield, rain, fireworks; pick which ones and
+  how they rotate.
+- **Blackjack** — played entirely with the lid's touch pad.
+
+## Beyond the modes
+
+- **The USB tether.** Plug the cube into any computer and open a single static web page: the cube
+  borrows that browser's internet — no WiFi ever needed. The same page is a full control panel
+  (settings, city lookup for weather, calendar file drop) and can **flash firmware updates over the
+  cable**, so a tethered cube is never stranded. It installs as a desktop app, reconnects by itself
+  when replugged, and includes a network health check that tells "cube problem" from "network
+  problem" in one glance. See [docs/tether-hosting.md](docs/tether-hosting.md) for standing it up.
+- **A typeface setting.** The classic pixel look, or real rasterised type (LiberationSans) across
+  the whole system — big numerals, headings, labels, the clock. The fonts are generated,
+  self-tested against every screen's layout budget, and previewed pixel-for-pixel before they ever
+  touch the panel (`tools/gen_font.py`, `tools/render_faces.py`).
+- **Touch controls.** Tap steps modes, double-tap blanks the screen, long-press does something
+  useful per mode (radar range, ambient pattern, blackjack input).
+- **Night mining.** On a schedule the screen goes fully dark, rendering stops, and every cycle
+  goes to the miner. A tap wakes the screen for a look.
+- **Work mode.** One switch: mining refused outright on the office network, explicit words masked
+  on screen.
+- **Notifications.** `POST /notify` flashes a banner on the cube from anything on your LAN.
+- **Diagnostics that speak.** Fetch failures name the host, HTTP code, resolved IP, and TLS error
+  on screen; `/api/status` and the tether page carry the same detail. A custom-DNS setting routes
+  around filtering resolvers on hotel/hotspot networks.
+
+## Which cube do I have
+
+The build targets five boards from one codebase. Check before flashing — the variants install
+differently.
 
 | | SmallTV (ESP8266) | SmallTV-ultra | SmallTV (ESP32-C2) | NM-TV-154 (ESP32) | SmallTV Pro (ESP32) |
 |---|---|---|---|---|---|
-| Photo | <img src="docs/public/assets/product-8266.png" alt="The SmallTV (ESP8266)" width="240"> | <img src="docs/public/assets/product-ultra.png" alt="The SmallTV-ultra" width="240"> | <img src="docs/public/assets/product-c2.png" alt="The SmallTV (ESP32-C2)" width="240"> | <img src="docs/public/assets/product-esp32.png" alt="The NM-TV-154 (ESP32)" width="240"> | <img src="docs/public/assets/product-pro.png" alt="The GeekMagic SmallTV Pro" width="240"> |
-| MCU | ESP-12F (ESP8266), 4 MB flash | same ESP-12F (ESP8266), 4 MB flash | ESP32-C2 / ESP8684, 4 MB flash | ESP32-WROOM-32E, 4 MB flash | classic ESP32, 8 MB flash |
-| Build env | `smalltv` | `smalltv` (same image, `smalltv_loader` to install) | `smalltv_c2` | `smalltv_esp32` | `smalltv_esp32_8mb` |
-| Display | 1.54" 240×240 IPS ST7789 | same panel | same panel, RGB order | same panel | same panel |
-| Flashing | OTA from the stock web UI, or UART header | two-step [loader](#flashing) then OTA, or UART | USB-C via the onboard CH340C (esptool) | USB via esptool | OTA from the stock web UI, or UART header |
-| Tell-tale | ESP8266 module, no USB-serial chip | stock firmware branded "Ultra", OTA of this image fails with "Not Enough Space" | CH340C chip next to the USB-C port | PCB reads "NM-TV-Miner" | sold as "SmallTV Pro", touch button on top |
+| MCU | ESP-12F, 4 MB | same ESP-12F | ESP32-C2 / ESP8684, 4 MB | ESP32-WROOM-32E, 4 MB | classic ESP32, 8 MB |
+| Build env | `smalltv` | `smalltv` (install via `smalltv_loader`) | `smalltv_c2` | `smalltv_esp32` | `smalltv_esp32_8mb` |
+| Flashing | OTA from stock web UI, or UART | two-step loader, then OTA | USB-C (esptool, CH340C) | USB (esptool) | OTA from stock web UI |
+| Tell-tale | ESP8266 module, no USB-serial chip | stock firmware branded "Ultra" | CH340C beside the USB-C port | PCB reads "NM-TV-Miner" | sold as "SmallTV Pro", touch button |
 
-The screens in the photos above are each unit's **stock firmware**, not this one, and they differ by model and firmware version (the ultra ships as a weather clock, the original as a ticker, and so on). Use the on-screen look as a first clue to which model you are holding, then confirm with the tell-tale row, because the binary and the install method differ per model. If your board has a **CH340C** chip beside the USB-C port and the main chip reads **ESP8684**, you have the ESP32-C2 model. Full teardown photos and pin maps are in [Hardware and variants](https://giovi321.github.io/smalltv-mod/getting-started/hardware/).
+All five share the same 1.54" 240×240 ST7789 IPS panel. Full teardown photos and pin maps are in
+the [upstream hardware docs](https://giovi321.github.io/smalltv-mod/getting-started/hardware/).
 
-## What it does
-
-- **Stock and crypto ticker.** Price, absolute change, percent change with an up/down arrow, and a sparkline. Up to 8 symbols rotate on a timer. Data comes straight from Yahoo Finance over HTTPS with no backend, from cash.ch for Swiss instruments Yahoo doesn't carry (structured products, AMCs, tracker certificates), or from your own webhook if you want to own the source. Stocks, ETFs, Swiss equities (`NESN.SW`), crypto (`BTC-USD`), and FX (`EURUSD=X`) all work. Add a quantity and cost basis to any ticker and it shows your P/L, with a portfolio summary page in the rotation.
-- **Claude usage meter.** An animated pixel mascot plus your 5-hour and 7-day usage as big percentages with fill bars and reset countdowns. It is fed over WiFi by the [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon) on your PC. When the data stops, the mascot plays an idle animation until it comes back. Running several devices, the daemon discovers them over mDNS and pushes to all of them.
-- **Plane radar.** A scope centred on your location with nearby aircraft as heading triangles, speed vectors, and callsign or altitude labels, from the free [adsb.fi](https://adsb.fi) API or a LAN webhook. Marker size, an altitude filter, and label decluttering are configurable.
-- **Web UI for everything.** Join WiFi (up to 4 saved networks), pick the mode or a carousel that rotates through them, manage the symbol list, set brightness, orientation, and colours, set an NTP timezone and a nightly dimming schedule (night brightness, 0 = screen off), and back up or restore the whole configuration as a file. First boot creates a `SmallTV-Setup` hotspot with a captive portal.
-- **Updates over WiFi.** Every board pulls the newest release from GitHub itself from the web UI's Update tab, or takes a manual firmware upload from the browser. On the ESP8266 the download runs at boot (the device reboots twice). **Warning: ESP8266 devices on firmware 2.6.1 or older cannot self-update** (the updater itself was broken; it fails with "connection failed"). Update those once manually: upload `smalltv-mod-firmware.bin` from the [Releases page](https://github.com/giovi321/smalltv-mod/releases) in the Update tab. From 2.7.0 on, self-update works everywhere.
-
-## Get the firmware
-
-You do not need a toolchain. GitHub Actions builds the images for all the boards.
-
-- Every push: the **Actions** tab, latest `build` run, download the firmware artifact.
-- Tagged releases (`vX.Y.Z`): attached to the [Releases](../../releases) page.
-
-Or [build it yourself](#building-from-source).
-
-## Flashing
-
-The right method depends on your board. The steps below are the short version; the [Flashing guide](https://giovi321.github.io/smalltv-mod/getting-started/flashing/) covers recovery, backups, and troubleshooting.
-
-**SmallTV (ESP8266).** The stock firmware exposes an OTA updater, so you can install this without opening the device. Find its IP, browse to `http://<device-ip>/update`, and upload `smalltv-mod-firmware.bin`. Back up the stock image first if you might want it back.
-
-**SmallTV-ultra.** Same ESP8266 hardware, but the stock "Ultra" firmware reserves most of the flash for image storage, so its OTA slot is too small for `smalltv-mod-firmware.bin` and rejects it with `Not Enough Space`. Install in two steps, no soldering: flash `smalltv-mod-loader.bin` at `http://<device-ip>/update` (it fits the small slot), join the open `SmallTV-Loader` AP it opens at `192.168.4.1`, then upload `smalltv-mod-firmware.bin` at `http://192.168.4.1/update`. UART is the fallback (`esptool write_flash 0x0 smalltv-mod-firmware.bin`).
-
-**SmallTV (ESP32-C2).** Flash over the USB-C cable with esptool, which talks to the onboard CH340C. Auto-reset works, so no button is needed. Back up the stock image first, then write `smalltv-mod-firmware-c2.factory.bin` from the [Releases](../../releases) page:
-
-```bash
-# back up the original 4 MB image first
-python -m esptool --chip esp32c2 --port COM3 read_flash 0x0 0x400000 stock-backup.bin
-
-# write this firmware (merged image at 0x0)
-python -m esptool --chip esp32c2 --port COM3 --baud 921600 write_flash 0x0 smalltv-mod-firmware-c2.factory.bin
-```
-
-**NM-TV-154 (ESP32).** Flash over USB with esptool the same way as the C2, with `--chip esp32` and `smalltv-mod-firmware-esp32.factory.bin` from the [Releases](../../releases) page (or a local `pio run -e smalltv_esp32` build). Back up the stock image first (`read_flash 0x0 0x400000 stock-backup.bin`).
-
-**SmallTV Pro (ESP32, 8 MB).** No USB-serial chip — the USB-C port is power only. Install over the air from the stock web UI: browse to `http://<device-ip>/update` and upload `smalltv-mod-firmware-esp32-pro.bin` (this firmware's partition layout matches stock, so the stock updater takes it directly). To back up the stock image first (recommended — it is not redistributed anywhere), or to recover, open the case and wire a 3.3 V USB-UART adapter to the internal header: `read_flash 0x0 0x800000 stock-backup.bin`, and `write_flash 0x0 smalltv-mod-firmware-esp32-pro.factory.bin` for a direct install.
-
-After the first flash, every board updates from the browser under the web UI's Update tab.
-
-## First-time setup
-
-1. On first boot the device shows **SETUP MODE** and creates an open `SmallTV-Setup` hotspot.
-2. Join it. A captive portal should open; if not, browse to `http://192.168.4.1`.
-3. Open **WiFi**, scan, pick your 2.4 GHz network, enter the password, and save. The device reboots and joins.
-4. It shows the network, its IP, and its `http://<hostname>.local` address on screen. Browse to either one.
-5. Add a few tickers under **Ticker** (for example `AAPL`, `NESN.SW`, `BTC-USD`). Each ticker picks its own source; Yahoo Finance is the default, so it works immediately.
-
-The [First-time setup guide](https://giovi321.github.io/smalltv-mod/getting-started/setup/) walks through the web UI tab by tab.
-
-## Documentation
-
-Full docs live at **[giovi321.github.io/smalltv-mod](https://giovi321.github.io/smalltv-mod/)**:
-
-- Received one already set up (as a gift, say)? Start at the [user manual](https://giovi321.github.io/smalltv-mod/manual/quick-start/) instead, no technical background assumed
-- [Hardware and variants](https://giovi321.github.io/smalltv-mod/getting-started/hardware/) with pin maps for every board
-- [Flashing](https://giovi321.github.io/smalltv-mod/getting-started/flashing/) and [first-time setup](https://giovi321.github.io/smalltv-mod/getting-started/setup/)
-- The three modes: [ticker](https://giovi321.github.io/smalltv-mod/features/ticker/), [Claude usage](https://giovi321.github.io/smalltv-mod/features/usage/), [plane radar](https://giovi321.github.io/smalltv-mod/features/radar/)
-- [Data sources](https://giovi321.github.io/smalltv-mod/reference/data-sources/), [building from source](https://giovi321.github.io/smalltv-mod/reference/building/), and [recovery](https://giovi321.github.io/smalltv-mod/reference/recovery/)
-
-## Building from source
+## Building and flashing
 
 Requires [PlatformIO](https://platformio.org/). Pick the env for your board:
 
 ```bash
+pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32)
 pio run -e smalltv                 # ESP8266
 pio run -e smalltv_c2              # ESP32-C2
-pio run -e smalltv_esp32           # NM-TV-154 (classic ESP32)
 pio run -e smalltv_esp32_8mb       # SmallTV Pro (classic ESP32, 8 MB)
 pio run -e smalltv_c2 -t upload    # build + flash the C2 over USB-C
-pio device monitor -e smalltv_c2   # serial logs @ 115200
+pio device monitor                 # serial logs @ 115200
 ```
 
-The four targets share one codebase. Chip differences live in `src/Platform.h` and the per-board pin headers (`src/board_esp8266.h`, `src/board_esp32c2.h`, `src/board_esp32.h`, `src/board_esp32_pro.h`); the three feature modes and the web UI are identical across all of them. See [Building from source](https://giovi321.github.io/smalltv-mod/reference/building/) for the project layout and the ESP32 toolchain notes.
+Every push also builds all five targets in CI; the images land as a workflow artifact
+(`smalltv-mod-firmware`) on the [Actions page](../../actions).
 
-The PC-side usage daemon lives in its own repo: [clawdmeter-daemon](https://github.com/giovi321/clawdmeter-daemon).
+- **First flash on USB-capable boards** (`esptool`): write `firmware.factory.bin` at `0x0`. Back
+  up the stock image first (`read_flash 0x0 0x400000 stock-backup.bin`).
+- **First flash on OTA-only boards**: upload the matching `firmware.bin` through the stock web UI
+  (the ultra needs the two-step loader — see the
+  [upstream flashing guide](https://giovi321.github.io/smalltv-mod/getting-started/flashing/)).
+- **After the first flash**: update from the web UI's Update tab over WiFi — or over the USB
+  tether, no WiFi involved.
 
-## Credits and references
+## First-time setup
 
-- GeekMagic SmallTV and SmallTV-Pro, the original product and stock firmware ([GeekMagicClock/smalltv-pro](https://github.com/GeekMagicClock/smalltv-pro)).
-- Pin maps and hardware notes from the ESPHome and Tasmota communities:
-  - [ViToni/esphome-geekmagic-smalltv](https://github.com/ViToni/esphome-geekmagic-smalltv)
-  - [Installing ESPHome on a new smart weather clock (HA community)](https://community.home-assistant.io/t/installing-esphome-on-new-smart-weather-clock-wifi-weather-station-display/1006172), which documented the ESP32-C2 pin map
-  - [Puddle of Code, My Own GeekMagic SmallTV](https://puddleofcode.com/story/my-own-geekmagic-smalltv/)
-  - [NMMiner's NM-TV-154 custom firmware guide](https://www.nmminer.com/2026/03/02/how-to-develop-nm-tv-custom-firmware/), which documents the NM-TV-154 pin map
-- The plane radar's look reimplements [MatixYo/ESP32-Plane-Radar](https://github.com/MatixYo/ESP32-Plane-Radar), a sonar-style ADS-B radar for a 1.28" round display: heading triangles, speed vectors, callsign and altitude tags, and rim dots for out-of-range traffic all come from that design.
-- Claude usage mode reimplements [clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) for this hardware; the mascot frames come from [claudepix](https://claudepix.vercel.app).
-- Libraries: [Arduino_GFX](https://github.com/moononournation/Arduino_GFX), [ArduinoJson](https://arduinojson.org/).
+1. On first boot the cube shows **SETUP MODE** and creates an open `SmallTV-Setup` hotspot.
+2. Join it; a captive portal opens (or browse to `http://192.168.4.1`).
+3. Pick your 2.4 GHz network under **WiFi** and save. The cube reboots and joins.
+4. It shows its IP and `http://<hostname>.local` on screen — open either in a browser.
+5. Configure any mode in its own tab. The ticker works immediately with a few symbols
+   (`AAPL`, `BTC-USD`); weather needs only a city lookup.
 
-## License
+No WiFi available at all? Skip everything above and use the
+[USB tether](docs/tether-hosting.md) instead.
 
-[WTFPL](LICENSE). Do What The F*ck You Want To Public License.
+## Documentation
+
+- [Hosting & using the USB tether](docs/tether-hosting.md) — the handoff guide
+- [What works over the tether, measured](docs/tether-limits.md) — per-service CORS findings
+- [Upstream docs](https://giovi321.github.io/smalltv-mod/) — hardware, flashing, recovery, and the
+  original three modes in depth
+
+## Development
+
+The firmware is exercised without hardware wherever possible: **16 host-side self-test suites**
+(`tools/*_selftest`) cover the ICS/RRULE calendar engine, the generated fonts against every
+screen's layout budget, the WMO weather mapping, the serial framing, HTTP chunk decoding, the
+miner's protocol arithmetic, and more. `tools/render_faces.py` renders every screen to PNG from
+the same generated data the firmware compiles, so visual changes are reviewed before they are
+flashed. CI builds all five targets on every push.
+
+## Credits & license
+
+Forked from [giovi321/smalltv-mod](https://github.com/giovi321/smalltv-mod), which carries the
+hardware bring-up, the original three modes, the web UI foundation, and the docs site. The miner
+core is ported from [NerdMiner_v2](https://github.com/BitMaker-hub/NerdMiner_v2). Licensed
+[WTFPL](LICENSE), same as upstream.
