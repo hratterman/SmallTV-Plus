@@ -1,4 +1,4 @@
-// smalltv-mod — custom firmware for the GeekMagic SmallTV (ESP-12F / ESP8266)
+// smalltv-plus — custom firmware for the GeekMagic SmallTV family
 //
 // Three features, each a self-contained DisplayMode (see Mode.h), picked in the
 // web UI and dispatched from the registry below:

@@ -1,4 +1,4 @@
-// config.h — compile-time constants for smalltv-mod
+// config.h — compile-time constants for smalltv-plus
 //
 // Hardware: three board variants, all a 1.54" 240x240 ST7789 IPS panel:
 //   - Original GeekMagic SmallTV: ESP-12F (ESP8266)      [board_esp8266.h]
@@ -11,22 +11,22 @@
 // ---------------------------------------------------------------------------
 // Firmware identity
 // ---------------------------------------------------------------------------
-#define FW_NAME     "smalltv-mod"
+#define FW_NAME     "smalltv-plus"
 #define FW_VERSION  "2.8.2"
 
 // Project / update references (shown in the web UI; used by the GitHub self-update)
-#define REPO_URL      "https://github.com/giovi321/smalltv-mod"
-#define REPO_OWNER    "giovi321"
-#define REPO_NAME     "smalltv-mod"
+#define REPO_URL      "https://github.com/hratterman/smalltv-plus"
+#define REPO_OWNER    "hratterman"
+#define REPO_NAME     "smalltv-plus"
 // Release asset the GitHub self-updater pulls — one app image per target.
 #if defined(SMALLTV_ESP32C2)
-  #define UPDATE_ASSET "smalltv-mod-firmware-c2.bin"
+  #define UPDATE_ASSET "smalltv-plus-firmware-c2.bin"
 #elif defined(SMALLTV_ESP32_PRO)
-  #define UPDATE_ASSET "smalltv-mod-firmware-esp32-pro.bin"
+  #define UPDATE_ASSET "smalltv-plus-firmware-esp32-pro.bin"
 #elif defined(SMALLTV_ESP32)
-  #define UPDATE_ASSET "smalltv-mod-firmware-esp32.bin"
+  #define UPDATE_ASSET "smalltv-plus-firmware-esp32.bin"
 #else
-  #define UPDATE_ASSET "smalltv-mod-firmware.bin"
+  #define UPDATE_ASSET "smalltv-plus-firmware.bin"
 #endif
 #define GH_API_HOST   "api.github.com"
 #define DAEMON_URL    "https://github.com/giovi321/clawdmeter-daemon"

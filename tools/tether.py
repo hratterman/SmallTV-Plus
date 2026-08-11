@@ -425,7 +425,7 @@ def selftest() -> int:
             got = list(Decoder().feed(out))
             # emit.cpp writes these three, in this order.
             want = [
-                (HELLO, 1, b"smalltv-mod"),
+                (HELLO, 1, b"smalltv-plus"),
                 (HTTP_DATA, 0x1234, bytes(range(256))),
                 (HTTP_END, 0xBEEF, b""),
             ]
@@ -525,7 +525,7 @@ def loopback(ck) -> int:
         return got
 
     # 1. Handshake: hello in, ack and a clock back.
-    os.write(master, encode(HELLO, 0, b"smalltv-mod 2.8.2"))
+    os.write(master, encode(HELLO, 0, b"smalltv-plus 2.8.2"))
     pump(2.0)
     ck(any(f[0] == HELLO_ACK for f in got), "hello is acknowledged")
     times = [f for f in got if f[0] == TIME]

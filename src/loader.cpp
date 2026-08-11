@@ -29,7 +29,7 @@ static ESP8266HTTPUpdateServer updater;
 
 void setup() {
   Serial.begin(115200);
-  Serial.println(F("\nsmalltv-mod loader"));
+  Serial.println(F("\nsmalltv-plus loader"));
   WiFi.persistent(false);
 
   const char* ssid = LOADER_SSID;

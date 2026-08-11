@@ -9,7 +9,7 @@ int main() {
   static uint8_t wire[8192];
   uint32_t n;
 
-  const char* hello = "smalltv-mod";
+  const char* hello = "smalltv-plus";
   n = sfEncode(SF_HELLO, 1, (const uint8_t*)hello, (uint16_t)strlen(hello),
                wire, sizeof(wire));
   fwrite(wire, 1, n, stdout);

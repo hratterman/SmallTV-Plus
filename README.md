@@ -1,7 +1,7 @@
-<h1 align="center">smalltv-mod</h1>
+<h1 align="center">smalltv-plus</h1>
 
 <p align="center">
-  <a href="https://github.com/hratterman/smalltv-mod-claude/actions/workflows/build.yml"><img src="https://github.com/hratterman/smalltv-mod-claude/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/hratterman/smalltv-plus/actions/workflows/build.yml"><img src="https://github.com/hratterman/smalltv-plus/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-WTFPL-blue.svg" alt="License: WTFPL"></a>
   <img src="https://img.shields.io/badge/platform-ESP8266%20%7C%20ESP32--C2%20%7C%20ESP32-informational" alt="ESP8266, ESP32-C2, and ESP32">
 </p>
@@ -94,7 +94,7 @@ pio device monitor                 # serial logs @ 115200
 ```
 
 Every push also builds all five targets in CI; the images land as a workflow artifact
-(`smalltv-mod-firmware`) on the [Actions page](../../actions).
+(`smalltv-plus-firmware`) on the [Actions page](../../actions).
 
 - **First flash on USB-capable boards** (`esptool`): write `firmware.factory.bin` at `0x0`. Back
   up the stock image first (`read_flash 0x0 0x400000 stock-backup.bin`).

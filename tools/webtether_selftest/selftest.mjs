@@ -57,7 +57,7 @@ console.log('\n--- log text is not mistaken for a frame --------------------');
 {
   const lines = [];
   const dec = new mod.Decoder(s => lines.push(s));
-  const mid = mod.encode(mod.HELLO, 3, new TextEncoder().encode('smalltv-mod'));
+  const mid = mod.encode(mod.HELLO, 3, new TextEncoder().encode('smalltv-plus'));
   const pre = new TextEncoder().encode('[net] up\n');
   const post = new TextEncoder().encode('[net] rssi -50\n');
   const all = new Uint8Array([...pre, ...mid, ...post]);
@@ -82,7 +82,7 @@ console.log('\n--- against the C++ implementation --------------------------');
   const produced = execFileSync(emit, {maxBuffer: 1 << 20});
   const got = drain(new mod.Decoder(), new Uint8Array(produced));
   const want = [
-    [mod.HELLO, 1, 11],
+    [mod.HELLO, 1, 12],   // len("smalltv-plus"), the hello fixture in emit.cpp
     [mod.HTTP_DATA, 0x1234, 256],
     [mod.HTTP_END, 0xBEEF, 0],
   ];
