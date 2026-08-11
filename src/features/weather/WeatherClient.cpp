@@ -34,12 +34,15 @@ static bool haveLocation(const Settings& s) {
 }
 
 static void buildUrl(const Settings& s, char* out, size_t n) {
+  // http on the device route, https via the tether - see WEATHER_HOST in
+  // config.h for why. The payload is public weather; nothing here is secret.
   snprintf(out, n,
-           WEATHER_URL
+           "%s://" WEATHER_HOST WEATHER_PATH
            "?latitude=%.4f&longitude=%.4f"
            "&current=temperature_2m,weather_code,is_day"
            "&daily=weather_code,temperature_2m_max,temperature_2m_min"
            "&timezone=auto&forecast_days=%d%s",
+           netFetchTethered() ? "https" : "http",
            (double)s.weather.lat, (double)s.weather.lon, WX_DAYS,
            s.weather.unitsF ? "&temperature_unit=fahrenheit" : "");
 }

@@ -147,7 +147,13 @@
 #define WITH_WEATHER 0
 #endif
 #endif
-#define WEATHER_URL "https://api.open-meteo.com/v1/forecast"
+// Scheme chosen per route in WeatherClient: plain http on the device path
+// (Open-Meteo answers http with a 200 - measured - and a hotspot middlebox
+// that kills the device's TLS 1.2 handshake by SNI has nothing to filter),
+// https on the tether path (the browser speaks TLS 1.3 through the same
+// filters, and an https page cannot fetch http at all).
+#define WEATHER_HOST "api.open-meteo.com"
+#define WEATHER_PATH "/v1/forecast"
 
 // The device-wide numerals style: how the ticker price, the usage meters and
 // the miner hashrate draw their big numbers. Letters always stay in the pixel
