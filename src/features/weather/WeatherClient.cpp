@@ -2,7 +2,9 @@
 #if WITH_WEATHER
 
 #include <ArduinoJson.h>
+#include <WiFiClientSecure.h>
 #include "NetFetch.h"
+#include "Platform.h"
 
 static WeatherData s_data;
 static uint32_t    s_nextPollMs = 0;
@@ -33,18 +35,107 @@ static bool haveLocation(const Settings& s) {
   return s.weather.lat != 0.0f || s.weather.lon != 0.0f;
 }
 
-static void buildUrl(const Settings& s, char* out, size_t n) {
-  // http on the device route, https via the tether - see WEATHER_HOST in
-  // config.h for why. The payload is public weather; nothing here is secret.
+static void buildQuery(const Settings& s, char* out, size_t n) {
   snprintf(out, n,
-           "%s://" WEATHER_HOST WEATHER_PATH
+           WEATHER_PATH
            "?latitude=%.4f&longitude=%.4f"
            "&current=temperature_2m,weather_code,is_day"
            "&daily=weather_code,temperature_2m_max,temperature_2m_min"
            "&timezone=auto&forecast_days=%d%s",
-           netFetchTethered() ? "https" : "http",
            (double)s.weather.lat, (double)s.weather.lon, WX_DAYS,
            s.weather.unitsF ? "&temperature_unit=fahrenheit" : "");
+}
+
+// The device-path fetch, hand-rolled on purpose. The field cube sits behind a
+// hotspot whose middlebox kills TLS handshakes by their SNI hostname (fatal
+// alert, ssl=7780) AND intercepts plain http for the same host. What passes:
+// a TLS connection opened to the resolved ADDRESS, so the SNI extension
+// carries only an IP literal with nothing for a hostname blocklist to match -
+// Open-Meteo then routes on the Host header (measured: 200 with the real
+// JSON; it needs HTTP/1.1, so the chunked framing is undone here). Normal
+// networks take this path too - the server accepts it either way.
+static bool fetchDirect(const Settings& s, String& raw, char* err, size_t errLen) {
+  char path[280];
+  buildQuery(s, path, sizeof(path));
+
+  IPAddress ip;
+  if (!WiFi.hostByName(WEATHER_HOST, ip)) {
+    snprintf(err, errLen, "DNS failed: %s", WEATHER_HOST);
+    return false;
+  }
+
+  NetTlsGuard tlsLock;
+  WiFiClientSecure sc;
+  sc.setInsecure();
+  sc.setTimeout(11);                       // seconds, like the netFetch path
+  if (!sc.connect(ip.toString().c_str(), 443)) {
+    char sb[4];
+    const int ssl = sc.lastError(sb, sizeof(sb));
+    snprintf(err, errLen, "tls @%s ssl=%X b=%uk", ip.toString().c_str(),
+             (unsigned)(ssl < 0 ? -ssl : ssl),
+             (unsigned)(platformMaxFreeBlock() / 1024));
+    return false;
+  }
+
+  sc.print("GET ");
+  sc.print(path);
+  sc.print(" HTTP/1.1\r\nHost: " WEATHER_HOST
+           "\r\nAccept: application/json\r\nConnection: close\r\n\r\n");
+
+  String line = sc.readStringUntil('\n');
+  const int sp = line.indexOf(' ');
+  const int code = sp > 0 ? line.substring(sp + 1).toInt() : 0;
+  if (code != 200) {
+    snprintf(err, errLen, "HTTP %d", code);
+    sc.stop();
+    return false;
+  }
+  bool chunked = false;
+  while (true) {
+    line = sc.readStringUntil('\n');
+    if (line.length() <= 1) break;         // blank line ends the headers
+    line.toLowerCase();
+    if (line.startsWith("transfer-encoding:") && line.indexOf("chunked") >= 0)
+      chunked = true;
+  }
+
+  raw = "";
+  raw.reserve(2048);
+  const uint32_t deadline = millis() + 10000UL;
+  if (chunked) {
+    while ((int32_t)(millis() - deadline) < 0) {
+      long sz = strtol(sc.readStringUntil('\n').c_str(), nullptr, 16);
+      if (sz <= 0) break;                  // 0 chunk = done (or a read timeout)
+      while (sz > 0 && (int32_t)(millis() - deadline) < 0 &&
+             raw.length() < 8192) {
+        char buf[257];
+        const int want = sz < 256 ? (int)sz : 256;
+        const int got = sc.read((uint8_t*)buf, want);
+        if (got > 0) {
+          buf[got] = 0;
+          raw.concat(buf, got);
+          sz -= got;
+        } else if (!sc.connected() && !sc.available()) {
+          break;
+        } else {
+          delay(1);
+        }
+      }
+      sc.readStringUntil('\n');            // the chunk's trailing CRLF
+    }
+  } else {
+    while ((sc.connected() || sc.available()) &&
+           (int32_t)(millis() - deadline) < 0 && raw.length() < 8192) {
+      while (sc.available() && raw.length() < 8192) raw += (char)sc.read();
+      if (!sc.available()) delay(1);
+    }
+  }
+  sc.stop();
+  if (!raw.length()) {
+    snprintf(err, errLen, "empty reply");
+    return false;
+  }
+  return true;
 }
 
 static bool parseWeather(const String& raw) {
@@ -92,19 +183,38 @@ void weatherService(const Settings& s) {
   const uint32_t now = millis();
   if (s_nextPollMs && (int32_t)(now - s_nextPollMs) < 0) return;
 
-  char url[280];
-  buildUrl(s, url, sizeof(url));
   String raw;
-  const NetFetchResult r = netFetchToString(url, false, "Accept: application/json",
-                                            nullptr, 0, raw, 8192, 10000);
-  if (r.ok && parseWeather(raw)) {
+  bool fetched;
+  char ferr[72] = "";
+  if (netFetchTethered()) {
+    // The browser end speaks TLS 1.3 through whatever the network filters,
+    // so the tether path stays an ordinary https fetch.
+    char url[300];
+    snprintf(url, sizeof(url), "https://" WEATHER_HOST "%s", "");
+    char q[280];
+    buildQuery(s, q, sizeof(q));
+    strlcat(url, q, sizeof(url));
+    const NetFetchResult r = netFetchToString(url, false, "Accept: application/json",
+                                              nullptr, 0, raw, 8192, 10000);
+    fetched = r.ok;
+    if (!fetched) strlcpy(ferr, r.error, sizeof(ferr));
+  } else {
+    fetched = fetchDirect(s, raw, ferr, sizeof(ferr));
+  }
+
+  if (fetched && parseWeather(raw)) {
     s_data.valid = true;
     s_data.error = false;
     s_data.lastOkMs = now;
     s_nextPollMs = now + (uint32_t)s.weather.pollSec * 1000UL;
   } else {
     s_data.error = true;
-    strlcpy(s_data.errMsg, r.ok ? "unexpected reply" : r.error, sizeof(s_data.errMsg));
+    if (fetched)
+      // Show the head of what DID come back - a filter's block page names
+      // itself in its first line.
+      snprintf(s_data.errMsg, sizeof(s_data.errMsg), "reply: %.60s", raw.c_str());
+    else
+      strlcpy(s_data.errMsg, ferr, sizeof(s_data.errMsg));
     s_nextPollMs = now + 60000UL;     // errors retry in a minute, not a poll period
   }
 }
