@@ -1063,7 +1063,14 @@ $('fwFile').onchange=async e=>{
     m.className='msg ok';
     log('firmware flashed; the cube is rebooting','l-ok');
   }catch(err){
-    m.textContent='update failed: '+err.message+' - the cube keeps its old firmware.';
+    // The one everyone hits once: a cube whose firmware predates the update
+    // frames ignores them silently, so the begin times out. Say what to do,
+    // not just what happened.
+    m.textContent = err.message==='no reply from the cube'
+      ? 'no reply - this cube\'s firmware is from before cable updates existed. '+
+        'Install one more update the old way (the cube\'s web UI, Manual update tab); '+
+        'every update after that can use this card.'
+      : 'update failed: '+err.message+' - the cube keeps its old firmware.';
     m.className='msg err';
     log('firmware update failed: '+err.message,'l-err');
   }finally{
