@@ -610,6 +610,7 @@ void Settings::setDefaults() {
   autoBrightness = false;
   backlightInverted = TFT_BL_DEFAULT_INVERTED;
   rotation = 0;
+  numFont       = NUM_FONT_PIXEL;   // nothing changes until someone opts in
 
   ticker.setDefaults();
   usage.setDefaults();
@@ -725,6 +726,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   root["autoBrightness"]    = s.autoBrightness;
   root["backlightInverted"] = s.backlightInverted;
   root["rotation"]          = s.rotation;
+  root["numFont"]           = s.numFont;
 
   // Feature slices
   s.ticker.toJson(root["ticker"].to<JsonObject>());
@@ -800,6 +802,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["autoBrightness"].is<bool>())    s.autoBrightness = root["autoBrightness"];
   if (root["backlightInverted"].is<bool>()) s.backlightInverted = root["backlightInverted"];
   if (root["rotation"].is<int>())           s.rotation = (uint8_t)(((int)root["rotation"]) & 3);
+  if (root["numFont"].is<int>())            s.numFont = (uint8_t)constrain((int)root["numFont"], 0, 1);
 
   // Feature slices: prefer the nested object; fall back to the top level so a
   // legacy flat config.json (or a legacy POST) still applies. The old shared

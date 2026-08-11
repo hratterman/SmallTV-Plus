@@ -46,6 +46,19 @@ struct GfxMarquee {
 // scrolling, so the caller knows this band needs to keep being redrawn.
 bool gfxMarqueeDraw(const GfxMarquee& m, const char* s, uint32_t phaseMs);
 
+// ---- The numbers face -----------------------------------------------------
+// Sites that show a big numeral (ticker price, usage %, miner hashrate) draw
+// it through these, so whether it comes out pixel or sans is one setting
+// checked in one place. The sans faces carry only 0x20..0x3A — a string with
+// anything else in it is not eligible and the caller keeps its pixel path.
+// `topY` is the top of the band in both worlds; the helper owns the baseline.
+bool gfxNumEligible(const char* s);
+int  gfxNumFace(const char* s, int maxW);          // largest face fitting maxW
+int  gfxNumFaceW(const char* s, int face);
+int  gfxNumFaceH(int face);                        // ascent + descent
+int  gfxNumFaceAscent(int face);                   // baseline below the band top
+void gfxNumFaceDraw(int x, int topY, const char* s, int face, uint16_t color);
+
 // ---- Shared boot / status / diagnostic screens ----------------------------
 void gfxBoot(const char* line1, const char* line2);
 void gfxApInfo(const char* ssid, const char* pass, const char* ip);

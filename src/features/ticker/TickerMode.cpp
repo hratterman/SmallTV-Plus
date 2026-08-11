@@ -106,11 +106,19 @@ static void drawStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
     fmtPrice(d.price, num, sizeof(num));
     char line[28];
     snprintf(line, sizeof(line), "%s%s", d.currency, num);
-    uint8_t sz = gfxFitSize(line, 236, 6);
-    int ph = 8 * sz;
-    int py = s.ticker.showName ? 74 : 64;
-    gfxDrawCentered(line, py, sz, C_WHITE);   // price stays neutral (not trend-colored)
-    y = py + ph + 8;
+    const int py = s.ticker.showName ? 74 : 64;
+    if (s.numFont == NUM_FONT_SANS && gfxNumEligible(line)) {
+      // A non-USD currency prefix ("CHF ") has letters and drops to the pixel
+      // path by the eligibility test, not by a second rule here.
+      const int face = gfxNumFace(line, 236);
+      const int w = gfxNumFaceW(line, face);
+      gfxNumFaceDraw((TFT_WIDTH - w) / 2, py, line, face, C_WHITE);
+      y = py + gfxNumFaceH(face) + 8;
+    } else {
+      uint8_t sz = gfxFitSize(line, 236, 6);
+      gfxDrawCentered(line, py, sz, C_WHITE); // price stays neutral (not trend-colored)
+      y = py + 8 * sz + 8;
+    }
   }
 
   // Change line: [arrow] +chg (+pct%)
@@ -120,24 +128,38 @@ static void drawStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
       snprintf(line, sizeof(line), "%+.2f (%+.2f%%)", chg, pct);
     else
       snprintf(line, sizeof(line), "%+.2f", chg);
-    uint8_t sz = gfxFitSize(line, 210, 2);
-    int tw = gfxTextW(line, sz);
-    int ah = 8 * sz;             // arrow box height
+    const bool sans = s.numFont == NUM_FONT_SANS && gfxNumEligible(line);
+    // The arrow is sized to the text either way, so the pair reads as one mark.
+    int tw, ah;
+    int face = -1;
+    if (sans) {
+      face = gfxNumFace(line, 200);
+      tw = gfxNumFaceW(line, face);
+      ah = gfxNumFaceAscent(face);          // arrow spans the cap height, not the descender
+    } else {
+      uint8_t sz = gfxFitSize(line, 210, 2);
+      tw = gfxTextW(line, sz);
+      ah = 8 * sz;
+    }
     int aw = ah;
     int totalW = aw + 4 + tw;
     int x = (TFT_WIDTH - totalW) / 2;
     if (x < 2) x = 2;
-    // arrow triangle
     int ax = x, ay = y;
     if (up)
       gfx->fillTriangle(ax, ay + ah, ax + aw, ay + ah, ax + aw / 2, ay, trendC);
     else
       gfx->fillTriangle(ax, ay, ax + aw, ay, ax + aw / 2, ay + ah, trendC);
-    gfx->setTextSize(sz);
-    gfx->setTextColor(trendC);
-    gfx->setCursor(x + aw + 4, ay);
-    gfx->print(line);
-    y = ay + ah + 8;
+    if (sans) {
+      gfxNumFaceDraw(x + aw + 4, ay, line, face, trendC);
+      y = ay + gfxNumFaceH(face) + 8;
+    } else {
+      gfx->setTextSize(gfxFitSize(line, 210, 2));
+      gfx->setTextColor(trendC);
+      gfx->setCursor(x + aw + 4, ay);
+      gfx->print(line);
+      y = ay + ah + 8;
+    }
   }
 
   // Position P/L vs the cost basis (symbols with qty and cost configured)

@@ -41,3 +41,4 @@ dependencies.lock
 # manual quotes-branch staging dir (see .github/workflows/quotes.yml)
 /out/
 src/webui_gz.h
+tools/previews/

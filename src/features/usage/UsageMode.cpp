@@ -55,6 +55,10 @@ static uint16_t barColor(float pct) {
   return C_UGREEN;
 }
 
+// drawMeter cannot see Settings, and threading it through four callers for one
+// bool is noise; the render entry latches it here instead.
+static bool g_numSans = false;
+
 // One usage card: big %, a 5h/7d label, a fill bar coloured by load, and the
 // reset countdown. `top` is the card's top y; the card is 82px tall.
 static void drawMeter(Arduino_GFX* gfx, int top, const char* label,
@@ -64,11 +68,21 @@ static void drawMeter(Arduino_GFX* gfx, int top, const char* label,
 
   char pc[8];
   snprintf(pc, sizeof(pc), "%d%%", (int)lroundf(constrain(pct, 0.0f, 100.0f)));
-  uint8_t sz = gfxFitSize(pc, 150, 5);
-  gfx->setTextSize(sz);
-  gfx->setTextColor(C_WHITE);
-  gfx->setCursor(x + 14, top + 10);
-  gfx->print(pc);
+  if (g_numSans) {
+    // The card gives the number 43 px before the bar. The bound is the
+    // ascent, not ascent+descent: digits and '%' never dip below the
+    // baseline (the self-test pins that), and the face's descent belongs
+    // to parentheses this string cannot contain.
+    int face = gfxNumFace(pc, 150);
+    while (face < NUM_FACES - 1 && gfxNumFaceAscent(face) + 2 > 43) face++;
+    gfxNumFaceDraw(x + 14, top + 9, pc, face, C_WHITE);
+  } else {
+    uint8_t sz = gfxFitSize(pc, 150, 5);
+    gfx->setTextSize(sz);
+    gfx->setTextColor(C_WHITE);
+    gfx->setCursor(x + 14, top + 10);
+    gfx->print(pc);
+  }
 
   int lw = gfxTextW(label, 2);
   gfx->setTextSize(2);
@@ -165,6 +179,7 @@ void UsageMode::invalidate(const Settings& s) {
 }
 
 void UsageMode::service(const Settings& s) {
+  g_numSans = (s.numFont == NUM_FONT_SANS);
   // Pull mode: poll the daemon when a Usage URL is set. Push mode: leave it blank
   // and the daemon POSTs to /api/usage (for networks where the device can't reach
   // the PC). Either way usageGet() drives the render below.

@@ -182,6 +182,11 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <label>Orientation</label>
    <select id="rotation"><option value="0">0&deg;</option><option value="1">90&deg;</option>
     <option value="2">180&deg;</option><option value="3">270&deg;</option></select>
+   <label style="margin-top:10px">Numbers <span class="muted">&mdash; prices, percentages, hashrate</span></label>
+   <select id="numFont">
+    <option value="0">Pixel &mdash; the classic blocky digits</option>
+    <option value="1">Sans &mdash; real type, bold</option>
+   </select>
    <div class="chk"><input id="backlightInverted" type="checkbox"><label>Backlight is active-low (try if screen stays dark)</label></div>
   </div>
   <div class="card"><h2>Clock &amp; night mode</h2>
@@ -339,7 +344,6 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <!-- CLOCK (feature) -->
  <section id="clock" class="tab">
   <div class="card"><h2>Clock face</h2>
-   <label>Hour format</label>
    <label>Face</label>
    <select id="clockFace">
     <option value="0">Pixel &mdash; the classic blocky digits</option>
@@ -590,7 +594,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  ['apSsid','apPass','hostname'].forEach(function(k){$(k).value=c[k]!=null?c[k]:''});
  renderWifi(c.wifi||(c.staSsid?[{ssid:c.staSsid,passSet:c.staPassSet}]:[]));
  $('brightness').value=c.brightness; $('brVal').textContent=c.brightness;
- $('rotation').value=c.rotation;
+ $('rotation').value=c.rotation; sv('numFont',String(c.numFont||0));
  sc('autoBrightness',!!c.autoBrightness);
  $('backlightInverted').checked=!!c.backlightInverted;
  // header chip = which chip this firmware was built for
@@ -729,7 +733,7 @@ function collect(){
  var o={mode:gv('mode'),
   carouselSec:parseInt(gv('carouselSec'))||30,
   brightness:parseInt(gv('brightness'))||0,
-  rotation:parseInt(gv('rotation')),
+  rotation:parseInt(gv('rotation')),numFont:parseInt(gv('numFont'))||0,
   backlightInverted:gc('backlightInverted'),
   hostname:gv('hostname'), apSsid:gv('apSsid'), apPass:gv('apPass'),
   wifi:collectWifi()};

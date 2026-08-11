@@ -106,6 +106,55 @@ void gfxDrawCentered(const char* s, int y, uint8_t size, uint16_t color) {
   gfx->print(s);
 }
 
+// ---- The numbers face -----------------------------------------------------
+#include "NumFonts.h"
+static_assert(NUM_FACES == NUM_FONT_COUNT,
+              "config.h and the generated NumFonts.h disagree on the face count");
+
+bool gfxNumEligible(const char* s) {
+  if (!s || !s[0]) return false;
+  for (const char* p = s; *p; p++)
+    if ((uint8_t)*p < NUM_FONT_FIRST || (uint8_t)*p > NUM_FONT_LAST) return false;
+  return true;
+}
+
+int gfxNumFaceW(const char* s, int face) {
+  if (face < 0 || face >= NUM_FONT_COUNT) return 0;
+  const GFXfont* f = kNumFaces[face].font;
+  int w = 0;
+  for (const char* p = s; *p; p++) {
+    const GFXglyph* g = &f->glyph[(uint8_t)*p - f->first];
+    w += pgm_read_byte(&g->xAdvance);
+  }
+  return w;
+}
+
+int gfxNumFace(const char* s, int maxW) {
+  for (int i = 0; i < NUM_FONT_COUNT; i++)
+    if (gfxNumFaceW(s, i) <= maxW) return i;
+  return NUM_FONT_COUNT - 1;     // nothing fits: the smallest clips least
+}
+
+int gfxNumFaceAscent(int face) {
+  if (face < 0 || face >= NUM_FONT_COUNT) return 0;
+  return kNumFaces[face].ascent;
+}
+
+int gfxNumFaceH(int face) {
+  if (face < 0 || face >= NUM_FONT_COUNT) return 0;
+  return kNumFaces[face].ascent + kNumFaces[face].descent;
+}
+
+void gfxNumFaceDraw(int x, int topY, const char* s, int face, uint16_t color) {
+  if (!gfx || face < 0 || face >= NUM_FONT_COUNT) return;
+  gfx->setFont(kNumFaces[face].font);
+  gfx->setTextSize(1);
+  gfx->setTextColor(color);
+  gfx->setCursor(x, topY + kNumFaces[face].ascent);   // GFXfonts draw from the baseline
+  gfx->print(s);
+  gfx->setFont(nullptr);       // back to the classic font for whoever draws next
+}
+
 // ---- Marquee --------------------------------------------------------------
 // The phase arithmetic lives in GfxMarqueeStep.h so it can be checked on a
 // host; what is left here is the drawing.

@@ -282,6 +282,23 @@ details>div{margin-top:12px}
                 <input id="carouselSec" type="number" min="5" max="3600">
               </div>
             </div>
+            <div class="two">
+              <div class="row">
+                <label for="numFont">Numbers <span class="hint">prices, %, hashrate</span></label>
+                <select id="numFont">
+                  <option value="0">Pixel (classic)</option>
+                  <option value="1">Sans (real type)</option>
+                </select>
+              </div>
+              <div class="row">
+                <label for="clockFace">Clock face</label>
+                <select id="clockFace">
+                  <option value="0">Pixel</option>
+                  <option value="1">Sans</option>
+                  <option value="2">7-segment</option>
+                </select>
+              </div>
+            </div>
             <div class="row">
               <label for="brightness">Brightness <span class="hint">&mdash; <span id="brightVal">100</span>%</span></label>
               <input id="brightness" type="range" min="0" max="100">
@@ -558,6 +575,8 @@ async function handleRequest(id,payload){
 const FIELDS=[
   ['mode',              ['mode'],                       'string'],
   ['rotation',          ['rotation'],                   'number'],
+  ['numFont',           ['numFont'],                    'number'],
+  ['clockFace',         ['clock','face'],               'number'],
   ['carouselSec',       ['carouselSec'],                'number'],
   ['brightness',        ['brightness'],                 'number'],
   ['backlightInverted', ['backlightInverted'],          'bool'],

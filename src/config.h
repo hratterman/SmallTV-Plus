@@ -137,6 +137,16 @@
 #endif
 #endif
 
+// The device-wide numerals style: how the ticker price, the usage meters and
+// the miner hashrate draw their big numbers. Letters always stay in the pixel
+// font — the sans faces carry only 0x20..0x3A (see tools/gen_font.py).
+#define NUM_FONT_PIXEL 0
+#define NUM_FONT_SANS  1
+// How many sans sizes exist (big/mid/small). Mirrored from the generated
+// NumFonts.h so call sites can clamp a face without pulling the font data in;
+// Gfx.cpp static_asserts the two stay equal.
+#define NUM_FACES 3
+
 // Clock faces. The sans face is a rasterised LiberationSans-Bold subset
 // (tools/gen_font.py); the seven-segment face is drawn from rectangles.
 #define CLOCK_FACE_PIXEL 0

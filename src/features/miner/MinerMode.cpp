@@ -178,19 +178,35 @@ void MinerMode::render(const Settings& s, bool full) {
   if (strcmp(s_rate.text, num) || strcmp(s_rateUnit.text, unit)) {
     strlcpy(s_rate.text, num, sizeof(s_rate.text));
     strlcpy(s_rateUnit.text, unit, sizeof(s_rateUnit.text));
-    uint8_t nsz = gfxFitSize(num, 150, 5);
-    int nw = gfxTextW(num, nsz), uw = gfxTextW(unit, 2);
-    int x0 = (TFT_WIDTH - (nw + 8 + uw)) / 2;
-    int ny = RATE_Y + (RATE_H - 8 * nsz) / 2;
     gfx->fillRect(PANEL_X + 4, RATE_Y + 6, PANEL_W - 8, RATE_H - 12, C_PANEL);
-    gfx->setTextSize(nsz);
-    gfx->setTextColor(st.hashrate ? C_WHITE : C_DIM);
-    gfx->setCursor(x0, ny);
-    gfx->print(num);
-    gfx->setTextSize(2);
-    gfx->setTextColor(C_DIM);
-    gfx->setCursor(x0 + nw + 8, ny + 8 * nsz - 16);
-    gfx->print(unit);
+    const uint16_t numC = st.hashrate ? C_WHITE : C_DIM;
+    if (s.numFont == NUM_FONT_SANS && gfxNumEligible(num)) {
+      // The unit ("kH/s") has letters and stays pixel; only the number changes
+      // face. Their baselines align so the pair still reads as one figure.
+      int face = gfxNumFace(num, 150);
+      while (face < NUM_FACES - 1 && gfxNumFaceH(face) > RATE_H - 12) face++;
+      const int nw = gfxNumFaceW(num, face), uw = gfxTextW(unit, 2);
+      const int x0 = (TFT_WIDTH - (nw + 8 + uw)) / 2;
+      const int ny = RATE_Y + (RATE_H - gfxNumFaceH(face)) / 2;
+      gfxNumFaceDraw(x0, ny, num, face, numC);
+      gfx->setTextSize(2);
+      gfx->setTextColor(C_DIM);
+      gfx->setCursor(x0 + nw + 8, ny + gfxNumFaceAscent(face) - 16);
+      gfx->print(unit);
+    } else {
+      uint8_t nsz = gfxFitSize(num, 150, 5);
+      int nw = gfxTextW(num, nsz), uw = gfxTextW(unit, 2);
+      int x0 = (TFT_WIDTH - (nw + 8 + uw)) / 2;
+      int ny = RATE_Y + (RATE_H - 8 * nsz) / 2;
+      gfx->setTextSize(nsz);
+      gfx->setTextColor(numC);
+      gfx->setCursor(x0, ny);
+      gfx->print(num);
+      gfx->setTextSize(2);
+      gfx->setTextColor(C_DIM);
+      gfx->setCursor(x0 + nw + 8, ny + 8 * nsz - 16);
+      gfx->print(unit);
+    }
   }
 
   // Stat rows.
