@@ -35,6 +35,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "CalendarTime.h"
+#include "../../TextFold.h"
 
 // Private bounded copy: Arduino has strlcpy and newer glibc grew one too, with
 // just enough declaration differences that owning seven lines beats
@@ -436,6 +437,7 @@ class IcsParser {
     if (is("SUMMARY")) {
       icsCopy(ev_.title, value, sizeof(ev_.title));
       unescape(ev_.title);
+      textFoldUtf8(ev_.title);   // curly quotes etc. -> ASCII the fonts have
     } else if (is("DTSTART")) {
       bool dateOnly;
       if (parseStamp(value, &ev_.sDay, &ev_.sSod, &ev_.sUtc, &dateOnly)) {

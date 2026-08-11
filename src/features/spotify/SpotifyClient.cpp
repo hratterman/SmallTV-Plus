@@ -1,3 +1,4 @@
+#include "../../TextFold.h"
 #include "SpotifyClient.h"
 #include "AlbumArt.h"   // SPOTIFY_ART_PX: the size the screen wants
 #if WITH_SPOTIFY
@@ -248,6 +249,10 @@ static bool fetchNowPlaying() {
     if (s_data.artist[0]) strlcat(s_data.artist, ", ", sizeof(s_data.artist));
     strlcat(s_data.artist, n, sizeof(s_data.artist));
   }
+  // Track names arrive as UTF-8 (curly quotes, accents); the panel fonts are
+  // ASCII, so fold on the way in rather than drawing CP437 confetti.
+  textFoldUtf8(s_data.track);
+  textFoldUtf8(s_data.artist);
 
   // Pick the cover that lands closest to the box once the decoder's descaling
   // is applied — albumArtFit() is the same function the decoder itself uses, so

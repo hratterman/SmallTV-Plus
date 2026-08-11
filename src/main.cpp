@@ -56,6 +56,9 @@
 #include "CalendarMode.h"
 #include "CalendarClient.h"
 #endif
+#if WITH_WEATHER
+#include "WeatherMode.h"
+#endif
 #if HAS_TOUCH
 #include "Touch.h"
 #endif
@@ -90,6 +93,9 @@ static DisplayMode* kModes[] = {
 #endif
 #if WITH_CALENDAR
   &g_calendarMode,
+#endif
+#if WITH_WEATHER
+  &g_weatherMode,
 #endif
 };
 static const size_t kModeCount = sizeof(kModes) / sizeof(kModes[0]);

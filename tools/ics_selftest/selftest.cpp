@@ -284,6 +284,47 @@ int main() {
     ck(sorted && soonest, "and holds the soonest events in order");
   }
 
+  printf("\n--- UTF-8 fold (TextFold.h) ----------------------------------\n");
+  {
+    auto fold = [](const char* in, const char* want, const char* what) {
+      char buf[96];
+      strncpy(buf, in, sizeof(buf) - 1);
+      buf[sizeof(buf) - 1] = 0;
+      textFoldUtf8(buf);
+      char msg[128];
+      snprintf(msg, sizeof(msg), "%s -> \"%s\"", what, buf);
+      ck(!strcmp(buf, want), msg);
+    };
+    fold("Doctor\xE2\x80\x99s Appointment", "Doctor's Appointment",
+         "curly apostrophe becomes '");
+    fold("\xE2\x80\x9Cscare quotes\xE2\x80\x9D", "\"scare quotes\"",
+         "curly doubles become \"");
+    fold("Caf\xC3\xA9 \xE2\x80\x93 review", "Cafe - review",
+         "accent stripped, en dash to hyphen");
+    fold("\xC5\x81ukasz \xC5\xBDluti\xC4\x87", "Lukasz Zlutic",
+         "Latin Extended-A folds to base letters");
+    fold("wait\xE2\x80\xA6", "wait...", "ellipsis expands to dots");
+    fold("hi \xF0\x9F\x98\x80!", "hi !", "emoji is dropped, not mangled");
+    fold("a\xFF" "b\x80" "c", "abc", "stray bytes are dropped");
+    fold("plain ASCII stays put", "plain ASCII stays put", "ASCII untouched");
+  }
+  {
+    // End to end: the parser folds SUMMARY as it stores it.
+    IcsParser p;
+    p.begin(NOW, NOW + 7 * 86400, OFF);
+    const char* ics =
+        "BEGIN:VEVENT\r\n"
+        "UID:fold1\r\n"
+        "SUMMARY:Doctor\xE2\x80\x99s Appointment\r\n"
+        "DTSTART:20260812T150000Z\r\n"
+        "DTEND:20260812T160000Z\r\n"
+        "END:VEVENT\r\n";
+    p.feed(ics, (unsigned)strlen(ics));
+    p.end();
+    ck(p.count() == 1 && !strcmp(p.get(0).title, "Doctor's Appointment"),
+       "an ICS SUMMARY with a curly apostrophe lands folded");
+  }
+
   printf("\n-------------------------------------------------------------\n");
   if (failures) { printf("%d check(s) FAILED\n", failures); return 1; }
   printf("all checks passed\n");

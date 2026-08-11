@@ -1,3 +1,4 @@
+#include "../../TextFold.h"
 #include "config.h"
 #if WITH_CALENDAR
 
@@ -177,6 +178,7 @@ static void stageEvent(const char* title, const char* startStr, const char* endS
     e.endUtc = e.startUtc;
   e.allDay = allDay || forceAllDay;
   strlcpy(e.title, (title && title[0]) ? title : "(untitled)", sizeof(e.title));
+  textFoldUtf8(e.title);
   s_stageN++;
 }
 

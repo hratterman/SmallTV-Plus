@@ -389,6 +389,27 @@ static uint8_t calProvFromStr(const String& s) {
   return CAL_GOOGLE;
 }
 
+void WeatherSettings::setDefaults() {
+  lat = 0.0f;
+  lon = 0.0f;
+  unitsF = true;
+  pollSec = 900;          // Open-Meteo updates its models ~hourly; 15 min is plenty
+}
+
+void WeatherSettings::toJson(JsonObject o) const {
+  o["lat"]     = lat;
+  o["lon"]     = lon;
+  o["unitsF"]  = unitsF;
+  o["pollSec"] = pollSec;
+}
+
+void WeatherSettings::fromJson(JsonObjectConst o) {
+  if (o["lat"].is<float>() || o["lat"].is<int>()) lat = o["lat"].as<float>();
+  if (o["lon"].is<float>() || o["lon"].is<int>()) lon = o["lon"].as<float>();
+  if (o["unitsF"].is<bool>()) unitsF = o["unitsF"];
+  if (o["pollSec"].is<int>()) pollSec = (uint16_t)constrain((int)o["pollSec"], 300, 43200);
+}
+
 void CalendarSettings::setDefaults() {
   enabled      = false;        // needs linking before it can do anything
   provider     = CAL_GOOGLE;
@@ -584,8 +605,9 @@ static const struct {
     {MODE_AMBIENT, "carouselAmbient", false},  // decoration, not information
     {MODE_BLACKJACK, "carouselBlackjack", false},  // a game should never just appear
     {MODE_CALENDAR,  "carouselCalendar",  false},  // blank until linked; tick it after setup
+    {MODE_WEATHER,   "carouselWeather",   false},  // prompts for a location until one is set
 };
-static_assert(MODE_CALENDAR < 16, "carouselMask is 16 bits wide");
+static_assert(MODE_WEATHER < 16, "carouselMask is 16 bits wide");
 
 void Settings::setDefaults() {
   wifiCount = 0;
@@ -618,6 +640,7 @@ void Settings::setDefaults() {
   miner.setDefaults();
   spotify.setDefaults();
   calendar.setDefaults();
+  weather.setDefaults();
   ambient.setDefaults();
   work.setDefaults();
   captive.setDefaults();
@@ -681,6 +704,7 @@ static const struct { uint8_t mode; const char* tok; } kModeTokens[] = {
     {MODE_AMBIENT,  "ambient"},
     {MODE_BLACKJACK, "blackjack"},
     {MODE_CALENDAR,  "calendar"},
+    {MODE_WEATHER,   "weather"},
 };
 
 static const char* modeToken(uint8_t m) {
@@ -735,6 +759,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   s.miner.toJson(root["miner"].to<JsonObject>());
   s.spotify.toJson(root["spotify"].to<JsonObject>(), includeSecrets);
   s.calendar.toJson(root["calendar"].to<JsonObject>(), includeSecrets);
+  s.weather.toJson(root["weather"].to<JsonObject>());
   s.ambient.toJson(root["ambient"].to<JsonObject>());
   s.work.toJson(root["work"].to<JsonObject>());
   s.captive.toJson(root["captive"].to<JsonObject>());
@@ -816,6 +841,7 @@ void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["miner"].is<JsonObjectConst>()) s.miner.fromJson(root["miner"].as<JsonObjectConst>());
   if (root["spotify"].is<JsonObjectConst>()) s.spotify.fromJson(root["spotify"].as<JsonObjectConst>());
   if (root["calendar"].is<JsonObjectConst>()) s.calendar.fromJson(root["calendar"].as<JsonObjectConst>());
+  if (root["weather"].is<JsonObjectConst>())  s.weather.fromJson(root["weather"].as<JsonObjectConst>());
   if (root["ambient"].is<JsonObjectConst>()) s.ambient.fromJson(root["ambient"].as<JsonObjectConst>());
   if (root["work"].is<JsonObjectConst>()) s.work.fromJson(root["work"].as<JsonObjectConst>());
   if (root["captive"].is<JsonObjectConst>()) s.captive.fromJson(root["captive"].as<JsonObjectConst>());

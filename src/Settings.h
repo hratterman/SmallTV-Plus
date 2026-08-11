@@ -160,6 +160,16 @@ struct SpotifySettings {
 // refresh token obtained once with tools/calendar_auth.py, and the cube
 // renewing its own access tokens from then on. Google needs the client secret
 // too (its "Desktop" clients are issued one); Microsoft public clients do not.
+struct WeatherSettings {
+  float    lat, lon;      // 0/0 = not set; the screen prompts
+  bool     unitsF;        // true = Fahrenheit
+  uint16_t pollSec;
+
+  void setDefaults();
+  void toJson(JsonObject o) const;
+  void fromJson(JsonObjectConst o);
+};
+
 struct CalendarSettings {
   bool     enabled;
   uint8_t  provider;       // CAL_GOOGLE / CAL_MICROSOFT
@@ -272,6 +282,7 @@ struct Settings {
   MinerSettings   miner;
   SpotifySettings spotify;
   CalendarSettings calendar;
+  WeatherSettings weather;
   AmbientSettings ambient;
   WorkSettings    work;
   CaptiveSettings captive;

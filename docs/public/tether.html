@@ -264,6 +264,7 @@ details>div{margin-top:12px}
                 <option value="ambient">Ambient patterns</option>
                 <option value="blackjack">Blackjack</option>
                 <option value="calendar">Calendar</option>
+                <option value="weather">Weather</option>
                 <option value="carousel">Carousel (rotate modes)</option>
               </select>
             </div>
@@ -319,7 +320,34 @@ details>div{margin-top:12px}
               <label class="tick"><input id="carouselAmbient" type="checkbox"><span>Ambient</span></label>
               <label class="tick"><input id="carouselBlackjack" type="checkbox"><span>Blackjack</span></label>
               <label class="tick"><input id="carouselCalendar" type="checkbox"><span>Calendar</span></label>
+              <label class="tick"><input id="carouselWeather" type="checkbox"><span>Weather</span></label>
             </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Weather</legend>
+            <div class="two">
+              <div class="row">
+                <label for="weatherLat">Latitude</label>
+                <input id="weatherLat" type="number" step="0.0001" min="-90" max="90">
+              </div>
+              <div class="row">
+                <label for="weatherLon">Longitude</label>
+                <input id="weatherLon" type="number" step="0.0001" min="-180" max="180">
+              </div>
+            </div>
+            <div class="two">
+              <div class="row">
+                <label for="weatherPollSec">Refresh <span class="hint">seconds</span></label>
+                <input id="weatherPollSec" type="number" min="300" max="43200">
+              </div>
+              <div class="row">
+                <label class="tick" style="margin-top:22px"><input id="weatherUnitsF" type="checkbox">
+                  <span>Fahrenheit</span></label>
+              </div>
+            </div>
+            <p class="hint">Open-Meteo, no key needed &mdash; and it answers browsers, so the
+              weather works over this cable exactly like it does on WiFi.</p>
           </fieldset>
 
           <fieldset>
@@ -589,6 +617,11 @@ const FIELDS=[
   ['carouselAmbient',   ['carouselAmbient'],            'bool'],
   ['carouselBlackjack', ['carouselBlackjack'],          'bool'],
   ['carouselCalendar',  ['carouselCalendar'],           'bool'],
+  ['carouselWeather',   ['carouselWeather'],            'bool'],
+  ['weatherLat',        ['weather','lat'],              'number'],
+  ['weatherLon',        ['weather','lon'],              'number'],
+  ['weatherUnitsF',     ['weather','unitsF'],           'bool'],
+  ['weatherPollSec',    ['weather','pollSec'],          'number'],
   ['ambLife',           ['ambient','patterns','life'],      'bool'],
   ['ambPlasma',         ['ambient','patterns','plasma'],    'bool'],
   ['ambStars',          ['ambient','patterns','stars'],     'bool'],

@@ -29,7 +29,7 @@ static const int LIST_ROWS  = 4;
 static const int FOOT_Y     = 226;
 static const int TEXT_X     = 8;
 static const int TEXT_W     = TFT_WIDTH - 2 * TEXT_X;
-static_assert(TITLE_Y + 16 <= WHEN_Y, "the title band overlaps the when-line");
+static_assert(TITLE_Y + 24 <= WHEN_Y, "the title band overlaps the when-line");
 static_assert(WHEN_Y + 16 <= LIST_Y, "the when-line overlaps the list");
 static_assert(LIST_Y + LIST_ROWS * LIST_ROW <= FOOT_Y, "the list runs into the footer");
 
@@ -164,7 +164,17 @@ void CalendarMode::render(const Settings& s) {
 
   char title[CAL_TITLE_LEN];
   maskedTitle(s, e, title, sizeof(title));
-  titleScrolls_ = gfxMarqueeDraw(kTitleBand, title, millis());
+  // Sans typeface: a title that fits draws static in real type - the size-3
+  // face if it fits, the size-2 face otherwise. Only a title too long for
+  // both falls back to the pixel marquee (the scroller is pixel by design).
+  titleScrolls_ = false;
+  if (gfxTypeIsSans() && gfxLabelW(title, 3) <= TEXT_W) {
+    gfxLabel(TEXT_X + (TEXT_W - gfxLabelW(title, 3)) / 2, TITLE_Y, title, 3, C_WHITE);
+  } else if (gfxTypeIsSans() && gfxLabelW(title, 2) <= TEXT_W) {
+    gfxLabel(TEXT_X + (TEXT_W - gfxLabelW(title, 2)) / 2, TITLE_Y + 4, title, 2, C_WHITE);
+  } else {
+    titleScrolls_ = gfxMarqueeDraw(kTitleBand, title, millis());
+  }
 
   // When + countdown, coloured by urgency: green while it is on, orange in the
   // last ten minutes, calm blue with time in hand.
@@ -189,17 +199,26 @@ void CalendarMode::render(const Settings& s) {
     fmtWhen(le.startUtc, le.allDay, s.clock.mode12h, when, sizeof(when));
     gfx->setTextSize(1);
     gfx->setTextColor(C_DIMTX);
-    gfx->setCursor(TEXT_X, y);
+    // Small metadata either way; centred against the taller sans title row.
+    gfx->setCursor(TEXT_X, y + (gfxTypeIsSans() ? 4 : 0));
     gfx->print(when);
 
     char t[CAL_TITLE_LEN];
     maskedTitle(s, le, t, sizeof(t));
-    // The when-column is up to 12 chars at size 1; the title gets the rest and
-    // clips rather than wraps.
-    t[26] = 0;
-    gfx->setTextColor(C_WHITE);
-    gfx->setCursor(TEXT_X + 76, y);
-    gfx->print(t);
+    const int tx = TEXT_X + 76, tw = TFT_WIDTH - tx - 4;
+    if (gfxTypeIsSans()) {
+      // Titles are the text of this screen: the size-2 sans face, trimmed to
+      // its measured width rather than a fixed character count.
+      size_t len = strlen(t);
+      while (len && gfxLabelW(t, 2) > tw) t[--len] = 0;
+      gfxLabel(tx, y, t, 2, C_WHITE);
+    } else {
+      // The pixel look keeps its original dense size-1 rows.
+      t[26] = 0;
+      gfx->setTextColor(C_WHITE);
+      gfx->setCursor(tx, y);
+      gfx->print(t);
+    }
     row++;
   }
   if (row == 0) {

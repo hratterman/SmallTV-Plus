@@ -58,6 +58,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
  <button data-t="clock">Clock</button>
  <button data-t="spotify">Spotify</button>
  <button data-t="calendar">Calendar</button>
+ <button data-t="weather">Weather</button>
  <button data-t="miner">Miner</button>
  <button data-t="touch">Touch</button>
  <button data-t="update">Update</button>
@@ -128,6 +129,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <option value="clock">Clock</option>
     <option value="spotify">Spotify now playing</option>
     <option value="calendar">Calendar</option>
+    <option value="weather">Weather</option>
     <option value="ambient">Ambient patterns</option>
     <option value="blackjack">Blackjack</option>
     <option value="carousel">Carousel (rotate modes)</option>
@@ -143,6 +145,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <div class="chk"><input id="carouselClock" type="checkbox"><label>Clock</label></div>
    <div class="chk"><input id="carouselSpotify" type="checkbox"><label>Spotify</label></div>
    <div class="chk"><input id="carouselCalendar" type="checkbox"><label>Calendar</label></div>
+   <div class="chk"><input id="carouselWeather" type="checkbox"><label>Weather</label></div>
    <div class="chk"><input id="carouselAmbient" type="checkbox"><label>Ambient</label></div>
    <div class="chk"><input id="carouselBlackjack" type="checkbox"><label>Blackjack</label></div>
    <small class="hint">Pick the active feature, then configure it in its own tab. The ticks above govern both the carousel rotation <i>and</i> which modes a tap on the lid steps through &mdash; untick one and it stops appearing either way. A mode you are not showing does no work: only the active mode fetches. Spotify is the exception, since it has to keep watching in order to take over when you press play.</small>
@@ -316,6 +319,23 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <table id="apTable"></table>
    <button class="btn sec" style="margin-top:10px" onclick="addAp()">+ Add airport</button>
    <small class="hint">A few home-area airports drawn as markers. ICAO code (e.g. <code>LSZH</code>) and its lat/lon. Up to 6.</small>
+  </div>
+ </section>
+
+ <!-- WEATHER (feature) -->
+ <section id="weather" class="tab">
+  <div class="card"><h2>Location &amp; units</h2>
+   <div class="row">
+    <div><label>Latitude</label><input id="wxLat" type="number" step="0.0001" min="-90" max="90"></div>
+    <div><label>Longitude</label><input id="wxLon" type="number" step="0.0001" min="-180" max="180"></div>
+   </div>
+   <small class="hint">Decimal degrees, e.g. <code>39.7392</code>, <code>-104.9903</code> &mdash; same convention as the radar. On openstreetmap.org, the two numbers in the URL after <code>map=</code>.</small>
+   <div class="row">
+    <div><label>Units</label>
+     <select id="wxUnitsF"><option value="true">&deg;F</option><option value="false">&deg;C</option></select></div>
+    <div><label>Refresh (s)</label><input id="wxPollSec" type="number" min="300" max="43200"></div>
+   </div>
+   <small class="hint">Forecast data from Open-Meteo: free, anonymous, no API key to create. It answers browsers too, so this mode works over the USB tether as well as WiFi.</small>
   </div>
  </section>
 
@@ -553,7 +573,8 @@ var FEATURES={
  spotify:{mode:'spotify',car:'carouselSpotify'},
  ambient:{mode:'ambient',car:'carouselAmbient'},
  blackjack:{mode:'blackjack',car:'carouselBlackjack'},
- calendar:{mode:'calendar',car:'carouselCalendar'}};
+ calendar:{mode:'calendar',car:'carouselCalendar'},
+ weather:{mode:'weather',car:'carouselWeather'}};
 var TOUCHGPIOS=[4,0,12,27,33,32];
 var calLinkTimer=null;
 function calLink(){
@@ -595,6 +616,9 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  renderWifi(c.wifi||(c.staSsid?[{ssid:c.staSsid,passSet:c.staPassSet}]:[]));
  $('brightness').value=c.brightness; $('brVal').textContent=c.brightness;
  $('rotation').value=c.rotation; sv('numFont',String(c.numFont||0));
+ var wx=c.weather||{};
+ if($('wxLat')){sv('wxLat',wx.lat||0);sv('wxLon',wx.lon||0);
+  sv('wxUnitsF',String(wx.unitsF!==false));sv('wxPollSec',wx.pollSec||900);}
  sc('autoBrightness',!!c.autoBrightness);
  $('backlightInverted').checked=!!c.backlightInverted;
  // header chip = which chip this firmware was built for
@@ -795,6 +819,8 @@ function collect(){
  if($('spotify')) o.spotify={enabled:gc('spotifyEnabled'),autoShow:gc('spotifyAutoShow'),
   clientId:gv('spotifyClientId').trim(), clientSecret:gv('spotifyClientSecret').trim(),
   refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
+ if($('wxLat')) o.weather={lat:parseFloat(gv('wxLat'))||0,lon:parseFloat(gv('wxLon'))||0,
+  unitsF:gv('wxUnitsF')==='true',pollSec:parseInt(gv('wxPollSec'))||900};
  if($('calEnabled')) o.calendar={enabled:gc('calEnabled'),provider:gv('calProvider'),
   clientId:gv('calClientId').trim(), clientSecret:gv('calClientSecret').trim(),
   refreshToken:gv('calRefreshToken').trim(), icsUrl:gv('calIcsUrl').trim(),

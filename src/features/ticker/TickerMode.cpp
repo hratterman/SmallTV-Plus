@@ -64,6 +64,24 @@ static void drawStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
   if (!d.valid) {
     gfxDrawCentered(d.symbol[0] ? d.symbol : "----", 80, 3, C_WHITE);
     gfxDrawCentered(d.error ? "fetch error" : "loading...", 120, 2, C_GRAY);
+    // Say WHY, not just that: the client records the failing host and HTTP
+    // code (or the client-side error) in its note. Two size-1 lines fit 80
+    // characters, which covers every note the client writes.
+    if (d.error && stocksNote()[0]) {
+      const char* n = stocksNote();
+      const size_t len = strlen(n);
+      if (len <= 38) {
+        gfxDrawCentered(n, 150, 1, C_DGRAY);
+      } else {
+        char l1[40];
+        size_t cut = 38;
+        while (cut > 20 && n[cut] != ' ') cut--;   // break at a space if there is one
+        if (n[cut] != ' ') cut = 38;
+        memcpy(l1, n, cut); l1[cut] = 0;
+        gfxDrawCentered(l1, 150, 1, C_DGRAY);
+        gfxDrawCentered(n + cut + (n[cut] == ' ' ? 1 : 0), 164, 1, C_DGRAY);
+      }
+    }
     if (s.ticker.showPageDots) {
       int total = pageCount * 10 - 4;
       int x0 = (TFT_WIDTH - total) / 2;

@@ -314,6 +314,115 @@ def clock(face):
     px_centered(px, 214, "America/Denver", 1, DGRAY)
     save(img, f"clock_{face}")
 
+# ---- weather icons, gfxWxIcon transcribed exactly (WeatherMode.cpp) -----------
+C_SUN = c565(0xFEA0); C_MOONC = c565(0xE71C); C_CLOUDM = c565(0xAD75)
+C_CLOUDD = c565(0x632C); C_RAINB = c565(0x34BF); C_BOLT = c565(0xFFE0)
+C_FOGL = c565(0x8410)
+
+def wx_sun(d, cx, cy, r, col):
+    rr = r * 5 // 8
+    d.ellipse([cx - (rr - 3), cy - (rr - 3), cx + (rr - 3), cy + (rr - 3)], fill=col)
+    dirs = [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)]
+    for dx, dy in dirs:
+        diag = dx and dy
+        a, b = rr, (r * 3 // 4 if diag else r)
+        d.line([cx + dx * a, cy + dy * a, cx + dx * b, cy + dy * b], fill=col)
+        d.line([cx + dx * a + (1 if dy else 0), cy + dy * a + (1 if dx else 0),
+                cx + dx * b + (1 if dy else 0), cy + dy * b + (1 if dx else 0)], fill=col)
+
+def wx_moon(d, cx, cy, r):
+    rr = r * 5 // 8
+    d.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], fill=C_MOONC)
+    r2 = r // 2
+    d.ellipse([cx + r // 3 - r2, cy - r // 4 - r2, cx + r // 3 + r2, cy - r // 4 + r2], fill=BLACK)
+
+def wx_cloud(d, cx, cy, r, col):
+    by = cy + r // 4
+    r1 = r // 2 + 1
+    d.ellipse([cx - r // 2 - r1, by - r // 4 - r1, cx - r // 2 + r1, by - r // 4 + r1], fill=col)
+    r2 = r * 5 // 8
+    d.ellipse([cx + r // 8 - r2, by - r // 2 - r2, cx + r // 8 + r2, by - r // 2 + r2], fill=col)
+    d.rounded_rectangle([cx - r + 2, by - r // 4, cx + r - 2, by + r // 4], r // 4, fill=col)
+
+def wx_icon(d, klass, day, cx, cy, r):
+    if klass == 0:                       # clear
+        wx_sun(d, cx, cy, r, C_SUN) if day else wx_moon(d, cx, cy, r)
+    elif klass == 1:                     # partly
+        wx_sun(d, cx - r // 3, cy - r // 3, r * 7 // 12, C_SUN)
+        wx_cloud(d, cx + r // 8, cy + r // 6, r * 3 // 4, C_CLOUDM)
+    elif klass == 2:                     # overcast
+        wx_cloud(d, cx, cy - r // 6, r, C_CLOUDD)
+        wx_cloud(d, cx - r // 8, cy, r, C_CLOUDM)
+    elif klass == 3:                     # fog
+        wx_cloud(d, cx, cy - r // 3, r * 7 // 8, C_CLOUDM)
+        for i in range(3):
+            y = cy + r // 4 + i * (r // 4 + 1)
+            d.rectangle([cx - r + 2 + (i % 2) * (r // 4), y,
+                         cx - r + 2 + (i % 2) * (r // 4) + r * 3 // 2, y + 1], fill=C_FOGL)
+    elif klass == 4:                     # rain
+        wx_cloud(d, cx, cy - r // 3, r * 7 // 8, C_CLOUDM)
+        for i in range(3):
+            x = cx - r // 2 + i * (r // 2)
+            y = cy + r // 4
+            d.line([x, y, x - r // 6, y + r // 3], fill=C_RAINB)
+            d.line([x + 1, y, x + 1 - r // 6, y + r // 3], fill=C_RAINB)
+    elif klass == 5:                     # snow
+        wx_cloud(d, cx, cy - r // 3, r * 7 // 8, C_CLOUDM)
+        fr = 2 if r > 20 else 1
+        for i in range(3):
+            x = cx - r // 2 + i * (r // 2)
+            y = cy + r // 3 + (i % 2) * (r // 6)
+            d.ellipse([x - fr, y - fr, x + fr, y + fr], fill=WHITE)
+    elif klass == 6:                     # storm
+        wx_cloud(d, cx, cy - r // 3, r * 7 // 8, C_CLOUDD)
+        by = cy + r // 6
+        d.polygon([(cx - r // 8, by - r // 8), (cx + r // 4, by - r // 8),
+                   (cx - r // 16, by + r // 4)], fill=C_BOLT)
+        d.polygon([(cx + r // 6, by), (cx - r // 4, by + r * 5 // 8),
+                   (cx - r // 16, by)], fill=C_BOLT)
+
+def weather(face):
+    img, px, d = screen()
+    sans = face == "sans"
+    # current: partly cloudy, 73 F, H/L
+    wx_icon(d, 1, True, 52, 62, 34)
+    num = "73"
+    if sans:
+        f = num_face_for(num, 100)
+        w = sans_w(NUM[f], num)
+        sans_draw(px, NUM[f], 104, 28 + NUM_META[f], num, WHITE)
+        x = 104 + w
+    else:
+        px_draw(px, 104, 28, num, 5, WHITE)
+        x = 104 + px_w(num, 5)
+    d.ellipse([x + 3, 30, x + 11, 38], outline=WHITE, width=2)
+    label(px, x + 16, 30, "F", 2, DIMU, sans)
+    label(px, 104, 88, "H 96", 2, WHITE, sans)
+    label(px, 104 + label_w("H 96", 2, sans) + 14, 88, "L 68", 2, DIMU, sans)
+    d.rectangle([12, 118, 227, 118], fill=c565(0x4208))
+    days = [("TUE", 4, "95", "66"), ("WED", 6, "94", "64"), ("THU", 0, "86", "62")]
+    for i, (lbl, k, hi, lo) in enumerate(days):
+        cx = 40 + i * 80
+        label(px, cx - label_w(lbl, 1, False) // 2, 128, lbl, 1, DIMU, False)
+        wx_icon(d, k, True, cx, 162, 17)
+        label(px, cx - label_w(hi, 2, sans) // 2, 186, hi, 2, WHITE, sans)
+        label(px, cx - label_w(lo, 2, sans) // 2, 206, lo, 2, DIMU, sans)
+    px_centered(px, 228, "just updated", 1, c565(0x4208))
+    save(img, f"weather_{face}")
+
+def weather_icons():
+    """All seven icon classes plus the moon, labelled, for review."""
+    img, px, d = screen()
+    names = ["CLEAR", "PARTLY", "CLOUD", "FOG", "RAIN", "SNOW", "STORM", "NIGHT"]
+    for i, nm in enumerate(names):
+        cx, cy = 40 + (i % 3) * 80, 44 + (i // 3) * 76
+        if nm == "NIGHT":
+            wx_icon(d, 0, False, cx, cy, 24)
+        else:
+            wx_icon(d, i, True, cx, cy, 24)
+        px_draw(px, cx - px_w(nm, 1) // 2, cy + 34, nm, 1, DIMU)
+    save(img, "weather_icons")
+
 def sheet(name, variants):
     """Side-by-side comparison sheet with a caption strip, for review at a glance."""
     caps = {"pixel": "PIXEL", "sans": "SANS", "7seg": "SEVEN-SEGMENT"}
@@ -341,7 +450,11 @@ if __name__ == "__main__":
         miner(f)
     for f in ("pixel", "sans", "7seg"):
         clock(f)
+    weather("pixel")
+    weather("sans")
+    weather_icons()
     sheet("ticker", ("pixel", "sans"))
     sheet("usage", ("pixel", "sans"))
     sheet("miner", ("pixel", "sans"))
     sheet("clock", ("pixel", "sans", "7seg"))
+    sheet("weather", ("pixel", "sans"))

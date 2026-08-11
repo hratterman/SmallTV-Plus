@@ -82,6 +82,7 @@
 #define MODE_AMBIENT   7
 #define MODE_BLACKJACK 8
 #define MODE_CALENDAR  9
+#define MODE_WEATHER   10
 #define DEFAULT_MODE MODE_STOCKS
 #define DEFAULT_CAROUSEL_SEC 30      // per-mode dwell in carousel
 
@@ -136,6 +137,17 @@
 #define WITH_CALENDAR 0
 #endif
 #endif
+
+// Weather: Open-Meteo, no key, no account, and Access-Control-Allow-Origin: *
+// (measured) — so it works identically on WiFi and over the tether cable.
+#ifndef WITH_WEATHER
+#if defined(SMALLTV_ESP32)
+#define WITH_WEATHER 1
+#else
+#define WITH_WEATHER 0
+#endif
+#endif
+#define WEATHER_URL "https://api.open-meteo.com/v1/forecast"
 
 // The device-wide numerals style: how the ticker price, the usage meters and
 // the miner hashrate draw their big numbers. Letters always stay in the pixel

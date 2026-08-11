@@ -583,6 +583,16 @@ static __attribute__((noinline)) bool parseInto(ParseKind kind, const Settings& 
   }
 }
 
+static const char* kindTag(ParseKind k) {
+  switch (k) {
+    case PARSE_YAHOO:                          return "yahoo";
+    case PARSE_SA_QUOTE: case PARSE_SA_HIST:   return "stockanalysis";
+    case PARSE_CASH_QUOTE: case PARSE_CASH_CHART: return "cash.ch";
+    case PARSE_GITHUB:                         return "github";
+    default:                                   return "webhook";
+  }
+}
+
 static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, StockData& d) {
   bool https = url.startsWith("https://");
   bool cash = (kind == PARSE_CASH_QUOTE || kind == PARSE_CASH_CHART);
@@ -597,13 +607,19 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
     //  - Yahoo / GitHub / webhook: forced to the cheap static-RSA suites, so
     //    those handshakes stay as light as the old BASIC build.
     if (cash) {
-      if (platformMaxFreeBlock() < 16000) return false;   // largest contiguous block, not total
+      if (platformMaxFreeBlock() < 16000) {   // largest contiguous block, not total
+        stocksSetNote("low heap: fetch skipped");
+        return false;
+      }
       client.reset(platformMakeSecureClient(512, &g_cashSession, 512, /*cheapCiphers=*/false));
     } else {
       // raw.githubusercontent.com sends a ~4 KB cert record and won't negotiate
       // MFLN, so it needs a bigger receive buffer than Yahoo's small records.
       uint16_t rx = (kind == PARSE_GITHUB) ? GH_QUOTES_RXBUF : 2048;
-      if (ESP.getFreeHeap() < (uint32_t)rx + 12000) return false;
+      if (ESP.getFreeHeap() < (uint32_t)rx + 12000) {
+        stocksSetNote("low heap: fetch skipped");
+        return false;
+      }
       client.reset(platformMakeSecureClient(rx, nullptr, 512, /*cheapCiphers=*/true));
     }
   } else {
@@ -668,6 +684,13 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
 
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
+    char note[72];
+    if (code < 0)
+      snprintf(note, sizeof(note), "%s: %s", kindTag(kind),
+               HTTPClient::errorToString(code).c_str());
+    else
+      snprintf(note, sizeof(note), "%s: HTTP %d", kindTag(kind), code);
+    stocksSetNote(note);
     http.end();
     return false;
   }
@@ -675,6 +698,11 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   // PARSE_GITHUB falls to parseWebhook inside parseInto: same JSON shape.
   const bool ok = parseInto(kind, s, d, http.getStream());
   http.end();
+  if (!ok) {
+    char note[72];
+    snprintf(note, sizeof(note), "%s: unexpected reply", kindTag(kind));
+    stocksSetNote(note);
+  }
   return ok;
 }
 
@@ -699,8 +727,6 @@ static bool stepSymbol(const Settings& s, StockData& d) {
   if (source == SRC_YAHOO && netFetchTethered()) {
     source = SRC_SA;
     stocksSetNote("tethered: Yahoo blocks browsers, using stockanalysis.com");
-  } else if (source == SRC_YAHOO) {
-    stocksSetNote("");
   }
 #endif
 
@@ -773,6 +799,7 @@ void stocksService(const Settings& s) {
       g_refreshing = true;
       g_fetchIdx = 0;
       g_fetchPhase = 0;
+      stocksSetNote("");   // this cycle's failures write it fresh
     } else {
       return;
     }
