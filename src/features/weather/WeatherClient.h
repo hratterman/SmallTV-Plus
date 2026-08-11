@@ -17,7 +17,7 @@
 struct WeatherData {
   bool     valid;                     // ever fetched OK
   bool     error;                     // last fetch failed
-  char     errMsg[48];
+  char     errMsg[72];
   uint32_t lastOkMs;
   float    curTemp;
   uint8_t  curCode;                   // WMO code, current conditions

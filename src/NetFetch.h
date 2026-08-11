@@ -21,7 +21,7 @@ struct NetFetchResult {
   int      status;     // HTTP status, 0 if it never got that far
   uint32_t bytes;      // body bytes handed to the sink
   bool     viaTether;  // which route carried it, for diagnostics
-  char     error[56];  // why not, when !ok
+  char     error[72];  // why not, when !ok
 };
 
 // One request. Blocking.
@@ -42,7 +42,21 @@ NetFetchResult netFetchToString(const char* url, bool post, const char* headers,
 // Resolve a URL's host and reject filtering-resolver block answers (0.0.0.0 /
 // 127.0.0.1) before a fetch. Returns false with `err` filled when DNS is the
 // problem — which on hotspots and hotel WiFi it often is.
-bool netDnsPrecheck(const char* url, char* err, size_t errLen);
+bool netDnsPrecheck(const char* url, char* err, size_t errLen,
+                    char* ipOut = nullptr);   // ipOut: >=16 bytes, dotted quad
+
+// Serialize TLS fetches across threads. The calendar task and the display
+// loop each stand up a TLS session with ~20+ KB of buffers; two at once on a
+// fragmenting heap is a "connection refused despite plenty of total heap"
+// generator. Scoped: construct to take the lock, destruct to release. On the
+// ESP8266 (single-threaded) it is a no-op.
+class NetTlsGuard {
+ public:
+  NetTlsGuard();
+  ~NetTlsGuard();
+ private:
+  bool held_;
+};
 
 // True when a request has somewhere to go at all: a joined network, or a
 // tether. Anything gating work on connectivity should ask this rather than the

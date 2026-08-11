@@ -21,7 +21,7 @@ class StringStream : public Stream {
 // Why the ticker can be blank, in the device's own words. Only set on the
 // tether path so far, where the reason is a fixed property of the source rather
 // than a transient network problem.
-static char s_note[64] = "";
+static char s_note[80] = "";
 void stocksSetNote(const char* n) {
   const char* v = n ? n : "";
   if (!strcmp(s_note, v)) return;          // once per change, not once per poll
@@ -664,15 +664,18 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   }
 #endif
 
+  char ips[16];
   {
     // Same pre-resolve NetFetch does: a filtering resolver's block answer must
     // not masquerade as "connection refused" in the note.
     char derr[64];
-    if (!netDnsPrecheck(url.c_str(), derr, sizeof(derr))) {
+    if (!netDnsPrecheck(url.c_str(), derr, sizeof(derr), ips)) {
       stocksSetNote(derr);
       return false;
     }
   }
+
+  NetTlsGuard tlsLock;   // don't overlap the calendar task's TLS session
 
   HTTPClient http;
   http.setTimeout(s.httpTimeout);
@@ -694,10 +697,13 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
 
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    char note[72];
+    char note[80];
     if (code < 0)
-      snprintf(note, sizeof(note), "%s: %s", kindTag(kind),
-               HTTPClient::errorToString(code).c_str());
+      // The resolved address and the largest free block turn "refused" into a
+      // diagnosis: a filter's sinkhole IP, or a heap too fragmented for TLS.
+      snprintf(note, sizeof(note), "%s: %s @%s b=%uk", kindTag(kind),
+               HTTPClient::errorToString(code).c_str(), ips,
+               (unsigned)(platformMaxFreeBlock() / 1024));
     else
       snprintf(note, sizeof(note), "%s: HTTP %d", kindTag(kind), code);
     stocksSetNote(note);

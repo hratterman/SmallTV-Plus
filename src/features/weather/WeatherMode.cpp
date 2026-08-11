@@ -154,7 +154,24 @@ void WeatherMode::render(const Settings& s) {
   if (!w.valid) {
     gfxDrawCentered("WEATHER", 80, 3, C_WHITE);
     gfxDrawCentered(w.error ? "fetch error" : "fetching...", 124, 2, C_DIMTX);
-    if (w.error && w.errMsg[0]) gfxDrawCentered(w.errMsg, 152, 1, C_FAINT);
+    // The reason, split over two size-1 lines - the message carries the
+    // resolved IP and heap details, and clipping those defeats its purpose.
+    if (w.error && w.errMsg[0]) {
+      const char* n = w.errMsg;
+      const size_t len = strlen(n);
+      if (len <= 38) {
+        gfxDrawCentered(n, 152, 1, C_FAINT);
+      } else {
+        char l1[40];
+        size_t cut = 38;
+        while (cut > 20 && n[cut] != ' ') cut--;
+        if (n[cut] != ' ') cut = 38;
+        memcpy(l1, n, cut);
+        l1[cut] = 0;
+        gfxDrawCentered(l1, 152, 1, C_FAINT);
+        gfxDrawCentered(n + cut + (n[cut] == ' ' ? 1 : 0), 166, 1, C_FAINT);
+      }
+    }
     return;
   }
 

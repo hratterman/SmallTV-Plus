@@ -1,3 +1,4 @@
+#include "Platform.h"
 #include "NetFetch.h"
 #include "Net.h"
 
@@ -30,7 +31,8 @@ bool netFetchTethered() {
 // clients fold "DNS said no", "DNS answered 0.0.0.0" (a filtering resolver's
 // block answer - hotspots and hotel WiFi do this) and "TCP refused" into one
 // opaque failure. On a filtered network the difference IS the diagnosis.
-bool netDnsPrecheck(const char* url, char* err, size_t errLen) {
+bool netDnsPrecheck(const char* url, char* err, size_t errLen, char* ipOut) {
+  if (ipOut) ipOut[0] = 0;
   char host[64];
   const char* hs = strstr(url, "://");
   hs = hs ? hs + 3 : url;
@@ -47,8 +49,27 @@ bool netDnsPrecheck(const char* url, char* err, size_t errLen) {
     snprintf(err, errLen, "DNS blocked %s (%s)", host, ip.toString().c_str());
     return false;
   }
+  if (ipOut) strlcpy(ipOut, ip.toString().c_str(), 16);
   return true;
 }
+
+// The TLS serialization lock. Function-local static so initialization is
+// thread-safe (magic statics); the 15 s cap means a wedged holder degrades to
+// the old concurrent behavior instead of deadlocking everyone.
+#if defined(ESP8266)
+NetTlsGuard::NetTlsGuard() : held_(false) {}
+NetTlsGuard::~NetTlsGuard() {}
+#else
+static SemaphoreHandle_t tlsMux() {
+  static SemaphoreHandle_t mux = xSemaphoreCreateMutex();
+  return mux;
+}
+NetTlsGuard::NetTlsGuard()
+    : held_(xSemaphoreTake(tlsMux(), pdMS_TO_TICKS(15000)) == pdTRUE) {}
+NetTlsGuard::~NetTlsGuard() {
+  if (held_) xSemaphoreGive(tlsMux());
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // WiFi backing.
@@ -60,8 +81,10 @@ static NetFetchResult fetchOverWifi(const char* url, bool post, const char* head
 
   const bool tls = strncmp(url, "https://", 8) == 0;
 
-  if (!netDnsPrecheck(url, r.error, sizeof(r.error))) return r;
+  char ips[16];
+  if (!netDnsPrecheck(url, r.error, sizeof(r.error), ips)) return r;
 
+  NetTlsGuard tlsLock;   // one TLS session at a time, across threads
   WiFiClientSecure secure;
   WiFiClient plain;
   if (tls) {
@@ -96,7 +119,20 @@ static NetFetchResult fetchOverWifi(const char* url, bool post, const char* head
 
   r.status = post ? http.POST((uint8_t*)body, bodyLen) : http.GET();
   if (r.status <= 0) {
-    snprintf(r.error, sizeof(r.error), "connect failed (%d)", r.status);
+    // Everything a remote diagnosis needs on one line: which address the
+    // resolver gave us (a filter's sinkhole answers then refuses 443), the
+    // largest free heap block (TLS wants big contiguous buffers), and the
+    // TLS layer's own error code when there is one.
+#if defined(ESP8266)
+    snprintf(r.error, sizeof(r.error), "connect failed (%d) @%s b=%uk",
+             r.status, ips, (unsigned)(platformMaxFreeBlock() / 1024));
+#else
+    char sb[4];
+    const int ssl = tls ? secure.lastError(sb, sizeof(sb)) : 0;
+    snprintf(r.error, sizeof(r.error), "connect failed (%d) @%s b=%uk ssl=%X",
+             r.status, ips, (unsigned)(platformMaxFreeBlock() / 1024),
+             (unsigned)(ssl < 0 ? -ssl : ssl));
+#endif
     http.end();
     return r;
   }
