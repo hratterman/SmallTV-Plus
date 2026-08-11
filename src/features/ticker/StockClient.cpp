@@ -664,6 +664,16 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
   }
 #endif
 
+  {
+    // Same pre-resolve NetFetch does: a filtering resolver's block answer must
+    // not masquerade as "connection refused" in the note.
+    char derr[64];
+    if (!netDnsPrecheck(url.c_str(), derr, sizeof(derr))) {
+      stocksSetNote(derr);
+      return false;
+    }
+  }
+
   HTTPClient http;
   http.setTimeout(s.httpTimeout);
   http.setReuse(false);
@@ -714,6 +724,16 @@ static bool fetchUrl(const Settings& s, const String& url, ParseKind kind, Stock
 // server and tripped the watchdog. g_fetchPhase tracks the step for g_fetchIdx.
 static uint8_t g_fetchPhase = 0;
 
+// Yahoo sometimes refuses connections from a whole network: a phone hotspot
+// puts thousands of users behind one carrier-NAT address, and Yahoo turns the
+// shared address away outright ("connection refused" while every other host
+// answers). After two full round-trip failures in a row the client latches
+// the same stockanalysis.com substitution the tether path makes, and retries
+// Yahoo when the latch expires. The saved configuration is untouched.
+static uint8_t  s_yahooFails = 0;
+static uint32_t s_yahooAvoidUntil = 0;
+static const uint32_t YAHOO_AVOID_MS = 10UL * 60UL * 1000UL;
+
 // Returns true when this symbol is finished (caller advances to the next).
 static bool stepSymbol(const Settings& s, StockData& d) {
   uint8_t source = d.source;
@@ -729,6 +749,11 @@ static bool stepSymbol(const Settings& s, StockData& d) {
     stocksSetNote("tethered: Yahoo blocks browsers, using stockanalysis.com");
   }
 #endif
+  if (source == SRC_YAHOO && s_yahooAvoidUntil &&
+      (int32_t)(millis() - s_yahooAvoidUntil) < 0) {
+    source = SRC_SA;
+    stocksSetNote("yahoo unreachable - using stockanalysis.com");
+  }
 
   if (source == SRC_SA) {
     if (g_fetchPhase == 0) {            // quote: price and the day's change
@@ -751,11 +776,23 @@ static bool stepSymbol(const Settings& s, StockData& d) {
 
   if (source == SRC_YAHOO) {
     if (g_fetchPhase == 0) {
-      if (fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST1, d.symbol), PARSE_YAHOO, d)) return true;
+      if (fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST1, d.symbol), PARSE_YAHOO, d)) {
+        s_yahooFails = 0;
+        return true;
+      }
       g_fetchPhase = 1;                 // transient drop: retry the mirror next tick
       return false;
     }
-    if (!fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST2, d.symbol), PARSE_YAHOO, d)) d.error = true;
+    if (!fetchUrl(s, buildYahooUrl(s, YAHOO_CHART_HOST2, d.symbol), PARSE_YAHOO, d)) {
+      d.error = true;
+      if (++s_yahooFails >= 2) {        // both mirrors, twice: not transient
+        s_yahooAvoidUntil = millis() + YAHOO_AVOID_MS;
+        if (!s_yahooAvoidUntil) s_yahooAvoidUntil = 1;   // 0 means "no latch"
+        s_yahooFails = 0;
+      }
+    } else {
+      s_yahooFails = 0;
+    }
     return true;
   }
 

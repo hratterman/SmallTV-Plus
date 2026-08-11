@@ -274,6 +274,7 @@ struct Settings {
   bool     backlightInverted; // active-low backlight
   uint8_t  rotation;          // 0..3 screen orientation
   uint8_t  numFont;           // NUM_FONT_* — how big numerals are drawn, device-wide
+  String   dnsOverride;       // optional DNS server (e.g. "8.8.8.8"); empty = the network's own
 
   // --- Feature slices ---
   TickerSettings ticker;

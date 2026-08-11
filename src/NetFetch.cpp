@@ -26,6 +26,31 @@ bool netFetchTethered() {
 }
 
 // ---------------------------------------------------------------------------
+// Resolve a URL's host separately before any HTTP client touches it: the
+// clients fold "DNS said no", "DNS answered 0.0.0.0" (a filtering resolver's
+// block answer - hotspots and hotel WiFi do this) and "TCP refused" into one
+// opaque failure. On a filtered network the difference IS the diagnosis.
+bool netDnsPrecheck(const char* url, char* err, size_t errLen) {
+  char host[64];
+  const char* hs = strstr(url, "://");
+  hs = hs ? hs + 3 : url;
+  size_t n = strcspn(hs, "/:");
+  if (n >= sizeof(host)) n = sizeof(host) - 1;
+  memcpy(host, hs, n);
+  host[n] = 0;
+  IPAddress ip;
+  if (!WiFi.hostByName(host, ip)) {
+    snprintf(err, errLen, "DNS failed: %s", host);
+    return false;
+  }
+  if (ip == IPAddress(0, 0, 0, 0) || ip == IPAddress(127, 0, 0, 1)) {
+    snprintf(err, errLen, "DNS blocked %s (%s)", host, ip.toString().c_str());
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // WiFi backing.
 static NetFetchResult fetchOverWifi(const char* url, bool post, const char* headers,
                                     const uint8_t* body, uint16_t bodyLen,
@@ -34,6 +59,9 @@ static NetFetchResult fetchOverWifi(const char* url, bool post, const char* head
   r.viaTether = false;
 
   const bool tls = strncmp(url, "https://", 8) == 0;
+
+  if (!netDnsPrecheck(url, r.error, sizeof(r.error))) return r;
+
   WiFiClientSecure secure;
   WiFiClient plain;
   if (tls) {

@@ -1,3 +1,4 @@
+#include "TextFold.h"
 #include "Gfx.h"
 #include "GfxMarqueeStep.h"
 #include "Platform.h"
@@ -299,6 +300,12 @@ void gfxApInfo(const char* ssid, const char* pass, const char* ip) {
 }
 
 void gfxStaInfo(const char* ssid, const char* ip, const char* host) {
+  // The SSID is the one string on this screen the outside world writes;
+  // fold it for display (the joining bytes elsewhere stay exact).
+  char sbuf[40];
+  strlcpy(sbuf, ssid && ssid[0] ? ssid : "-", sizeof(sbuf));
+  textFoldUtf8(sbuf);
+  ssid = sbuf;
   if (!gfx) return;
   gfx->fillScreen(C_BLACK);
   gfxDrawCentered("CONNECTED", 18, 3, C_GREEN);

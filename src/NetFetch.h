@@ -39,6 +39,11 @@ NetFetchResult netFetchToString(const char* url, bool post, const char* headers,
                                 const uint8_t* body, uint16_t bodyLen,
                                 String& out, uint32_t maxBytes, uint32_t timeoutMs);
 
+// Resolve a URL's host and reject filtering-resolver block answers (0.0.0.0 /
+// 127.0.0.1) before a fetch. Returns false with `err` filled when DNS is the
+// problem — which on hotspots and hotel WiFi it often is.
+bool netDnsPrecheck(const char* url, char* err, size_t errLen);
+
 // True when a request has somewhere to go at all: a joined network, or a
 // tether. Anything gating work on connectivity should ask this rather than the
 // radio — the radio is one of two answers, and treating it as the only one is

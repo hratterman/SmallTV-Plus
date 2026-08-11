@@ -92,6 +92,9 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
   </div>
   <div class="card"><h2>Device name</h2>
    <label>Hostname</label><input id="hostname" type="text" placeholder="smalltv">
+   <label style="margin-top:10px">Custom DNS <span class="muted">&mdash; optional</span></label>
+   <input id="dnsOverride" type="text" placeholder="e.g. 8.8.8.8 (blank = the network's own)">
+   <small class="hint">Some networks &mdash; phone hotspots and hotel WiFi especially &mdash; run a filtering DNS that blocks API hosts while normal sites work (the symptom: some modes fetch fine, others say <code>DNS blocked</code> or <code>connect failed</code>). Pointing at a public resolver like <code>8.8.8.8</code> or <code>1.1.1.1</code> routes past the filter.</small>
    <small class="hint">Reachable as <code>http://&lt;hostname&gt;.local</code> via mDNS. Running several SmallTVs? Give each its own name (<code>smalltv-desk</code>, <code>smalltv-shelf</code>) so browsers and the clawdmeter daemon's <code>--push-to</code> reach the right device. Saving a new name reboots the device.</small>
   </div>
   <div class="card"><h2>Setup hotspot (AP)</h2>
@@ -641,6 +644,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  var t=c.ticker||{}, u=c.usage||{};
  // shared
  ['apSsid','apPass','hostname'].forEach(function(k){$(k).value=c[k]!=null?c[k]:''});
+ $('dnsOverride').value=c.dns!=null?c.dns:'';
  renderWifi(c.wifi||(c.staSsid?[{ssid:c.staSsid,passSet:c.staPassSet}]:[]));
  $('brightness').value=c.brightness; $('brVal').textContent=c.brightness;
  $('rotation').value=c.rotation; sv('numFont',String(c.numFont||0));
@@ -788,6 +792,7 @@ function collect(){
   rotation:parseInt(gv('rotation')),numFont:parseInt(gv('numFont'))||0,
   backlightInverted:gc('backlightInverted'),
   hostname:gv('hostname'), apSsid:gv('apSsid'), apPass:gv('apPass'),
+  dns:gv('dnsOverride').trim(),
   wifi:collectWifi()};
  // Every mode tick, taken from CAROPT rather than listed again. Spelling them
  // out here is how the miner tick went unsent for weeks, and then ambient and

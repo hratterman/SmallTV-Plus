@@ -620,6 +620,7 @@ void Settings::setDefaults() {
   // Unique per device so several SmallTVs on one network don't collide on
   // mDNS out of the box. A hostname saved in config.json overrides this.
   hostname = String(DEFAULT_HOSTNAME) + "-" + String(platformChipId() & 0xFFFF, HEX);
+  dnsOverride = "";
 
   mode = DEFAULT_MODE;
   carouselSec = DEFAULT_CAROUSEL_SEC;
@@ -721,6 +722,7 @@ static uint8_t modeFromToken(const String& t) {
 
 void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
   root["hostname"]   = s.hostname;
+  root["dns"]        = s.dnsOverride;
 
   // WiFi networks. Passwords only reach the config file, never the web API.
   JsonArray wf = root["wifi"].to<JsonArray>();
@@ -771,6 +773,7 @@ void settingsToJson(const Settings& s, JsonObject root, bool includeSecrets) {
 // the nested layout and the legacy flat layout (feature keys at the top level).
 void settingsApplyJson(Settings& s, JsonObjectConst root) {
   if (root["hostname"].is<const char*>()) s.hostname = root["hostname"].as<String>();
+  if (root["dns"].is<const char*>())      s.dnsOverride = root["dns"].as<String>();
 
   if (root["wifi"].is<JsonArrayConst>()) {
     // The list is authoritative when present (order = try priority, missing

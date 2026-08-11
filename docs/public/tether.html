@@ -301,6 +301,10 @@ details>div{margin-top:12px}
               </div>
             </div>
             <div class="row">
+              <label for="dnsOverride">Custom DNS <span class="hint">optional; e.g. 8.8.8.8 &mdash; routes past filtering hotspot resolvers</span></label>
+              <input id="dnsOverride" type="text" placeholder="blank = the network's own">
+            </div>
+            <div class="row">
               <label for="brightness">Brightness <span class="hint">&mdash; <span id="brightVal">100</span>%</span></label>
               <input id="brightness" type="range" min="0" max="100">
             </div>
@@ -643,6 +647,7 @@ const FIELDS=[
   ['rotation',          ['rotation'],                   'number'],
   ['numFont',           ['numFont'],                    'number'],
   ['clockFace',         ['clock','face'],               'number'],
+  ['dnsOverride',       ['dns'],                        'string'],
   ['carouselSec',       ['carouselSec'],                'number'],
   ['brightness',        ['brightness'],                 'number'],
   ['backlightInverted', ['backlightInverted'],          'bool'],

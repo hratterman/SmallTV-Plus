@@ -1,3 +1,5 @@
+#include <lwip/dns.h>
+#include "TextFold.h"
 #include "Net.h"
 #if WITH_TETHER
 #include "Tether.h"
@@ -64,7 +66,24 @@ void netStartApAlongside() {
   startAPCommon(*g_cfg, true);
 }
 
+// The DNS override, cached at netBegin so the reconnect path (which has no
+// Settings in scope) can re-apply it after a DHCP re-bind resets the servers.
+// Filtering resolvers (hotspots, hotel WiFi, parental controls) answer for
+// some hosts and block others; pointing at a public resolver routes past them.
+static String g_dnsOverride;
+
+static void applyDnsOverride() {
+  if (!g_dnsOverride.length()) return;
+  IPAddress d;
+  if (!d.fromString(g_dnsOverride)) return;
+  ip_addr_t da;
+  IP_ADDR4(&da, d[0], d[1], d[2], d[3]);
+  dns_setserver(0, &da);
+  dns_setserver(1, &da);
+}
+
 void netBegin(const Settings& s, void (*onProgress)(const char*)) {
+  g_dnsOverride = s.dnsOverride;
   g_cfg = &s;
   g_hostname = s.hostname.length() ? s.hostname : String(DEFAULT_HOSTNAME);
   WiFi.persistent(false);
@@ -120,6 +139,7 @@ void netBegin(const Settings& s, void (*onProgress)(const char*)) {
     if (onProgress) {
       char msg[48];
       snprintf(msg, sizeof(msg), "WiFi: %s", n.ssid.c_str());
+      textFoldUtf8(msg);   // hotspot names love curly apostrophes; the panel font doesn't
       onProgress(msg);
     }
     WiFi.begin(n.ssid.c_str(), n.pass.c_str());
@@ -134,6 +154,7 @@ void netBegin(const Settings& s, void (*onProgress)(const char*)) {
     if (WiFi.status() == WL_CONNECTED) {
       g_curNet = (int8_t)order[k];
       g_mode = NET_STA;
+      applyDnsOverride();
       if (MDNS.begin(g_hostname.c_str())) {
         MDNS.addService("http", "tcp", 80);
 #if WITH_USAGE
@@ -169,6 +190,7 @@ void netLoop() {
   // status is picked up on later passes.
   platformMdnsUpdate();
   if (WiFi.status() == WL_CONNECTED) {
+    if (g_downSince) applyDnsOverride();   // recovered: DHCP re-bind reset DNS
     g_downSince = 0;
     return;
   }

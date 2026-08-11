@@ -297,6 +297,8 @@ int main() {
     };
     fold("Doctor\xE2\x80\x99s Appointment", "Doctor's Appointment",
          "curly apostrophe becomes '");
+    fold("Angie\xE2\x80\x99s Ipad Mini", "Angie's Ipad Mini",
+         "hotspot SSIDs fold the same way");
     fold("\xE2\x80\x9Cscare quotes\xE2\x80\x9D", "\"scare quotes\"",
          "curly doubles become \"");
     fold("Caf\xC3\xA9 \xE2\x80\x93 review", "Cafe - review",
