@@ -96,14 +96,82 @@ void gfxSetRotation(uint8_t r) {
 // ---- text helpers (built-in 6x8 font, integer scaled) ---------------------
 int gfxTextW(const char* s, uint8_t size) { return (int)strlen(s) * 6 * size; }
 
+// ---- The typeface ---------------------------------------------------------
+#include "TextFonts.h"
+
+static bool s_typeSans = false;
+void gfxTypeSans(bool on) { s_typeSans = on; }
+bool gfxTypeIsSans()      { return s_typeSans; }
+
+// Which sans face stands in for a pixel size. Only 3 and 2 have one — size 1
+// is too small for anything but the pixel font, and nothing draws text at 4+.
+static int textFaceFor(uint8_t size) {
+  if (size == 3) return 0;
+  if (size == 2) return 1;
+  return -1;
+}
+
+static int textFaceW(const char* s, int face) {
+  const GFXfont* f = kTextFaces[face].font;
+  int w = 0;
+  for (const char* p = s; *p; p++) {
+    if ((uint8_t)*p < TEXT_FONT_FIRST || (uint8_t)*p > TEXT_FONT_LAST) return -1;
+    const GFXglyph* g = &f->glyph[(uint8_t)*p - f->first];
+    w += pgm_read_byte(&g->xAdvance);
+  }
+  return w;
+}
+
+// Top-of-band to baseline. The pixel value is 8*size — the constant the sites
+// that align a smaller unit against a big number's baseline always used.
+int gfxLabelAscent(uint8_t size) {
+  if (s_typeSans) {
+    const int face = textFaceFor(size);
+    if (face >= 0) return kTextFaces[face].ascent;
+  }
+  return 8 * size;
+}
+
+int gfxLabelW(const char* s, uint8_t size) {
+  if (s_typeSans) {
+    const int face = textFaceFor(size);
+    if (face >= 0) {
+      const int w = textFaceW(s, face);
+      if (w >= 0) return w;
+    }
+  }
+  return gfxTextW(s, size);
+}
+
+// Draw a label with `topY` as the top of its pixel band. The sans faces fit
+// the band by construction, so this can substitute for the pixel font at any
+// call site without re-checking its layout. Falls back to pixel when the
+// string has a character the face lacks, or when sans would overflow a line
+// the caller had pixel-fit (all-caps sans can run a little wider per char).
+void gfxLabel(int x, int topY, const char* s, uint8_t size, uint16_t color) {
+  if (!gfx) return;
+  const int face = s_typeSans ? textFaceFor(size) : -1;
+  const int w = face >= 0 ? textFaceW(s, face) : -1;
+  if (w >= 0 && x + w <= TFT_WIDTH) {
+    gfx->setFont(kTextFaces[face].font);
+    gfx->setTextSize(1);
+    gfx->setTextColor(color);
+    gfx->setCursor(x, topY + kTextFaces[face].ascent);
+    gfx->print(s);
+    gfx->setFont(nullptr);
+  } else {
+    gfx->setTextSize(size);
+    gfx->setTextColor(color);
+    gfx->setCursor(x, topY);
+    gfx->print(s);
+  }
+}
+
 void gfxDrawCentered(const char* s, int y, uint8_t size, uint16_t color) {
   if (!gfx) return;
-  int x = (TFT_WIDTH - gfxTextW(s, size)) / 2;
+  int x = (TFT_WIDTH - gfxLabelW(s, size)) / 2;
   if (x < 0) x = 0;
-  gfx->setTextSize(size);
-  gfx->setTextColor(color);
-  gfx->setCursor(x, y);
-  gfx->print(s);
+  gfxLabel(x, y, s, size, color);
 }
 
 // ---- The numbers face -----------------------------------------------------

@@ -46,6 +46,18 @@ struct GfxMarquee {
 // scrolling, so the caller knows this band needs to keep being redrawn.
 bool gfxMarqueeDraw(const GfxMarquee& m, const char* s, uint32_t phaseMs);
 
+// ---- The typeface ---------------------------------------------------------
+// One device-wide switch (the Typeface setting) between the classic pixel
+// font and real sans type. The main loop latches it here each frame; the
+// helpers below — and gfxDrawCentered — consult it, so call sites don't.
+// Sizes 2 and 3 have sans stand-ins whose ascent+descent fit the pixel band
+// exactly (see tools/gen_font.py); size 1 and the marquee always stay pixel.
+void gfxTypeSans(bool on);
+bool gfxTypeIsSans();
+int  gfxLabelW(const char* s, uint8_t size);   // width under the active typeface
+int  gfxLabelAscent(uint8_t size);             // top-to-baseline, for mixed figures
+void gfxLabel(int x, int topY, const char* s, uint8_t size, uint16_t color);
+
 // ---- The numbers face -----------------------------------------------------
 // Sites that show a big numeral (ticker price, usage %, miner hashrate) draw
 // it through these, so whether it comes out pixel or sans is one setting

@@ -84,11 +84,7 @@ static void drawMeter(Arduino_GFX* gfx, int top, const char* label,
     gfx->print(pc);
   }
 
-  int lw = gfxTextW(label, 2);
-  gfx->setTextSize(2);
-  gfx->setTextColor(C_DIM);
-  gfx->setCursor(x + w - lw - 14, top + 12);
-  gfx->print(label);
+  gfxLabel(x + w - gfxLabelW(label, 2) - 14, top + 12, label, 2, C_DIM);
 
   int bx = x + 14, by = top + 52, bw = w - 28, bh = 12;
   gfx->fillRoundRect(bx, by, bw, bh, bh / 2, C_BARBG);
@@ -99,10 +95,7 @@ static void drawMeter(Arduino_GFX* gfx, int top, const char* label,
   char rs[16], line[28];
   fmtReset(resetMins, rs, sizeof(rs));
   snprintf(line, sizeof(line), "Resets in %s", rs);
-  gfx->setTextSize(2);
-  gfx->setTextColor(C_DIM);
-  gfx->setCursor(x + 14, top + 64);
-  gfx->print(line);
+  gfxLabel(x + 14, top + 64, line, 2, C_DIM);
 }
 
 // Stats screen: mascot header + 5h/7d meters.
@@ -114,10 +107,7 @@ static void drawUsage(const UsageData& u) {
 
   // Header: a small calm mascot pose + title.
   blitMascot(gfx, mascotIdleCells(), mascotIdlePalette(), 6, 4, 2);
-  gfx->setTextSize(3);
-  gfx->setTextColor(C_WHITE);
-  gfx->setCursor(56, 12);
-  gfx->print("CLAUDE");
+  gfxLabel(56, 12, "CLAUDE", 3, C_WHITE);
 
   if (!u.valid) {
     gfxDrawCentered(u.error ? "daemon error" : "waiting...", 120, 2, C_DIM);

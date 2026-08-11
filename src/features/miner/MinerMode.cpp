@@ -102,10 +102,7 @@ static void drawSlotRight(Arduino_GFX* gfx, Slot& slot, const char* s, int right
   if (!strcmp(slot.text, s)) return;
   strlcpy(slot.text, s, sizeof(slot.text));
   gfx->fillRect(rightX - VAL_SLOT, y, VAL_SLOT, 8 * size, bg);
-  gfx->setTextSize(size);
-  gfx->setTextColor(color);
-  gfx->setCursor(rightX - gfxTextW(s, size), y);
-  gfx->print(s);
+  gfxLabel(rightX - gfxLabelW(s, size), y, s, size, color);
 }
 
 void MinerMode::begin(const Settings& s) {
@@ -123,10 +120,7 @@ void MinerMode::renderChrome(const Settings& s) {
   if (!gfx) return;
 
   gfx->fillScreen(C_BLACK);
-  gfx->setTextSize(2);
-  gfx->setTextColor(C_BTC);
-  gfx->setCursor(10, 10);
-  gfx->print("MINER");
+  gfxLabel(10, 10, "MINER", 2, C_BTC);
 
   gfx->fillRoundRect(PANEL_X, RATE_Y, PANEL_W, RATE_H, 8, C_PANEL);
   gfx->fillRoundRect(PANEL_X, STAT_Y, PANEL_W, STAT_H, 8, C_PANEL);
@@ -152,10 +146,7 @@ void MinerMode::render(const Settings& s, bool full) {
   if (!st.configured) {
     if (full) {
       gfx->fillScreen(C_BLACK);
-      gfx->setTextSize(2);
-      gfx->setTextColor(C_BTC);
-      gfx->setCursor(10, 10);
-      gfx->print("MINER");
+      gfxLabel(10, 10, "MINER", 2, C_BTC);
       const bool work = st.blockedByWork;
       gfxDrawCentered(work ? "off for work mode"
                            : (s.miner.enabled ? "no BTC address" : "mining disabled"),
@@ -181,18 +172,16 @@ void MinerMode::render(const Settings& s, bool full) {
     gfx->fillRect(PANEL_X + 4, RATE_Y + 6, PANEL_W - 8, RATE_H - 12, C_PANEL);
     const uint16_t numC = st.hashrate ? C_WHITE : C_DIM;
     if (s.numFont == NUM_FONT_SANS && gfxNumEligible(num)) {
-      // The unit ("kH/s") has letters and stays pixel; only the number changes
-      // face. Their baselines align so the pair still reads as one figure.
+      // The unit rides the text face, the number the numbers face; their
+      // baselines align so the pair still reads as one figure.
       int face = gfxNumFace(num, 150);
       while (face < NUM_FACES - 1 && gfxNumFaceH(face) > RATE_H - 12) face++;
-      const int nw = gfxNumFaceW(num, face), uw = gfxTextW(unit, 2);
+      const int nw = gfxNumFaceW(num, face), uw = gfxLabelW(unit, 2);
       const int x0 = (TFT_WIDTH - (nw + 8 + uw)) / 2;
       const int ny = RATE_Y + (RATE_H - gfxNumFaceH(face)) / 2;
       gfxNumFaceDraw(x0, ny, num, face, numC);
-      gfx->setTextSize(2);
-      gfx->setTextColor(C_DIM);
-      gfx->setCursor(x0 + nw + 8, ny + gfxNumFaceAscent(face) - 16);
-      gfx->print(unit);
+      gfxLabel(x0 + nw + 8, ny + gfxNumFaceAscent(face) - gfxLabelAscent(2),
+               unit, 2, C_DIM);
     } else {
       uint8_t nsz = gfxFitSize(num, 150, 5);
       int nw = gfxTextW(num, nsz), uw = gfxTextW(unit, 2);

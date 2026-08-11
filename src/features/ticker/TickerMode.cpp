@@ -183,12 +183,7 @@ static void drawStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
 
   // Range label (top-right; the very bottom row is overscanned on this panel)
   if (s.ticker.showRangeLabel && d.rangeLabel[0]) {
-    int sz = 2;
-    int tw = gfxTextW(d.rangeLabel, sz);
-    gfx->setTextSize(sz);
-    gfx->setTextColor(C_GRAY);
-    gfx->setCursor(TFT_WIDTH - tw - 4, 4);
-    gfx->print(d.rangeLabel);
+    gfxLabel(TFT_WIDTH - gfxLabelW(d.rangeLabel, 2) - 4, 4, d.rangeLabel, 2, C_GRAY);
   }
 
   // Updated-ago (bottom-left)
@@ -197,10 +192,7 @@ static void drawStock(const StockData& d, uint8_t pageIndex, uint8_t pageCount,
     char buf[12];
     if (ago < 100) snprintf(buf, sizeof(buf), "%lus", (unsigned long)ago);
     else           snprintf(buf, sizeof(buf), "%lum", (unsigned long)(ago / 60));
-    gfx->setTextSize(2);
-    gfx->setTextColor(d.error ? C_RED : C_DGRAY);
-    gfx->setCursor(4, 224);
-    gfx->print(buf);
+    gfxLabel(4, 224, buf, 2, d.error ? C_RED : C_DGRAY);
   }
 
   // Stale/error dot (top-left) when last refresh failed but we have old data.
@@ -259,24 +251,18 @@ static void drawPortfolio(uint8_t pageIndex, uint8_t pageCount, const Settings& 
 
     char nm[10];
     strlcpy(nm, d.name[0] ? d.name : d.symbol, sizeof(nm));
-    gfx->setTextSize(2);
-    gfx->setTextColor(C_WHITE);
-    gfx->setCursor(4, y);
-    gfx->print(nm);
+    gfxLabel(4, y, nm, 2, C_WHITE);
 
     if (d.valid) {
       float val = d.qty * d.price;
       char vbuf[12];
       fmtVal(val, vbuf, sizeof(vbuf));
-      gfx->setCursor(TFT_WIDTH - gfxTextW(vbuf, 2) - 4, y);
-      gfx->print(vbuf);
+      gfxLabel(TFT_WIDTH - gfxLabelW(vbuf, 2) - 4, y, vbuf, 2, C_WHITE);
       if (d.cost > 0) {
         float plPct = (d.price / d.cost - 1.0f) * 100.0f;
         char pbuf[10];
         snprintf(pbuf, sizeof(pbuf), "%+.1f%%", plPct);
-        gfx->setTextColor(plPct >= 0 ? upC : downC);
-        gfx->setCursor(116, y);
-        gfx->print(pbuf);
+        gfxLabel(116, y, pbuf, 2, plPct >= 0 ? upC : downC);
       }
       uint8_t b = 0xFF;
       for (uint8_t k = 0; k < curN; k++)
@@ -291,9 +277,7 @@ static void drawPortfolio(uint8_t pageIndex, uint8_t pageCount, const Settings& 
       }
     } else {
       const char* st = d.error ? "err" : "...";
-      gfx->setTextColor(d.error ? C_RED : C_GRAY);
-      gfx->setCursor(TFT_WIDTH - gfxTextW(st, 2) - 4, y);
-      gfx->print(st);
+      gfxLabel(TFT_WIDTH - gfxLabelW(st, 2) - 4, y, st, 2, d.error ? C_RED : C_GRAY);
     }
     y += 18;
   }
@@ -308,19 +292,13 @@ static void drawPortfolio(uint8_t pageIndex, uint8_t pageCount, const Settings& 
     // at most 11, which the formatter cannot work out from the array types.
     char line[20];
     snprintf(line, sizeof(line), "%.5s%.11s", totCur[k], vbuf);
-    gfx->setTextSize(2);
-    gfx->setTextColor(C_WHITE);
-    gfx->setCursor(4, y);
-    gfx->print("Total");
-    gfx->setCursor(TFT_WIDTH - gfxTextW(line, 2) - 4, y);
-    gfx->print(line);
+    gfxLabel(4, y, "Total", 2, C_WHITE);
+    gfxLabel(TFT_WIDTH - gfxLabelW(line, 2) - 4, y, line, 2, C_WHITE);
     if (totC[k] > 0) {
       float plPct = (totV[k] / totC[k] - 1.0f) * 100.0f;
       char pbuf[10];
       snprintf(pbuf, sizeof(pbuf), "%+.1f%%", plPct);
-      gfx->setTextColor(plPct >= 0 ? upC : downC);
-      gfx->setCursor(78, y);
-      gfx->print(pbuf);
+      gfxLabel(78, y, pbuf, 2, plPct >= 0 ? upC : downC);
     }
     y += 18;
   }

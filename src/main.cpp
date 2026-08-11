@@ -572,6 +572,10 @@ void loop() {
 
   // A pushed banner owns the screen while it lasts, then the mode repaints.
   static bool s_hadNotify = false;
+  // The one place the Typeface setting turns into draw behavior: everything
+  // below (notifications included) renders under whatever is latched here.
+  gfxTypeSans(g_settings.numFont == NUM_FONT_SANS);
+
   if (notifyActive()) {
     notifyService();
     s_hadNotify = true;

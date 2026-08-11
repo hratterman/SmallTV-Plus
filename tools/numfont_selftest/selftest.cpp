@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "../../src/NumFonts.h"
+#include "../../src/TextFonts.h"
 #include "../../src/features/clock/font_clock_sans.h"
 
 static int failures = 0;
@@ -128,7 +129,60 @@ int main() {
     }
     ck(ok, "every charset character resolves to a glyph");
     ck(textW(kNumFaces[0].font, "kH/s") < 0,
-       "letters do not (they stay in the pixel font)");
+       "letters do not (they go to the text faces)");
+  }
+
+  printf("\n--- text faces: structure ------------------------------------\n");
+  checkFont("TextSansMid", &TextSansMid, (int)sizeof(TextSansMidBitmaps),
+            kTextFaces[0].ascent, kTextFaces[0].descent);
+  checkFont("TextSansSmall", &TextSansSmall, (int)sizeof(TextSansSmallBitmaps),
+            kTextFaces[1].ascent, kTextFaces[1].descent);
+  {
+    // THE property the whole design rests on: each face fits its pixel band,
+    // so gfxDrawCentered can swap faces without re-checking any caller's
+    // vertical layout. Mid stands in for pixel size 3 (24 px), Small for
+    // size 2 (16 px).
+    ck(kTextFaces[0].ascent + kTextFaces[0].descent <= 24 &&
+           kTextFaces[0].band == 24,
+       "TextSansMid fits the pixel size-3 band (24 px)");
+    ck(kTextFaces[1].ascent + kTextFaces[1].descent <= 16 &&
+           kTextFaces[1].band == 16,
+       "TextSansSmall fits the pixel size-2 band (16 px)");
+    // Full printable-ASCII coverage — a calendar title or pool error can
+    // contain anything, and a missing glyph would knock the whole string
+    // back to pixel for no visible reason.
+    bool ok = true;
+    for (int c = TEXT_FONT_FIRST; c <= TEXT_FONT_LAST; c++) {
+      char one[2] = {(char)c, 0};
+      if (c != ' ' && textW(kTextFaces[0].font, one) < 0) ok = false;
+      if (c != ' ' && textW(kTextFaces[1].font, one) < 0) ok = false;
+    }
+    ck(ok, "both text faces cover all printable ASCII");
+  }
+
+  printf("\n--- text faces: the converted sites fit ----------------------\n");
+  {
+    // Clock date line, centered in 240: the longest English date.
+    const int w = textW(kTextFaces[1].font, "Wednesday 30 Sep");
+    ck(w > 0 && w <= 236, "the longest date fits the clock's date band");
+    // Usage card: "Resets in 23h 59m" starts at x+14 inside a 224 px card.
+    ck(textW(kTextFaces[1].font, "Resets in 23h 59m") <= 196,
+       "the reset countdown fits its usage card");
+    // Usage/miner headers sit at fixed x and must not run off the panel.
+    ck(56 + textW(kTextFaces[0].font, "CLAUDE") <= 236, "'CLAUDE' header fits");
+    ck(10 + textW(kTextFaces[1].font, "MINER") <= 120, "'MINER' header fits");
+  }
+  {
+    // Right-aligned slots (miner stats, portfolio values) erase a fixed-width
+    // slot and draw the text right-aligned into it. Sans digits are narrower
+    // than pixel's 12 px, so a value that fit the slot in pixel must still
+    // fit in sans — otherwise a shrinking value would leave stale pixels.
+    const char* vals[] = {"88888/88888 -888", "999.99M", "12.4K", "42s",
+                          "$99.99M", "+999.9%"};
+    bool ok = true;
+    for (const char* v : vals)
+      if (textW(kTextFaces[1].font, v) > (int)strlen(v) * 12) ok = false;
+    ck(ok, "sans values never outgrow the pixel slot they erase");
   }
 
   printf("\n-------------------------------------------------------------\n");
