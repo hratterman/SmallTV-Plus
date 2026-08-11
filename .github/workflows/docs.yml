@@ -1,11 +1,11 @@
 name: Deploy Documentation
 
+# Manual-only on this fork. The Astro site under docs/ is the UPSTREAM
+# project's documentation (giovi321.github.io/smalltv-mod) - deploying it
+# from here would publish another project's site under this repo's name,
+# and with GitHub Pages unconfigured the push trigger just paints main red.
+# Run it by hand if this fork ever grows its own docs site.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
