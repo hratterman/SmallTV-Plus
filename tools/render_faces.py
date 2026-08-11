@@ -375,11 +375,11 @@ def wx_icon(d, klass, day, cx, cy, r):
             d.ellipse([x - fr, y - fr, x + fr, y + fr], fill=WHITE)
     elif klass == 6:                     # storm
         wx_cloud(d, cx, cy - r // 3, r * 7 // 8, C_CLOUDD)
-        by = cy + r // 6
-        d.polygon([(cx - r // 8, by - r // 8), (cx + r // 4, by - r // 8),
-                   (cx - r // 16, by + r // 4)], fill=C_BOLT)
-        d.polygon([(cx + r // 6, by), (cx - r // 4, by + r * 5 // 8),
-                   (cx - r // 16, by)], fill=C_BOLT)
+        x0, y0, w, h = cx - r // 2, cy - r // 8, r, r * 7 // 8
+        P = lambda px_, py_: (x0 + px_ * w // 100, y0 + py_ * h // 100)
+        d.polygon([P(60, 0), P(20, 55), P(45, 55)], fill=C_BOLT)
+        d.polygon([P(60, 0), P(45, 55), P(75, 0)], fill=C_BOLT)
+        d.polygon([P(52, 40), P(80, 40), P(30, 100)], fill=C_BOLT)
 
 def weather(face):
     img, px, d = screen()

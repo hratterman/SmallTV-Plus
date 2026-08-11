@@ -92,11 +92,16 @@ void gfxWxIcon(Arduino_GFX* g, uint8_t klass, bool day, int cx, int cy, int r) {
     }
     case WX_STORM: {
       wxCloud(g, cx, cy - r / 3, r * 7 / 8, C_CLOUDD);
-      const int by = cy + r / 6;
-      g->fillTriangle(cx - r / 8, by - r / 8, cx + r / 4, by - r / 8,
-                      cx - r / 16, by + r / 4, C_BOLT);
-      g->fillTriangle(cx + r / 6, by, cx - r / 4, by + r * 5 / 8,
-                      cx - r / 16, by, C_BOLT);
+      // The classic jagged bolt: a 7-vertex zigzag outline (percent
+      // coordinates in the box below), filled as three triangles - the two
+      // halves of the upper band, then the lower spike whose right corner
+      // juts past the band to make the jag.
+      const int x0 = cx - r / 2, y0 = cy - r / 8, w = r, h = r * 7 / 8;
+#define WXPT(px_, py_) x0 + (px_)*w / 100, y0 + (py_)*h / 100
+      g->fillTriangle(WXPT(60, 0), WXPT(20, 55), WXPT(45, 55), C_BOLT);
+      g->fillTriangle(WXPT(60, 0), WXPT(45, 55), WXPT(75, 0), C_BOLT);
+      g->fillTriangle(WXPT(52, 40), WXPT(80, 40), WXPT(30, 100), C_BOLT);
+#undef WXPT
       break;
     }
   }

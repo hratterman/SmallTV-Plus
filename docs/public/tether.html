@@ -326,6 +326,16 @@ details>div{margin-top:12px}
 
           <fieldset>
             <legend>Weather</legend>
+            <div class="row">
+              <label for="wxCity">City <span class="hint">fills the coordinates for you</span></label>
+              <div style="display:flex;gap:8px">
+                <input id="wxCity" type="text" placeholder="e.g. Denver" style="flex:1"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();wxFind();}">
+                <button type="button" id="btnWxFind">Find</button>
+              </div>
+              <select id="wxCityPick" class="hide" style="margin-top:8px"></select>
+              <p class="hint" id="wxCityMsg" style="margin:6px 0 0"></p>
+            </div>
             <div class="two">
               <div class="row">
                 <label for="weatherLat">Latitude</label>
@@ -600,6 +610,34 @@ async function handleRequest(id,payload){
 // control that is added without a path (or points at a key the cube does not
 // send) is visible here rather than silently saving nothing — which is exactly
 // how the device's own page shipped three dead checkboxes.
+let wxGeo=[];
+async function wxFind(){
+  const q=$('wxCity').value.trim(), m=$('wxCityMsg');
+  if(!q){m.textContent='type a city first';return;}
+  m.textContent='searching...';
+  try{
+    const j=await (await fetch('https://geocoding-api.open-meteo.com/v1/search?count=8&name='
+      +encodeURIComponent(q))).json();
+    wxGeo=j.results||[];
+    const s=$('wxCityPick'); s.innerHTML='';
+    if(!wxGeo.length){s.classList.add('hide');m.textContent=`no match for "${q}"`;return;}
+    wxGeo.forEach((g,i)=>{
+      const o=document.createElement('option'); o.value=i;
+      o.textContent=g.name+(g.admin1?', '+g.admin1:'')+(g.country?', '+g.country:'');
+      s.appendChild(o);
+    });
+    s.classList.remove('hide'); s.selectedIndex=0; wxPick();
+  }catch(e){m.textContent='lookup failed: '+e;}
+}
+function wxPick(){
+  const g=wxGeo[Number($('wxCityPick').value)]; if(!g)return;
+  $('weatherLat').value=g.latitude; $('weatherLon').value=g.longitude;
+  $('wxCityMsg').textContent=`set to ${g.name} (${g.latitude.toFixed(4)}, ${g.longitude.toFixed(4)}) - remember to Save`;
+}
+
+$('btnWxFind').addEventListener('click',wxFind);
+$('wxCityPick').addEventListener('change',wxPick);
+
 const FIELDS=[
   ['mode',              ['mode'],                       'string'],
   ['rotation',          ['rotation'],                   'number'],
