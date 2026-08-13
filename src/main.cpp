@@ -618,6 +618,18 @@ void loop() {
       }
     }
   }
+  // A banner a few minutes before an event, whatever page is showing.
+  calendarReminderService(g_settings);
+#endif
+
+#if WITH_WEATHER
+  // The weather task cannot draw; it leaves a note when a storm newly enters
+  // the forecast, and the loop turns it into a banner when the screen is free.
+  if (!notifyActive()) {
+    char wxAlert[48];
+    if (weatherTakeAlert(wxAlert, sizeof(wxAlert)))
+      notifyShow(wxAlert, 12, 0xFFE0);   // the storm icon's bolt yellow
+  }
 #endif
 
   // A pushed banner owns the screen while it lasts, then the mode repaints.

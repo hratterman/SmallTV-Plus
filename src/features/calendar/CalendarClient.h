@@ -52,6 +52,11 @@ static inline int calSnapshotNext(const CalSnapshot& s, int64_t nowUtc) {
 // device-code link below delivers its token through the same channel.
 String calendarTakeRotatedToken();
 
+// Push a banner remindMin minutes before an event starts, whatever page is
+// showing. Called from the main loop — the mode's own service only runs while
+// its page has the screen, and a reminder is exactly for when it does not.
+void calendarReminderService(const Settings& s);
+
 // ---- on-device linking (Microsoft only) -------------------------------------
 // The device-code flow needs no browser on the cube and no secret anywhere:
 // the cube asks Microsoft for a short code, shows it, and polls until the user

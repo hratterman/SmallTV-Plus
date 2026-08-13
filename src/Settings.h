@@ -41,6 +41,7 @@ struct TickerSettings {
   uint16_t points;        // sparkline points requested
   uint16_t pollSec;       // refresh period
   uint16_t rotateSec;     // per-symbol on-screen time
+  uint8_t  alertPct;      // banner when a symbol moves this % on the day; 0 = off
   bool     colorInverted; // false: up=green/down=red ; true: swapped
   bool     changeOnRange; // true: change/% over the chart timeframe; false: provider's 1-day change
 
@@ -164,6 +165,7 @@ struct WeatherSettings {
   float    lat, lon;      // 0/0 = not set; the screen prompts
   bool     unitsF;        // true = Fahrenheit
   uint16_t pollSec;
+  bool     stormAlert;    // banner when a storm enters the forecast
 
   void setDefaults();
   void toJson(JsonObject o) const;
@@ -178,6 +180,7 @@ struct CalendarSettings {
   String   refreshToken;
   String   icsUrl;         // CAL_ICS: the calendar's secret address; no OAuth at all
   uint16_t pollSec;
+  uint8_t  remindMin;      // banner this many minutes before an event; 0 = off
 
   void setDefaults();
   void toJson(JsonObject o, bool includeSecrets) const;

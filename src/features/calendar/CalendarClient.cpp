@@ -10,6 +10,8 @@ static_assert(ICS_TITLE_LEN == CAL_TITLE_LEN,
               "the ICS parser and the calendar events must agree on title size");
 #include "NetFetch.h"
 #include "Clock.h"
+#include "Notify.h"
+#include "WorkMask.h"
 #include <ArduinoJson.h>
 #include <time.h>
 #include <freertos/FreeRTOS.h>
@@ -532,6 +534,63 @@ String calendarTakeRotatedToken() {
   s_rotatedToken = "";
   lockGive();
   return t;
+}
+
+// ---- reminders (main-loop side) ---------------------------------------------
+// Events already announced, so one event gets one banner. Keyed on start time
+// and title together: a rescheduled meeting is a different obligation and
+// deserves a fresh reminder; the ring is deep enough that everything inside
+// one reminder window fits at once.
+static uint32_t s_remindDone[8];
+static uint8_t  s_remindIdx = 0;
+
+static uint32_t remindKey(const CalEvent& e) {
+  uint32_t k = 2166136261u;
+  for (const char* p = e.title; *p; p++) k = (k ^ (uint8_t)*p) * 16777619u;
+  return k ^ (uint32_t)e.startUtc;
+}
+
+void calendarReminderService(const Settings& s) {
+  if (!s.calendar.remindMin) return;
+  static uint32_t s_lastSweep = 0;
+  if (millis() - s_lastSweep < 10000UL) return;   // a 10 s sweep is plenty
+  s_lastSweep = millis();
+  // clockSynced: before NTP lands, "minutes until" is fiction. notifyActive:
+  // never repaint someone else's banner; the next sweep is ten seconds away.
+  if (!clockSynced() || notifyActive()) return;
+
+  CalSnapshot snap;
+  calendarSnapshot(snap);
+  if (!snap.ok) return;
+  const int64_t now = (int64_t)time(nullptr);
+  const int64_t win = (int64_t)s.calendar.remindMin * 60;
+
+  for (uint8_t i = 0; i < snap.count; i++) {
+    const CalEvent& e = snap.events[i];
+    if (e.allDay) continue;                       // "all day" needs no countdown
+    const int64_t dl = e.startUtc - now;
+    if (dl <= 0 || dl > win) continue;
+    const uint32_t key = remindKey(e);
+    bool seen = false;
+    for (uint8_t k = 0; k < 8; k++)
+      if (s_remindDone[k] == key) { seen = true; break; }
+    if (seen) continue;
+    s_remindDone[s_remindIdx] = key;
+    s_remindIdx = (uint8_t)((s_remindIdx + 1) % 8);
+
+    // The reminder interrupts whatever page is up, so it honours work mode the
+    // same way the calendar page itself does.
+    char title[CAL_TITLE_LEN];
+    strlcpy(title, e.title, sizeof(title));
+    if (s.work.enabled && s.work.hideExplicit)
+      workMaskWords(title, s.work.blocklist.c_str());
+
+    const int mins = (int)((dl + 59) / 60);
+    char msg[CAL_TITLE_LEN + 16];
+    snprintf(msg, sizeof(msg), "in %d min: %s", mins, title);
+    notifyShow(msg, 12, 0x34BF);                  // the calendar's countdown blue
+    return;   // one banner at a time; the next sweep catches any second event
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 #include "StockClient.h"
 #include "NetFetch.h"
+#include "Notify.h"
 
 // Lets the existing Stream-based parsers read a response that arrived as text
 // over the tether, without giving any of them a second implementation.
@@ -36,6 +37,11 @@ const char* stocksNote() { return s_note; }
 
 static StockData g_stocks[MAX_SYMBOLS];
 static uint8_t   g_count = 0;
+// Move-alert latch, one bit per symbol: set when a banner has fired for the
+// current excursion, cleared with hysteresis once the move has calmed down,
+// so a symbol oscillating around the threshold does not drum on the screen.
+static uint16_t  g_alertHot = 0;
+static_assert(MAX_SYMBOLS <= 16, "g_alertHot is 16 bits wide");
 
 static bool     g_refreshing = false;
 static uint8_t  g_fetchIdx = 0;
@@ -58,6 +64,7 @@ void stocksInit(const Settings& s) {
   }
   g_refreshing = false;
   g_nextPollMs = millis();
+  g_alertHot = 0;          // a new list means no excursion has been announced
 }
 
 void stocksForceRefresh() {
@@ -834,6 +841,32 @@ static bool stepSymbol(const Settings& s, StockData& d) {
 }
 
 // ---------------------------------------------------------------------------
+// A banner when a symbol's day move crosses the configured percentage. Runs
+// once per refresh cycle on fresh data only; the latch above keeps it to one
+// banner per excursion, re-arming a point below the threshold.
+static void alertScan(const Settings& s) {
+  if (!s.ticker.alertPct) return;
+  const float on  = (float)s.ticker.alertPct;
+  const float off = on > 1.0f ? on - 1.0f : on * 0.5f;
+  for (uint8_t i = 0; i < g_count; i++) {
+    const StockData& d = g_stocks[i];
+    const uint16_t bit = (uint16_t)(1u << i);
+    if (!d.valid || !d.hasChange || d.error) continue;
+    if (fabsf(d.changePct) >= on) {
+      if (g_alertHot & bit) continue;
+      g_alertHot |= bit;
+      if (!notifyActive()) {
+        char msg[48];
+        snprintf(msg, sizeof(msg), "%s %+.1f%% today", d.symbol, (double)d.changePct);
+        const bool upIsGreen = !s.ticker.colorInverted;
+        notifyShow(msg, 10, (d.changePct >= 0) == upIsGreen ? 0x07E0 : 0xF800);
+      }
+    } else if (fabsf(d.changePct) < off) {
+      g_alertHot &= (uint16_t)~bit;
+    }
+  }
+}
+
 void stocksService(const Settings& s) {
   if (g_count == 0) return;
 
@@ -860,6 +893,7 @@ void stocksService(const Settings& s) {
 
   if (g_fetchIdx >= g_count) {
     g_refreshing = false;
+    alertScan(s);
     // If any symbol failed this cycle (typically a cash fetch skipped because
     // the heap was momentarily too fragmented for TLS), retry soon instead of
     // waiting the full poll interval — the heap usually recovers within

@@ -36,8 +36,13 @@ static struct {
   volatile uint32_t epoch;
   float    lat, lon;
   bool     unitsF;
+  bool     stormAlert;
   uint16_t pollSec;
 } s_cfg;
+
+// One pending storm banner, handed to the loop: notifyShow paints from the
+// display thread, so the task leaves a note instead of drawing.
+static char s_alertMsg[48];
 
 static inline void lockTake() { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
 static inline void lockGive() { if (s_lock) xSemaphoreGive(s_lock); }
@@ -46,6 +51,17 @@ void weatherSnapshot(WeatherData& out) {
   lockTake();
   out = s_data;
   lockGive();
+}
+
+bool weatherTakeAlert(char* out, size_t n) {
+  lockTake();
+  const bool have = s_alertMsg[0] != 0;
+  if (have) {
+    strlcpy(out, s_alertMsg, n);
+    s_alertMsg[0] = 0;
+  }
+  lockGive();
+  return have;
 }
 
 static void weatherTask(void*);
@@ -58,6 +74,7 @@ static uint32_t cfgFingerprint(const Settings& s) {
   mix((uint32_t)(s.weather.lon * 10000.0f));
   mix(s.weather.unitsF ? 1 : 2);
   mix(s.weather.pollSec);   // the task learns cadence via the same epoch bump
+  mix(s.weather.stormAlert ? 1 : 2);
   return fp;
 }
 
@@ -65,10 +82,11 @@ void weatherInit(const Settings& s) {
   if (!s_lock) s_lock = xSemaphoreCreateMutex();
   const uint32_t fp = cfgFingerprint(s);
   lockTake();
-  s_cfg.lat     = s.weather.lat;
-  s_cfg.lon     = s.weather.lon;
-  s_cfg.unitsF  = s.weather.unitsF;
-  s_cfg.pollSec = s.weather.pollSec;
+  s_cfg.lat        = s.weather.lat;
+  s_cfg.lon        = s.weather.lon;
+  s_cfg.unitsF     = s.weather.unitsF;
+  s_cfg.stormAlert = s.weather.stormAlert;
+  s_cfg.pollSec    = s.weather.pollSec;
   if (fp != s_cfgFp) {
     s_cfgFp = fp;
     s_cfg.epoch = s_cfg.epoch + 1;   // task refetches now
@@ -233,16 +251,24 @@ static void weatherTask(void*) {
   uint32_t nextPollMs = 0;
   float    lat = 0.0f, lon = 0.0f;
   bool     unitsF = false;
+  bool     stormAlert = true;
   uint16_t pollSec = 600;
+  // Last fetch's per-day weather class, for the storm heads-up: a banner when
+  // a storm ENTERS the forecast, not for its continued presence. The first
+  // fetch after boot primes this silently — rebooting under a known storm
+  // forecast should not re-announce it.
+  bool    havePrev = false;
+  uint8_t prevClass[WX_DAYS] = {0};
 
   for (;;) {
     if (myEpoch != s_cfg.epoch) {
       lockTake();
-      myEpoch = s_cfg.epoch;
-      lat     = s_cfg.lat;
-      lon     = s_cfg.lon;
-      unitsF  = s_cfg.unitsF;
-      pollSec = s_cfg.pollSec;
+      myEpoch    = s_cfg.epoch;
+      lat        = s_cfg.lat;
+      lon        = s_cfg.lon;
+      unitsF     = s_cfg.unitsF;
+      stormAlert = s_cfg.stormAlert;
+      pollSec    = s_cfg.pollSec;
       lockGive();
       nextPollMs = 0;                    // a new place: fetch now
     }
@@ -312,8 +338,30 @@ static void weatherTask(void*) {
       fresh.valid = true;
       fresh.error = false;
       fresh.lastOkMs = millis();
+
+      // Storm heads-up: one banner note when any forecast day newly turns
+      // stormy, worded by how far off it is.
+      static const char* kDay[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+      int stormDay = -1;
+      for (int i = 0; i < WX_DAYS && stormDay < 0; i++)
+        if (wxClass(fresh.code[i]) == WX_STORM &&
+            (!havePrev || prevClass[i] != WX_STORM))
+          stormDay = i;
+      for (int i = 0; i < WX_DAYS; i++) prevClass[i] = (uint8_t)wxClass(fresh.code[i]);
+      const bool announce = stormAlert && havePrev && stormDay >= 0;
+      havePrev = true;
+
       lockTake();
       s_data = fresh;
+      if (announce) {
+        if (stormDay == 0)      strlcpy(s_alertMsg, "Storms today", sizeof(s_alertMsg));
+        else if (stormDay == 1) strlcpy(s_alertMsg, "Storms tomorrow", sizeof(s_alertMsg));
+        else {
+          const int8_t dw = fresh.dow[stormDay];
+          snprintf(s_alertMsg, sizeof(s_alertMsg), "Storms on %s",
+                   (dw >= 0 && dw < 7) ? kDay[dw] : "the way");
+        }
+      }
       lockGive();
       nextPollMs = millis() + (uint32_t)pollSec * 1000UL;
     } else {

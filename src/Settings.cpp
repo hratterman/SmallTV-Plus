@@ -26,6 +26,7 @@ void TickerSettings::setDefaults() {
   points = DEFAULT_POINTS;
   pollSec = DEFAULT_POLL_SEC;
   rotateSec = DEFAULT_ROTATE_SEC;
+  alertPct = 5;           // a 5% day is news on most tickers; 0 turns it off
   colorInverted = false;
   changeOnRange = true;
 
@@ -54,6 +55,7 @@ void TickerSettings::toJson(JsonObject o) const {
   o["points"]         = points;
   o["pollSec"]        = pollSec;
   o["rotateSec"]      = rotateSec;
+  o["alertPct"]       = alertPct;
   o["colorInverted"]  = colorInverted;
   o["changeOnRange"]  = changeOnRange;
   o["showName"]       = showName;
@@ -95,6 +97,7 @@ void TickerSettings::fromJson(JsonObjectConst o) {
   }
   if (o["pollSec"].is<int>())            pollSec = max(10, (int)o["pollSec"]);
   if (o["rotateSec"].is<int>())          rotateSec = max(2, (int)o["rotateSec"]);
+  if (o["alertPct"].is<int>())           alertPct = (uint8_t)constrain((int)o["alertPct"], 0, 50);
   if (o["colorInverted"].is<bool>())     colorInverted = o["colorInverted"];
   if (o["changeOnRange"].is<bool>())     changeOnRange = o["changeOnRange"];
 
@@ -397,6 +400,7 @@ void WeatherSettings::setDefaults() {
   lon = 0.0f;
   unitsF = true;
   pollSec = 900;          // Open-Meteo updates its models ~hourly; 15 min is plenty
+  stormAlert = true;
 }
 
 void WeatherSettings::toJson(JsonObject o) const {
@@ -404,6 +408,7 @@ void WeatherSettings::toJson(JsonObject o) const {
   o["lon"]     = lon;
   o["unitsF"]  = unitsF;
   o["pollSec"] = pollSec;
+  o["stormAlert"] = stormAlert;
 }
 
 void WeatherSettings::fromJson(JsonObjectConst o) {
@@ -411,6 +416,7 @@ void WeatherSettings::fromJson(JsonObjectConst o) {
   if (o["lon"].is<float>() || o["lon"].is<int>()) lon = o["lon"].as<float>();
   if (o["unitsF"].is<bool>()) unitsF = o["unitsF"];
   if (o["pollSec"].is<int>()) pollSec = (uint16_t)constrain((int)o["pollSec"], 300, 43200);
+  if (o["stormAlert"].is<bool>()) stormAlert = o["stormAlert"];
 }
 
 void CalendarSettings::setDefaults() {
@@ -421,6 +427,7 @@ void CalendarSettings::setDefaults() {
   refreshToken = "";
   icsUrl       = "";
   pollSec      = DEFAULT_CALENDAR_POLL_SEC;
+  remindMin    = 5;        // a banner five minutes out; 0 turns it off
 }
 
 void CalendarSettings::toJson(JsonObject o, bool includeSecrets) const {
@@ -428,6 +435,7 @@ void CalendarSettings::toJson(JsonObject o, bool includeSecrets) const {
   o["provider"] = calProvToStr(provider);
   o["clientId"] = clientId;
   o["pollSec"]  = pollSec;
+  o["remindMin"] = remindMin;
   // The web API learns whether these are set, never their values — the same
   // rule as the WiFi passwords and the Spotify secrets. The ICS "secret
   // address" is exactly that — it grants read access to whoever holds it.
@@ -446,6 +454,7 @@ void CalendarSettings::fromJson(JsonObjectConst o) {
   if (o["provider"].is<const char*>()) provider = calProvFromStr(o["provider"].as<String>());
   if (o["clientId"].is<const char*>()) { clientId = o["clientId"].as<String>(); clientId.trim(); }
   if (o["pollSec"].is<int>())          pollSec = constrain((int)o["pollSec"], 60, 3600);
+  if (o["remindMin"].is<int>())        remindMin = (uint8_t)constrain((int)o["remindMin"], 0, 60);
   // Blank means "keep what is stored", so saving the page does not wipe them.
   if (o["clientSecret"].is<const char*>()) {
     String v = o["clientSecret"].as<String>(); v.trim();

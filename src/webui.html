@@ -76,7 +76,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <pre style="background:#0b0e13;border:1px solid var(--bd);border-radius:8px;padding:10px;overflow-x:auto;font-size:12px;margin:8px 0 0"><code>curl -X POST http://<span id="notifyHost">smalltv.local</span>/notify \
   -d '{"text":"Build finished","sec":8,"color":"#3fb950"}'</code></pre>
    <div style="margin-top:10px"><button class="btn sec" onclick="notifyTest()">Send a test banner</button></div>
-   <small class="hint"><code>sec</code> defaults to 8 (max 120) and <code>color</code> is any hex like <code>#f7931a</code>; only <code>text</code> is required. The banner takes over whichever mode is showing, then hands the screen back. A tap on the lid clears it early.</small>
+   <small class="hint"><code>sec</code> defaults to 8 (max 120) and <code>color</code> is any hex like <code>#f7931a</code>; only <code>text</code> is required. The banner takes over whichever mode is showing, then hands the screen back. A tap on the lid clears it early.
+   The cube also raises its own banners: calendar reminders (Calendar tab), big ticker moves (Ticker tab) and storm heads-ups (Weather tab).</small>
   </div>
  </section>
 
@@ -220,6 +221,10 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div><label>Refresh data (s)</label><input id="pollSec" type="number" min="10" max="3600"></div>
    </div>
    <div class="row">
+    <div><label>Move banner at &plusmn;% <span class="muted">&mdash; 0 = off</span></label><input id="alertPct" type="number" min="0" max="50"></div>
+   </div>
+   <small class="hint">Pops a banner over whichever page is showing when a symbol moves this much on the day &mdash; once per excursion, not on every refresh.</small>
+   <div class="row">
     <div><label>Chart timeframe</label>
      <select id="range">
       <option value="1d">1 day</option><option value="5d">5 days</option>
@@ -345,6 +350,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
      <select id="wxUnitsF"><option value="true">&deg;F</option><option value="false">&deg;C</option></select></div>
     <div><label>Refresh (s)</label><input id="wxPollSec" type="number" min="300" max="43200"></div>
    </div>
+   <div class="chk"><input id="wxStorm" type="checkbox"><label>Storm heads-up &mdash; a banner when storms newly enter the forecast</label></div>
    <small class="hint">Forecast data from Open-Meteo: free, anonymous, no API key to create. It answers browsers too, so this mode works over the USB tether as well as WiFi.</small>
   </div>
  </section>
@@ -424,6 +430,8 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
    <input id="calClientSecret" type="password" placeholder="(unchanged)">
    <label>Refresh token</label><input id="calRefreshToken" type="password" placeholder="(unchanged)">
    <label>Poll every (s)</label><input id="calPollSec" type="number" min="60" max="3600">
+   <label>Remind before events (min) <span class="muted">&mdash; 0 = off</span></label>
+   <input id="calRemind" type="number" min="0" max="60">
    <div style="margin-top:12px"><button class="btn" id="calLinkBtn" onclick="calLink()">Link with Microsoft</button>
     <span class="muted" id="calLinkMsg"></span></div>
    <small class="hint"><b>The plug-and-play way:</b> pick <i>Calendar link</i> and paste your
@@ -537,7 +545,7 @@ document.querySelectorAll('nav button').forEach(function(b){b.onclick=function()
 
 // field groups by their location in the nested config
 var T_TEXT=['webhookUrl','range'];                   // ticker strings
-var T_NUM=['rotateSec','pollSec','points'];          // ticker numbers
+var T_NUM=['rotateSec','pollSec','points','alertPct']; // ticker numbers
 var T_BOOL=['showName','showPrice','showChange','showChart','showRangeLabel','showUpdatedAgo','showPageDots','showPortfolio'];
 
 // IANA -> POSIX TZ. The device stores/uses the POSIX rule; this map lives in the
@@ -652,7 +660,8 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  $('rotation').value=c.rotation; sv('numFont',String(c.numFont||0));
  var wx=c.weather||{};
  if($('wxLat')){sv('wxLat',wx.lat||0);sv('wxLon',wx.lon||0);
-  sv('wxUnitsF',String(wx.unitsF!==false));sv('wxPollSec',wx.pollSec||900);}
+  sv('wxUnitsF',String(wx.unitsF!==false));sv('wxPollSec',wx.pollSec||900);
+  sc('wxStorm',wx.stormAlert!==false);}
  sc('autoBrightness',!!c.autoBrightness);
  $('backlightInverted').checked=!!c.backlightInverted;
  // header chip = which chip this firmware was built for
@@ -718,6 +727,7 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  var cal=c.calendar||{};
  sc('calEnabled',!!cal.enabled); sv('calProvider',cal.provider||'google');
  sv('calClientId',cal.clientId); sv('calPollSec',cal.pollSec||300);
+ sv('calRemind',cal.remindMin!=null?cal.remindMin:5);
  var ccs=$('calClientSecret'); if(ccs)ccs.placeholder=cal.secretSet?'(unchanged)':'paste the client secret';
  var crt=$('calRefreshToken'); if(crt)crt.placeholder=cal.tokenSet?'(unchanged)':'paste the refresh token';
  var cics=$('calIcsUrl'); if(cics)cics.placeholder=cal.icsSet?'(unchanged)':'https://... or webcal://...';
@@ -855,11 +865,12 @@ function collect(){
   clientId:gv('spotifyClientId').trim(), clientSecret:gv('spotifyClientSecret').trim(),
   refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
  if($('wxLat')) o.weather={lat:parseFloat(gv('wxLat'))||0,lon:parseFloat(gv('wxLon'))||0,
-  unitsF:gv('wxUnitsF')==='true',pollSec:parseInt(gv('wxPollSec'))||900};
+  unitsF:gv('wxUnitsF')==='true',pollSec:parseInt(gv('wxPollSec'))||900,
+  stormAlert:gc('wxStorm')};
  if($('calEnabled')) o.calendar={enabled:gc('calEnabled'),provider:gv('calProvider'),
   clientId:gv('calClientId').trim(), clientSecret:gv('calClientSecret').trim(),
   refreshToken:gv('calRefreshToken').trim(), icsUrl:gv('calIcsUrl').trim(),
-  pollSec:parseInt(gv('calPollSec'))||300};
+  pollSec:parseInt(gv('calPollSec'))||300, remindMin:parseInt(gv('calRemind'))||0};
  if($('workEnabled')) o.work={enabled:gc('workEnabled'),noMining:gc('workNoMining'),
   hideExplicit:gc('workHideExplicit'),blocklist:gv('workBlocklist').trim()};
  if($('captiveAuto')) o.captive={autoAccept:gc('captiveAuto'),

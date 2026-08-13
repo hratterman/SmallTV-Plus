@@ -31,4 +31,8 @@ struct WeatherData {
 void weatherInit(const Settings& s);      // config hand-off; starts the task
 void weatherSnapshot(WeatherData& out);   // a consistent copy, any thread
 
+// A storm newly in the forecast, worded for a banner ("Storms tomorrow").
+// Reading it clears it; the loop shows it, since only the loop may draw.
+bool weatherTakeAlert(char* out, size_t n);
+
 #endif  // WITH_WEATHER

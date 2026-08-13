@@ -434,8 +434,26 @@ details>div{margin-top:12px}
                   <span>Fahrenheit</span></label>
               </div>
             </div>
+            <label class="tick"><input id="weatherStorm" type="checkbox">
+              <span>Storm heads-up &mdash; a banner when storms newly enter the forecast</span></label>
             <p class="hint">Open-Meteo, no key needed &mdash; and it answers browsers, so the
               weather works over this cable exactly like it does on WiFi.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Banners</legend>
+            <div class="two">
+              <div class="row">
+                <label for="calRemindMin">Calendar reminder <span class="hint">minutes before, 0 = off</span></label>
+                <input id="calRemindMin" type="number" min="0" max="60">
+              </div>
+              <div class="row">
+                <label for="tickerAlertPct">Ticker move <span class="hint">&plusmn;% on the day, 0 = off</span></label>
+                <input id="tickerAlertPct" type="number" min="0" max="50">
+              </div>
+            </div>
+            <p class="hint">The cube interrupts whatever page is showing with a short banner,
+              then hands the screen back. A tap clears it early.</p>
           </fieldset>
 
           <fieldset>
@@ -742,6 +760,9 @@ const FIELDS=[
   ['weatherLon',        ['weather','lon'],              'number'],
   ['weatherUnitsF',     ['weather','unitsF'],           'bool'],
   ['weatherPollSec',    ['weather','pollSec'],          'number'],
+  ['weatherStorm',      ['weather','stormAlert'],       'bool'],
+  ['calRemindMin',      ['calendar','remindMin'],       'number'],
+  ['tickerAlertPct',    ['ticker','alertPct'],          'number'],
   ['ambLife',           ['ambient','patterns','life'],      'bool'],
   ['ambPlasma',         ['ambient','patterns','plasma'],    'bool'],
   ['ambStars',          ['ambient','patterns','stars'],     'bool'],
