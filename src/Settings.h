@@ -166,6 +166,7 @@ struct WeatherSettings {
   bool     unitsF;        // true = Fahrenheit
   uint16_t pollSec;
   bool     stormAlert;    // banner when a storm enters the forecast
+  bool     rainRadar;     // animated radar timelapse when rain is nearby
 
   void setDefaults();
   void toJson(JsonObject o) const;

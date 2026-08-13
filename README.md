@@ -25,8 +25,11 @@ step through them with a tap on the lid.
   stockanalysis.com (with automatic failover between them), cash.ch for Swiss instruments, or your
   own webhook.
 - **Weather** — current conditions with drawn icons, today's high/low, three-day forecast. Powered
-  by Open-Meteo: no API key, no account; set your location by typing a city name.
-- **Clock** — three faces: classic pixels, real sans type, or seven-segment alarm-clock digits.
+  by Open-Meteo: no API key, no account; set your location by typing a city name. When rain shows
+  up nearby, the page also plays a radar timelapse — the last hour (plus the nowcast when
+  RainViewer publishes one) over a real street map, only while there is something to see.
+- **Clock** — five faces: classic pixels, real sans type, seven-segment alarm-clock digits, an
+  analog dial, or split-flip cards.
   NTP-synced, 12/24h, seconds bar, night schedule.
 - **Calendar** — your next obligation with a live countdown, then what follows. Easiest setup is
   pasting a calendar's secret iCal link; Google and Microsoft OAuth are supported too, including an

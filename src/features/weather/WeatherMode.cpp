@@ -5,6 +5,7 @@
 #include <math.h>
 #include "Gfx.h"
 #include "WeatherClient.h"
+#include "RainRadarClient.h"
 
 WeatherMode g_weatherMode;
 
@@ -215,6 +216,7 @@ void WeatherMode::render(const Settings& s, const WeatherData& w) {
 void WeatherMode::begin(const Settings& s) {
   weatherInit(s);
   needFull_ = true;
+  condSince_ = millis();
 }
 
 void WeatherMode::invalidate(const Settings& s) {
@@ -225,22 +227,153 @@ void WeatherMode::invalidate(const Settings& s) {
 void WeatherMode::wake(const Settings& s) {
   (void)s;
   needFull_ = true;
+  subRadar_ = false;          // another mode drew; come back on conditions
+  condSince_ = millis();
+}
+
+uint16_t WeatherMode::dwellSec(const Settings& s) const {
+  // One radar pass is ~7 s; give the slot enough room for conditions AND the
+  // animation, otherwise the carousel rotates away just as the rain starts.
+  return rainRadarReady() ? (uint16_t)(s.carouselSec + 14) : 0;
+}
+
+void WeatherMode::onContextAction(Settings& s) {
+  (void)s;
+  if (!subRadar_ && rainRadarReady()) {
+    subRadar_ = true;
+    rFrame_ = 0;
+    rLoops_ = 0;
+    rTick_ = 0;
+  }
+}
+
+// Frame pacing: a beat per frame, a longer beat on the last one so the loop
+// visibly ends before it starts again.
+#define RR_FRAME_MS 500
+#define RR_HOLD_MS  1400
+#define RR_SHOW_LOOPS 2
+#define RR_COND_SEC 8
+
+// The whole radar screen is repainted per animation frame from RAM: the dim
+// map, the rain cells blended over it, the location dot, then the header and
+// timeline bands. ~60 ms of SPI per frame, twice a second.
+bool WeatherMode::drawRadarFrame() {
+  Arduino_GFX* gfx = gfxDev();
+  if (!gfx) return false;
+  RainRadarView v;
+  if (!rainRadarAcquire(v)) return false;
+  if (rFrame_ >= v.frames) rFrame_ = 0;
+  rFrames_ = v.frames;
+  const uint8_t* g = v.grid[rFrame_];
+
+  uint16_t line[TFT_WIDTH];
+  for (int y = 0; y < TFT_HEIGHT; y++) {
+    const int ty = y + RR_CROP;
+    const uint8_t* mrow = v.map + (size_t)(ty >> 1) * RR_MAP_PX;
+    const int gy = ty >> 2;
+    for (int x = 0; x < TFT_WIDTH; x++) {
+      const int tx = x + RR_CROP;
+      uint16_t c = rr332to565(mrow[tx >> 1]);
+      const uint8_t n = rrGridGet(g, tx >> 2, gy);
+      if (n >= RR_GATE_NIBBLE) c = rrBlend565(c, rrPalette[n]);
+      line[x] = c;
+    }
+    gfx->draw16bitRGBBitmap(0, y, line, TFT_WIDTH, 1);
+  }
+
+  // You are here.
+  const int mx = (int)v.markerX - RR_CROP, my = (int)v.markerY - RR_CROP;
+  if (mx >= 4 && mx < TFT_WIDTH - 4 && my >= 4 && my < TFT_HEIGHT - 4) {
+    gfx->drawCircle(mx, my, 4, C_BLACK);
+    gfx->drawCircle(mx, my, 3, C_WHITE);
+    gfx->fillCircle(mx, my, 1, C_WHITE);
+  }
+
+  // Header band: what this is, and when this frame was.
+  gfx->fillRect(0, 0, TFT_WIDTH, 14, C_BLACK);
+  gfx->setTextSize(1);
+  gfx->setTextColor(C_DIMTX);
+  gfx->setCursor(6, 3);
+  gfx->print("RADAR");
+  char lbl[8];
+  const int off = (int)v.minOff[rFrame_];
+  if (rFrame_ == v.nowIdx || off == 0) strlcpy(lbl, "now", sizeof(lbl));
+  else snprintf(lbl, sizeof(lbl), "%+dm", off);
+  gfx->setTextColor(rFrame_ > v.nowIdx ? C_RAINB : C_WHITE);
+  gfx->setCursor(TFT_WIDTH - 6 - gfxTextW(lbl, 1), 3);
+  gfx->print(lbl);
+
+  // Timeline band: a tick per frame, the observed/forecast divide, a cursor.
+  gfx->fillRect(0, TFT_HEIGHT - 16, TFT_WIDTH, 16, C_BLACK);
+  gfx->drawFastHLine(RR_TL_X0, RR_TL_Y + 2, RR_TL_W + 1, C_FAINT);
+  for (uint8_t i = 0; i < v.frames; i++) {
+    const int x = rrTimelineX(i, v.frames);
+    gfx->drawFastVLine(x, RR_TL_Y, 5, i > v.nowIdx ? C_RAINB : C_DIMTX);
+  }
+  const int nx = rrTimelineX(v.nowIdx, v.frames);
+  gfx->drawFastVLine(nx, RR_TL_Y - 2, 9, C_WHITE);
+  const int cx = rrTimelineX(rFrame_, v.frames);
+  gfx->fillRect(cx - 2, RR_TL_Y - 1, 5, 7, C_SUN);
+
+  rainRadarRelease();
+  return true;
 }
 
 void WeatherMode::service(const Settings& s) {
-  // The fetch lives on its own task; this only decides whether to repaint.
+  const uint32_t now = millis();
+
+  if (subRadar_) {
+    // The animation. Each frame holds for a beat, the last for longer; after
+    // a couple of loops the conditions screen takes the glass back.
+    const uint32_t hold =
+        (rFrames_ && rFrame_ + 1 >= rFrames_) ? RR_HOLD_MS : RR_FRAME_MS;
+    if (rTick_ && (now - rTick_) < hold) return;
+    if (rTick_) {                        // advance past the frame just shown
+      rFrame_++;
+      if (rFrames_ && rFrame_ >= rFrames_) {
+        rFrame_ = 0;
+        if (++rLoops_ >= RR_SHOW_LOOPS) {
+          subRadar_ = false;
+          needFull_ = true;
+          condSince_ = now;
+        }
+      }
+    }
+    if (subRadar_) {
+      rTick_ = now;
+      if (!drawRadarFrame()) {           // radar went away: back to conditions
+        subRadar_ = false;
+        needFull_ = true;
+        condSince_ = now;
+      } else {
+        return;
+      }
+    }
+  }
+
+  // The conditions screen. The fetch lives on its own task; this only decides
+  // whether to repaint.
   WeatherData w;
   weatherSnapshot(w);
   bool repaint = needFull_;
   if (w.lastOkMs != renderedOk_ || w.error != renderedErr_) repaint = true;
   // Once a minute for the footer age (and the fetching/error screens).
-  if (millis() - lastDrawMs_ >= 60000UL) repaint = true;
+  if (now - lastDrawMs_ >= 60000UL) repaint = true;
   if (repaint) {
     needFull_ = false;
     renderedOk_ = w.lastOkMs;
     renderedErr_ = w.error;
-    lastDrawMs_ = millis();
+    lastDrawMs_ = now;
     render(s, w);
+  }
+
+  // After the conditions have had their say, the timelapse takes a turn —
+  // but only when there is actually something on the radar to show.
+  if (w.valid && rainRadarReady() && (now - condSince_) >= RR_COND_SEC * 1000UL) {
+    subRadar_ = true;
+    rFrame_ = 0;
+    rLoops_ = 0;
+    rTick_ = 0;
   }
 }
 

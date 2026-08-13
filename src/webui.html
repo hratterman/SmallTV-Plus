@@ -351,6 +351,7 @@ small.hint{display:block;color:var(--mut);margin-top:4px;font-size:12px}
     <div><label>Refresh (s)</label><input id="wxPollSec" type="number" min="300" max="43200"></div>
    </div>
    <div class="chk"><input id="wxStorm" type="checkbox"><label>Storm heads-up &mdash; a banner when storms newly enter the forecast</label></div>
+   <div class="chk"><input id="wxRadar" type="checkbox"><label>Rain radar &mdash; an animated timelapse over a street map when rain is nearby</label></div>
    <small class="hint">Forecast data from Open-Meteo: free, anonymous, no API key to create. It answers browsers too, so this mode works over the USB tether as well as WiFi.</small>
   </div>
  </section>
@@ -661,7 +662,8 @@ function loadConfig(){return j('/api/config').then(function(c){C=c;
  var wx=c.weather||{};
  if($('wxLat')){sv('wxLat',wx.lat||0);sv('wxLon',wx.lon||0);
   sv('wxUnitsF',String(wx.unitsF!==false));sv('wxPollSec',wx.pollSec||900);
-  sc('wxStorm',wx.stormAlert!==false);}
+  sc('wxStorm',wx.stormAlert!==false);
+  sc('wxRadar',wx.rainRadar!==false);}
  sc('autoBrightness',!!c.autoBrightness);
  $('backlightInverted').checked=!!c.backlightInverted;
  // header chip = which chip this firmware was built for
@@ -866,7 +868,7 @@ function collect(){
   refreshToken:gv('spotifyRefreshToken').trim(), pollSec:parseInt(gv('spotifyPollSec'))||10};
  if($('wxLat')) o.weather={lat:parseFloat(gv('wxLat'))||0,lon:parseFloat(gv('wxLon'))||0,
   unitsF:gv('wxUnitsF')==='true',pollSec:parseInt(gv('wxPollSec'))||900,
-  stormAlert:gc('wxStorm')};
+  stormAlert:gc('wxStorm'),rainRadar:gc('wxRadar')};
  if($('calEnabled')) o.calendar={enabled:gc('calEnabled'),provider:gv('calProvider'),
   clientId:gv('calClientId').trim(), clientSecret:gv('calClientSecret').trim(),
   refreshToken:gv('calRefreshToken').trim(), icsUrl:gv('calIcsUrl').trim(),

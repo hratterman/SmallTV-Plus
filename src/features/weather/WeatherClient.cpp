@@ -5,6 +5,7 @@
 #include <WiFiClientSecure.h>
 #include "NetFetch.h"
 #include "Platform.h"
+#include "RainRadarClient.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -37,6 +38,7 @@ static struct {
   float    lat, lon;
   bool     unitsF;
   bool     stormAlert;
+  bool     rainRadar;
   uint16_t pollSec;
 } s_cfg;
 
@@ -75,6 +77,7 @@ static uint32_t cfgFingerprint(const Settings& s) {
   mix(s.weather.unitsF ? 1 : 2);
   mix(s.weather.pollSec);   // the task learns cadence via the same epoch bump
   mix(s.weather.stormAlert ? 1 : 2);
+  mix(s.weather.rainRadar ? 1 : 2);
   return fp;
 }
 
@@ -86,6 +89,7 @@ void weatherInit(const Settings& s) {
   s_cfg.lon        = s.weather.lon;
   s_cfg.unitsF     = s.weather.unitsF;
   s_cfg.stormAlert = s.weather.stormAlert;
+  s_cfg.rainRadar  = s.weather.rainRadar;
   s_cfg.pollSec    = s.weather.pollSec;
   if (fp != s_cfgFp) {
     s_cfgFp = fp;
@@ -252,6 +256,7 @@ static void weatherTask(void*) {
   float    lat = 0.0f, lon = 0.0f;
   bool     unitsF = false;
   bool     stormAlert = true;
+  bool     rainRadar = true;
   uint16_t pollSec = 600;
   // Last fetch's per-day weather class, for the storm heads-up: a banner when
   // a storm ENTERS the forecast, not for its continued presence. The first
@@ -268,6 +273,7 @@ static void weatherTask(void*) {
       lon        = s_cfg.lon;
       unitsF     = s_cfg.unitsF;
       stormAlert = s_cfg.stormAlert;
+      rainRadar  = s_cfg.rainRadar;
       pollSec    = s_cfg.pollSec;
       lockGive();
       nextPollMs = 0;                    // a new place: fetch now
@@ -279,6 +285,12 @@ static void weatherTask(void*) {
       vTaskDelay(1000 / portTICK_PERIOD_MS);
       continue;
     }
+
+    // The radar timelapse shares this task; it times itself (one cheap tile
+    // every ten minutes until there is weather worth a full build) and must
+    // run whether or not the forecast poll below is due.
+    rainRadarCycle(lat, lon, rainRadar);
+
     const uint32_t now = millis();
     if (nextPollMs && (int32_t)(now - nextPollMs) < 0) {
       vTaskDelay(250 / portTICK_PERIOD_MS);

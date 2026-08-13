@@ -436,6 +436,8 @@ details>div{margin-top:12px}
             </div>
             <label class="tick"><input id="weatherStorm" type="checkbox">
               <span>Storm heads-up &mdash; a banner when storms newly enter the forecast</span></label>
+            <label class="tick"><input id="weatherRainRadar" type="checkbox">
+              <span>Rain radar &mdash; an animated timelapse over a street map when rain is nearby</span></label>
             <p class="hint">Open-Meteo, no key needed &mdash; and it answers browsers, so the
               weather works over this cable exactly like it does on WiFi.</p>
           </fieldset>
@@ -761,6 +763,7 @@ const FIELDS=[
   ['weatherUnitsF',     ['weather','unitsF'],           'bool'],
   ['weatherPollSec',    ['weather','pollSec'],          'number'],
   ['weatherStorm',      ['weather','stormAlert'],       'bool'],
+  ['weatherRainRadar',  ['weather','rainRadar'],        'bool'],
   ['calRemindMin',      ['calendar','remindMin'],       'number'],
   ['tickerAlertPct',    ['ticker','alertPct'],          'number'],
   ['ambLife',           ['ambient','patterns','life'],      'bool'],

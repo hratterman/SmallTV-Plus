@@ -401,6 +401,7 @@ void WeatherSettings::setDefaults() {
   unitsF = true;
   pollSec = 900;          // Open-Meteo updates its models ~hourly; 15 min is plenty
   stormAlert = true;
+  rainRadar = true;
 }
 
 void WeatherSettings::toJson(JsonObject o) const {
@@ -409,6 +410,7 @@ void WeatherSettings::toJson(JsonObject o) const {
   o["unitsF"]  = unitsF;
   o["pollSec"] = pollSec;
   o["stormAlert"] = stormAlert;
+  o["rainRadar"] = rainRadar;
 }
 
 void WeatherSettings::fromJson(JsonObjectConst o) {
@@ -417,6 +419,7 @@ void WeatherSettings::fromJson(JsonObjectConst o) {
   if (o["unitsF"].is<bool>()) unitsF = o["unitsF"];
   if (o["pollSec"].is<int>()) pollSec = (uint16_t)constrain((int)o["pollSec"], 300, 43200);
   if (o["stormAlert"].is<bool>()) stormAlert = o["stormAlert"];
+  if (o["rainRadar"].is<bool>()) rainRadar = o["rainRadar"];
 }
 
 void CalendarSettings::setDefaults() {
