@@ -31,6 +31,7 @@ class SpotifyMode : public DisplayMode {
  private:
   void renderAll(const Settings& s);       // full panel
   void renderProgress(const Settings& s);  // bar segment + elapsed label only
+  void drawArtPlate(const SpotifyData& d); // the cover box when the cover won't
 
   bool     needFull_ = true;
   uint32_t lastTick_ = 0;
@@ -50,6 +51,7 @@ class SpotifyMode : public DisplayMode {
   char     drawnArt_[SPOTIFY_ART_LEN] = {0};
   bool     artOnGlass_ = false;
   bool     artFailed_  = false;   // last cover attempt did not land
+  uint32_t artRetryTick_ = 0;     // when the failed cover was last re-attempted
   int      barW_    = -1;   // filled pixels currently drawn
   int      elapsed_ = -1;   // seconds currently shown
 };

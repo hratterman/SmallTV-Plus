@@ -173,6 +173,13 @@ static uint32_t s_retryAt = 0;     // millis() before which a retry is pointless
 
 const char* albumArtStatus() { return s_status; }
 
+// Whether a fresh call would actually go to the network, or bounce straight
+// off the backoff. The mode retries on a timer; without this it could not tell
+// a real attempt from a no-op, and would count the no-ops as tries.
+bool albumArtRetryDue() {
+  return !s_retryAt || (int32_t)(millis() - s_retryAt) >= 0;
+}
+
 // A TLS session costs tens of kilobytes and this device is also running the
 // miner, the web server and the Spotify poll. Starting a handshake that cannot
 // complete does not just fail — it takes the heap the *poll* needed with it,
@@ -300,7 +307,10 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y) {
   // sessions at once do not fit in this heap. Wait for it rather than fail.
   if (!spotifyNetLock(2500)) {
     strlcpy(s_status, "busy: poll holds the radio", sizeof(s_status));
-    s_retryAt = millis() + 15000;
+    // Nothing was spent here — no socket, no TLS arena, the poll just had the
+    // radio at the wrong moment. It lets go within a few seconds, so the full
+    // 15 s penalty was pure bad luck compounding: lose one race, sit out three.
+    s_retryAt = millis() + 4000;
     return false;
   }
   struct NetRelease { ~NetRelease() { spotifyNetUnlock(); } } netRelease;

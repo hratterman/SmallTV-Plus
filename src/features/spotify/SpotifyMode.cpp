@@ -79,6 +79,21 @@ static void fmtTime(uint32_t ms, char* out, size_t n) {
   snprintf(out, n, "%lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
 }
 
+// A cover that would not load leaves a plate rather than a hole, so the layout
+// below it does not move about between tracks — and the plate says why, because
+// "no art" on its own has never once been enough to act on.
+void SpotifyMode::drawArtPlate(const SpotifyData& d) {
+  Arduino_GFX* gfx = gfxDev();
+  if (!gfx) return;
+  gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
+  gfx->fillCircle(TFT_WIDTH / 2, ART_Y + SPOTIFY_ART_PX / 2, 16, C_SPOT);
+  const char* why = d.artUrl[0] ? albumArtStatus() : "poll sent no cover url";
+  gfxDrawCentered(why, ART_Y + SPOTIFY_ART_PX - 24, 1, C_DIM);
+  char n[24];
+  snprintf(n, sizeof(n), "%u covers offered", (unsigned)spotifyArtCandidates());
+  gfxDrawCentered(n, ART_Y + SPOTIFY_ART_PX - 14, 1, C_DIM);
+}
+
 // The two scrolling bands. A title that does not fit used to wrap to a second
 // line and then end in an ellipsis, which silently drops the rest of the name;
 // these scroll instead, so everything is eventually readable.
@@ -153,18 +168,7 @@ void SpotifyMode::renderAll(const Settings& s) {
       artFailed_ = true;
       drawnArt_[0] = 0;
     }
-    if (artFailed_) {
-      // A cover that would not load leaves a plate rather than a hole, so the
-      // layout below it does not move about between tracks — and the plate says
-      // why, because "no art" on its own has never once been enough to act on.
-      gfx->fillRoundRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, 6, C_PANEL);
-      gfx->fillCircle(TFT_WIDTH / 2, ART_Y + SPOTIFY_ART_PX / 2, 16, C_SPOT);
-      const char* why = d.artUrl[0] ? albumArtStatus() : "poll sent no cover url";
-      gfxDrawCentered(why, ART_Y + SPOTIFY_ART_PX - 24, 1, C_DIM);
-      char n[24];
-      snprintf(n, sizeof(n), "%u covers offered", (unsigned)spotifyArtCandidates());
-      gfxDrawCentered(n, ART_Y + SPOTIFY_ART_PX - 14, 1, C_DIM);
-    }
+    if (artFailed_) drawArtPlate(d);
   }
 
   char title[SPOTIFY_TRACK_LEN], artist[SPOTIFY_ARTIST_LEN];
@@ -278,6 +282,29 @@ void SpotifyMode::service(const Settings& s) {
     workText(s, d, title, sizeof(title), artist, sizeof(artist));
     gfxMarqueeDraw(kTitleBand, title, now);
     gfxMarqueeDraw(kArtistBand, artist, now);
+  }
+
+  // A failed cover is not settled business. The full repaint above only runs
+  // when the panel's *text* changes, so a cover that lost one race with the
+  // poll stayed a plate for the whole track: AlbumArt's backoff expired with
+  // nobody left to try again. Keep trying the box — just the box — until the
+  // cover lands or the song ends. albumArtRetryDue() gates it so a tick spent
+  // inside the backoff is not burned as an attempt. The box is cleared first
+  // for the same reason renderAll paints covers over black: a cover smaller
+  // than the box must not sit on the plate, and a half-decoded corpse from the
+  // previous try must not sit under the new one.
+  if (linked && d.valid && !d.error && d.playing && artFailed_ && d.artUrl[0] &&
+      (now - artRetryTick_) >= 5000 && albumArtRetryDue()) {
+    artRetryTick_ = now;
+    Arduino_GFX* gfx = gfxDev();
+    if (gfx) gfx->fillRect(ART_X, ART_Y, SPOTIFY_ART_PX, SPOTIFY_ART_PX, C_BLACK);
+    if (albumArtDraw(d.artUrl, ART_X, ART_Y)) {
+      artFailed_  = false;
+      artOnGlass_ = true;
+      strlcpy(drawnArt_, d.artUrl, sizeof(drawnArt_));
+    } else {
+      drawArtPlate(d);   // still failing; put the current reason back up
+    }
   }
 }
 

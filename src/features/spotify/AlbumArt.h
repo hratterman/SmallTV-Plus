@@ -57,4 +57,8 @@ bool albumArtDraw(const char* url, int16_t x, int16_t y);
 // more than once already.
 const char* albumArtStatus();
 
+// True when the backoff after the last failure has expired, i.e. a call to
+// albumArtDraw would genuinely try rather than return false on the spot.
+bool albumArtRetryDue();
+
 #endif  // WITH_SPOTIFY
