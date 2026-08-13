@@ -5,12 +5,50 @@
 #include <WiFiClientSecure.h>
 #include "NetFetch.h"
 #include "Platform.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 
-static WeatherData s_data;
-static uint32_t    s_nextPollMs = 0;
-static uint32_t    s_cfgFp = 0;       // refetch when the location/units change
+#if WITH_SPOTIFY
+#include "SpotifyClient.h"   // spotifyNetLock: one TLS operation at a time
+#endif
 
-const WeatherData& weatherGet() { return s_data; }
+// ---------------------------------------------------------------------------
+// Shared state, guarded by s_lock. The task writes, the display loop reads.
+//
+// The fetch used to run on the loop thread out of WeatherMode::service, which
+// froze the whole UI — touch sampling included — for the length of a TLS
+// handshake whenever this mode came up with a stale reading. Tapping off the
+// calendar page onto this one was the reproducible victim: the poll only
+// advanced while the weather page was showing, so arriving here it was always
+// overdue, the fetch ran before the first paint, and the tap looked dead —
+// the calendar stayed on the glass and every further tap fell on a thread
+// that was inside mbedTLS. Same cure as Spotify and the calendar: a task.
+// ---------------------------------------------------------------------------
+static SemaphoreHandle_t s_lock = nullptr;
+static TaskHandle_t      s_task = nullptr;
+static WeatherData       s_data;
+static uint32_t          s_cfgFp = 0;   // loop-side only: change detector
+
+// What the fetch needs from Settings, copied under the lock: the task must
+// not read g_settings, which the loop rewrites on every web-UI save.
+static struct {
+  volatile uint32_t epoch;
+  float    lat, lon;
+  bool     unitsF;
+  uint16_t pollSec;
+} s_cfg;
+
+static inline void lockTake() { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
+static inline void lockGive() { if (s_lock) xSemaphoreGive(s_lock); }
+
+void weatherSnapshot(WeatherData& out) {
+  lockTake();
+  out = s_data;
+  lockGive();
+}
+
+static void weatherTask(void*);
 
 static uint32_t cfgFingerprint(const Settings& s) {
   // Enough to notice any change that should trigger an immediate refetch.
@@ -19,31 +57,39 @@ static uint32_t cfgFingerprint(const Settings& s) {
   mix((uint32_t)(s.weather.lat * 10000.0f));
   mix((uint32_t)(s.weather.lon * 10000.0f));
   mix(s.weather.unitsF ? 1 : 2);
+  mix(s.weather.pollSec);   // the task learns cadence via the same epoch bump
   return fp;
 }
 
 void weatherInit(const Settings& s) {
+  if (!s_lock) s_lock = xSemaphoreCreateMutex();
   const uint32_t fp = cfgFingerprint(s);
+  lockTake();
+  s_cfg.lat     = s.weather.lat;
+  s_cfg.lon     = s.weather.lon;
+  s_cfg.unitsF  = s.weather.unitsF;
+  s_cfg.pollSec = s.weather.pollSec;
   if (fp != s_cfgFp) {
     s_cfgFp = fp;
-    s_nextPollMs = 0;                 // fetch on the next service tick
-    s_data.error = false;
+    s_cfg.epoch = s_cfg.epoch + 1;   // task refetches now
+    s_data.error = false;            // a new place starts clean, not mid-complaint
+  }
+  lockGive();
+  if (!s_task) {
+    // Core 0 with the Spotify and calendar polls, away from the display loop.
+    xTaskCreatePinnedToCore(weatherTask, "weather", 8192, nullptr, 1, &s_task, 0);
   }
 }
 
-static bool haveLocation(const Settings& s) {
-  return s.weather.lat != 0.0f || s.weather.lon != 0.0f;
-}
-
-static void buildQuery(const Settings& s, char* out, size_t n) {
+static void buildQuery(float lat, float lon, bool unitsF, char* out, size_t n) {
   snprintf(out, n,
            WEATHER_PATH
            "?latitude=%.4f&longitude=%.4f"
            "&current=temperature_2m,weather_code,is_day"
            "&daily=weather_code,temperature_2m_max,temperature_2m_min"
            "&timezone=auto&forecast_days=%d%s",
-           (double)s.weather.lat, (double)s.weather.lon, WX_DAYS,
-           s.weather.unitsF ? "&temperature_unit=fahrenheit" : "");
+           (double)lat, (double)lon, WX_DAYS,
+           unitsF ? "&temperature_unit=fahrenheit" : "");
 }
 
 // The device-path fetch, hand-rolled on purpose. The field cube sits behind a
@@ -57,9 +103,10 @@ static void buildQuery(const Settings& s, char* out, size_t n) {
 // TLS is killed: port 80 to this host was measured CLEAN on the field
 // hotspot (the earlier "unexpected reply" was un-decoded chunking, fixed in
 // NetFetch since).
-static bool fetchDirect(const Settings& s, String& raw, char* err, size_t errLen) {
+static bool fetchDirect(float lat, float lon, bool unitsF, String& raw,
+                        char* err, size_t errLen) {
   char path[280];
-  buildQuery(s, path, sizeof(path));
+  buildQuery(lat, lon, unitsF, path, sizeof(path));
 
   IPAddress ip;
   if (!WiFi.hostByName(WEATHER_HOST, ip)) {
@@ -141,7 +188,7 @@ static bool fetchDirect(const Settings& s, String& raw, char* err, size_t errLen
   return true;
 }
 
-static bool parseWeather(const String& raw) {
+static bool parseWeather(const String& raw, WeatherData& out) {
   // Filtered parse: the reply also carries units metadata and generation
   // stats nobody here reads.
   JsonDocument filter;
@@ -160,9 +207,9 @@ static bool parseWeather(const String& raw) {
   if (!doc["current"].is<JsonObjectConst>() || !doc["daily"].is<JsonObjectConst>())
     return false;
 
-  s_data.curTemp = doc["current"]["temperature_2m"] | 0.0f;
-  s_data.curCode = (uint8_t)(doc["current"]["weather_code"] | 0);
-  s_data.day     = (int)(doc["current"]["is_day"] | 1) != 0;
+  out.curTemp = doc["current"]["temperature_2m"] | 0.0f;
+  out.curCode = (uint8_t)(doc["current"]["weather_code"] | 0);
+  out.day     = (int)(doc["current"]["is_day"] | 1) != 0;
 
   JsonArrayConst tim = doc["daily"]["time"].as<JsonArrayConst>();
   JsonArrayConst cod = doc["daily"]["weather_code"].as<JsonArrayConst>();
@@ -171,73 +218,116 @@ static bool parseWeather(const String& raw) {
   if (tmx.size() < 1 || tmn.size() < 1) return false;
   for (int i = 0; i < WX_DAYS; i++) {
     const bool have = (size_t)i < tmx.size();
-    s_data.hi[i]   = have ? (tmx[i] | 0.0f) : 0.0f;
-    s_data.lo[i]   = have ? (tmn[i] | 0.0f) : 0.0f;
-    s_data.code[i] = have && (size_t)i < cod.size() ? (uint8_t)(cod[i] | 0) : 0;
-    s_data.dow[i]  = have && (size_t)i < tim.size()
-                         ? (int8_t)wxDowFromDate(tim[i] | "")
-                         : (int8_t)-1;
+    out.hi[i]   = have ? (tmx[i] | 0.0f) : 0.0f;
+    out.lo[i]   = have ? (tmn[i] | 0.0f) : 0.0f;
+    out.code[i] = have && (size_t)i < cod.size() ? (uint8_t)(cod[i] | 0) : 0;
+    out.dow[i]  = have && (size_t)i < tim.size()
+                      ? (int8_t)wxDowFromDate(tim[i] | "")
+                      : (int8_t)-1;
   }
   return true;
 }
 
-void weatherService(const Settings& s) {
-  if (!haveLocation(s) || !netHaveRoute()) return;
-  const uint32_t now = millis();
-  if (s_nextPollMs && (int32_t)(now - s_nextPollMs) < 0) return;
+static void weatherTask(void*) {
+  uint32_t myEpoch = 0;
+  uint32_t nextPollMs = 0;
+  float    lat = 0.0f, lon = 0.0f;
+  bool     unitsF = false;
+  uint16_t pollSec = 600;
 
-  String raw;
-  bool fetched;
-  char ferr[72] = "";
-  if (netFetchTethered()) {
-    // The browser end speaks TLS 1.3 through whatever the network filters,
-    // so the tether path stays an ordinary https fetch.
-    char url[300];
-    snprintf(url, sizeof(url), "https://" WEATHER_HOST "%s", "");
-    char q[280];
-    buildQuery(s, q, sizeof(q));
-    strlcat(url, q, sizeof(url));
-    const NetFetchResult r = netFetchToString(url, false, "Accept: application/json",
-                                              nullptr, 0, raw, 8192, 10000);
-    fetched = r.ok;
-    if (!fetched) strlcpy(ferr, r.error, sizeof(ferr));
-  } else {
-    fetched = fetchDirect(s, raw, ferr, sizeof(ferr));
-    if (!fetched) {
-      // TLS is being interfered with even without a hostname to match: fall
-      // back to plain http, which netFetch now de-chunks correctly. Public
-      // weather data over port 80 beats a blank screen.
+  for (;;) {
+    if (myEpoch != s_cfg.epoch) {
+      lockTake();
+      myEpoch = s_cfg.epoch;
+      lat     = s_cfg.lat;
+      lon     = s_cfg.lon;
+      unitsF  = s_cfg.unitsF;
+      pollSec = s_cfg.pollSec;
+      lockGive();
+      nextPollMs = 0;                    // a new place: fetch now
+    }
+
+    // netHaveRoute, not the radio: tethered there is no station connection
+    // and a perfectly good route. 0,0 is "no location set", not a real place.
+    if ((lat == 0.0f && lon == 0.0f) || !netHaveRoute()) {
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      continue;
+    }
+    const uint32_t now = millis();
+    if (nextPollMs && (int32_t)(now - nextPollMs) < 0) {
+      vTaskDelay(250 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+#if WITH_SPOTIFY
+    // One TLS operation at a time across the firmware — the same rule the
+    // calendar task and the art fetch already obey, for the same heap.
+    if (!spotifyNetLock(10000)) { vTaskDelay(500 / portTICK_PERIOD_MS); continue; }
+#endif
+    String raw;
+    bool fetched;
+    char ferr[72] = "";
+    if (netFetchTethered()) {
+      // The browser end speaks TLS 1.3 through whatever the network filters,
+      // so the tether path stays an ordinary https fetch.
       char url[300];
-      snprintf(url, sizeof(url), "http://" WEATHER_HOST);
+      snprintf(url, sizeof(url), "https://" WEATHER_HOST "%s", "");
       char q[280];
-      buildQuery(s, q, sizeof(q));
+      buildQuery(lat, lon, unitsF, q, sizeof(q));
       strlcat(url, q, sizeof(url));
       const NetFetchResult r = netFetchToString(url, false, "Accept: application/json",
                                                 nullptr, 0, raw, 8192, 10000);
-      if (r.ok) {
-        fetched = true;
-      } else {
-        char both[72];
-        snprintf(both, sizeof(both), "%.32s / http: %.28s", ferr, r.error);
-        strlcpy(ferr, both, sizeof(ferr));
+      fetched = r.ok;
+      if (!fetched) strlcpy(ferr, r.error, sizeof(ferr));
+    } else {
+      fetched = fetchDirect(lat, lon, unitsF, raw, ferr, sizeof(ferr));
+      if (!fetched) {
+        // TLS is being interfered with even without a hostname to match: fall
+        // back to plain http, which netFetch now de-chunks correctly. Public
+        // weather data over port 80 beats a blank screen.
+        char url[300];
+        snprintf(url, sizeof(url), "http://" WEATHER_HOST);
+        char q[280];
+        buildQuery(lat, lon, unitsF, q, sizeof(q));
+        strlcat(url, q, sizeof(url));
+        const NetFetchResult r = netFetchToString(url, false, "Accept: application/json",
+                                                  nullptr, 0, raw, 8192, 10000);
+        if (r.ok) {
+          fetched = true;
+        } else {
+          char both[72];
+          snprintf(both, sizeof(both), "%.32s / http: %.28s", ferr, r.error);
+          strlcpy(ferr, both, sizeof(ferr));
+        }
       }
     }
-  }
+#if WITH_SPOTIFY
+    spotifyNetUnlock();
+#endif
 
-  if (fetched && parseWeather(raw)) {
-    s_data.valid = true;
-    s_data.error = false;
-    s_data.lastOkMs = now;
-    s_nextPollMs = now + (uint32_t)s.weather.pollSec * 1000UL;
-  } else {
-    s_data.error = true;
-    if (fetched)
-      // Show the head of what DID come back - a filter's block page names
-      // itself in its first line.
-      snprintf(s_data.errMsg, sizeof(s_data.errMsg), "reply: %.60s", raw.c_str());
-    else
-      strlcpy(s_data.errMsg, ferr, sizeof(s_data.errMsg));
-    s_nextPollMs = now + 60000UL;     // errors retry in a minute, not a poll period
+    // Parse into a staging copy and swap it in whole, so the display loop can
+    // never read a half-written forecast.
+    WeatherData fresh = {};
+    if (fetched && parseWeather(raw, fresh)) {
+      fresh.valid = true;
+      fresh.error = false;
+      fresh.lastOkMs = millis();
+      lockTake();
+      s_data = fresh;
+      lockGive();
+      nextPollMs = millis() + (uint32_t)pollSec * 1000UL;
+    } else {
+      lockTake();
+      s_data.error = true;   // the last good reading stays; the red dot says stale
+      if (fetched)
+        // Show the head of what DID come back - a filter's block page names
+        // itself in its first line.
+        snprintf(s_data.errMsg, sizeof(s_data.errMsg), "reply: %.60s", raw.c_str());
+      else
+        strlcpy(s_data.errMsg, ferr, sizeof(s_data.errMsg));
+      lockGive();
+      nextPollMs = millis() + 60000UL;   // errors retry in a minute, not a poll period
+    }
   }
 }
 

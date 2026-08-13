@@ -3,6 +3,7 @@
 #if WITH_WEATHER
 
 #include "../../Mode.h"
+#include "WeatherClient.h"
 
 class WeatherMode : public DisplayMode {
  public:
@@ -14,7 +15,7 @@ class WeatherMode : public DisplayMode {
   void service(const Settings& s) override;
 
  private:
-  void render(const Settings& s);
+  void render(const Settings& s, const WeatherData& w);
   bool     needFull_ = true;
   uint32_t renderedOk_ = 0xFFFFFFFF;
   bool     renderedErr_ = false;

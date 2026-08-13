@@ -220,7 +220,8 @@ static void tetherStatusFill(String& out) {
 #endif
 #if WITH_WEATHER
   {
-    const WeatherData& w = weatherGet();
+    WeatherData w;
+    weatherSnapshot(w);
     if (w.error && w.errMsg[0]) d["weather"] = w.errMsg;
     else if (w.valid) d["weather"] = "ok";
   }

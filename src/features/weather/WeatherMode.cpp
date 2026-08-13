@@ -139,11 +139,10 @@ static void drawTemp(Arduino_GFX* gfx, const Settings& s, float t) {
   gfxLabel(x + 16, TEMP_Y + 2, s.weather.unitsF ? "F" : "C", 2, C_DIMTX);
 }
 
-void WeatherMode::render(const Settings& s) {
+void WeatherMode::render(const Settings& s, const WeatherData& w) {
   Arduino_GFX* gfx = gfxDev();
   if (!gfx) return;
   gfx->fillScreen(C_BLACK);
-  const WeatherData& w = weatherGet();
 
   if (s.weather.lat == 0.0f && s.weather.lon == 0.0f) {
     gfxDrawCentered("no location set", 96, 2, C_WHITE);
@@ -229,8 +228,9 @@ void WeatherMode::wake(const Settings& s) {
 }
 
 void WeatherMode::service(const Settings& s) {
-  weatherService(s);
-  const WeatherData& w = weatherGet();
+  // The fetch lives on its own task; this only decides whether to repaint.
+  WeatherData w;
+  weatherSnapshot(w);
   bool repaint = needFull_;
   if (w.lastOkMs != renderedOk_ || w.error != renderedErr_) repaint = true;
   // Once a minute for the footer age (and the fetching/error screens).
@@ -240,7 +240,7 @@ void WeatherMode::service(const Settings& s) {
     renderedOk_ = w.lastOkMs;
     renderedErr_ = w.error;
     lastDrawMs_ = millis();
-    render(s);
+    render(s, w);
   }
 }
 

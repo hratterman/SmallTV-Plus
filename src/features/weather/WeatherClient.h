@@ -2,8 +2,9 @@
 //
 // No API key, no account: api.open-meteo.com answers anonymously and sends
 // Access-Control-Allow-Origin: * (measured), so the same fetch works on WiFi
-// and down the tether cable. The client polls only while the mode is being
-// serviced — the screen that isn't showing costs nothing.
+// and down the tether cable. The poll runs on its own task, like Spotify's
+// and the calendar's: a TLS handshake on the display loop froze the whole UI
+// — touch included — for its full duration, which is a lot of dead taps.
 #pragma once
 #include "config.h"
 #if WITH_WEATHER
@@ -27,8 +28,7 @@ struct WeatherData {
   int8_t   dow[WX_DAYS];              // 0=Sun, -1 unknown
 };
 
-void weatherInit(const Settings& s);
-void weatherService(const Settings& s);   // call while the mode is visible
-const WeatherData& weatherGet();
+void weatherInit(const Settings& s);      // config hand-off; starts the task
+void weatherSnapshot(WeatherData& out);   // a consistent copy, any thread
 
 #endif  // WITH_WEATHER
