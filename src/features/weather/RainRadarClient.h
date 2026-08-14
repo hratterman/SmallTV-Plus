@@ -1,22 +1,26 @@
-// RainRadarClient.h — the last hour of rain, fetched and held for the screen.
+// RainRadarClient.h — the last hour of rain, kept on flash for a 55 KB heap.
 //
 // RainViewer publishes a tile pyramid of the world's radar composites every
 // ten minutes (past ~2 h, plus a short nowcast when their model is running),
-// free and keyless, CORS-open — so the same fetches work over WiFi and down
-// the tether cable. Esri's street-map tiles are baseline JPEG, which this
-// chip decodes from ROM; the radar tiles are PNG, which it inflates with the
-// ROM copy of miniz and defilters by hand (RainRadar.h holds that logic).
+// free and keyless — and, measured: over plain HTTP as well as TLS, which on
+// WiFi removes the 45 KB TLS arena from the radar's account entirely. Esri's
+// street-map tiles are baseline JPEG (ROM TJpgDec); the radar tiles are PNG,
+// inflated with the ROM copy of miniz and defiltered by hand (RainRadar.h).
 //
-// Memory is the design constraint, so nothing full-size is ever kept: the map
-// lands as 128x128 RGB332 at half brightness (16 KB), each radar frame as a
-// 64x64 grid of intensity nibbles (2 KB), and everything bigger lives only for
-// the seconds one tile takes to decode. The whole build runs on the weather
-// task; the display loop reads a locked view and draws.
+// The first version cached everything in RAM and needed ~110 KB at peak; a
+// field cube running the miner reported 55 KB free, which is not a tuning
+// problem. So nothing big lives in RAM at all now:
+//   - a fetched tile streams straight into a LittleFS file (no buffer),
+//   - the inflater runs afterwards, input read back from flash — the one
+//     large transient (~47 KB), never concurrent with a connection,
+//   - each decoded frame is a 2 KB grid file keyed by its timestamp, so a
+//     steady rain fetches only the one new frame per cycle, and a dry sky
+//     writes nothing to flash at all,
+//   - the renderer streams the map and the current grid from flash as it
+//     draws. Steady-state RAM for the whole feature: about 2 KB.
 //
-// The cheap-gate rule the user actually asked for: every cycle fetches ONE
-// tile (the newest) first, and only when it shows real precipitation does the
-// full map + history + nowcast build happen. A dry week costs six tiny tiles
-// an hour; the animation only ever exists when there is something to animate.
+// The cheap-gate rule stands: every cycle examines the newest frame first,
+// and only real precipitation triggers the full build.
 #pragma once
 #include "config.h"
 #if WITH_WEATHER
@@ -24,30 +28,32 @@
 #include <Arduino.h>
 #include "RainRadar.h"
 
+// Metadata only — pixel data is read through the accessors below, which
+// stream it from flash while the acquire lock is held.
 struct RainRadarView {
-  uint8_t        frames;                 // total frames held, oldest first
-  uint8_t        nowIdx;                 // index of the newest *observed* frame
-  int16_t        minOff[RR_FRAMES_MAX];  // minutes relative to that frame
-  uint8_t        markerX, markerY;       // the location, in tile pixels
-  const uint8_t* map;                    // RR_MAP_PX^2 RGB332, pre-dimmed
-  const uint8_t* grid[RR_FRAMES_MAX];    // nibble planes, RR_GRID_BYTES each
+  uint8_t frames;                 // total frames held, oldest first
+  uint8_t nowIdx;                 // index of the newest *observed* frame
+  int16_t minOff[RR_FRAMES_MAX];  // minutes relative to that frame
+  uint8_t markerX, markerY;       // the location, in tile pixels
 };
 
-// Task-side. Call freely from the weather task's loop; it times itself (ten
-// minutes between looks, sooner after a failure) and tears down when disabled.
+// Task-side. Call freely from the weather task's loop; it times itself and
+// tears down (files included) when disabled or the location moves.
 void rainRadarCycle(float lat, float lon, bool enabled);
 
-// True when a built animation is ready to draw. Cheap; any thread.
-bool rainRadarReady();
+bool rainRadarReady();            // cheap hint, any thread
+const char* rainRadarNote();      // last outcome, for status surfaces
 
-// Lock and fill the view. Returns false (nothing locked) when not ready.
-// Balance every true return with rainRadarRelease() promptly — the weather
-// task waits on this lock to publish a rebuild.
+// Lock + metadata. Balance every true return with rainRadarRelease().
 bool rainRadarAcquire(RainRadarView& v);
 void rainRadarRelease();
 
-// The last cycle's outcome, for status surfaces: "radar: 9 frames",
-// "radar quiet", or why not.
-const char* rainRadarNote();
+// While holding the lock: copy one frame's grid (RR_GRID_BYTES) into `out`,
+// and stream the base map a row at a time (RR_MAP_PX bytes of RGB332 per
+// row). mapBegin/mapEnd bracket one drawing pass; rows may repeat or skip.
+bool rainRadarReadGrid(uint8_t frameIdx, uint8_t* out);
+bool rainRadarMapBegin();
+bool rainRadarMapRow(int mapRow, uint8_t* out);
+void rainRadarMapEnd();
 
 #endif  // WITH_WEATHER

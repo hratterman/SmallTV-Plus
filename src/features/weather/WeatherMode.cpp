@@ -263,9 +263,11 @@ void WeatherMode::onContextAction(Settings& s) {
 #define RR_SHOW_LOOPS 2
 #define RR_COND_SEC 8
 
-// The whole radar screen is repainted per animation frame from RAM: the dim
-// map, the rain cells blended over it, the location dot, then the header and
-// timeline bands. ~60 ms of SPI per frame, twice a second.
+// The whole radar screen is repainted per animation frame: the dim map and
+// the current frame's grid stream in from flash (the 55 KB cube taught the
+// radar to keep nothing big in RAM), the rain cells blend over the map, then
+// the location dot and the header and timeline bands. ~60 ms of SPI plus a
+// few ms of flash per frame, twice a second.
 bool WeatherMode::drawRadarFrame() {
   Arduino_GFX* gfx = gfxDev();
   if (!gfx) return false;
@@ -273,22 +275,33 @@ bool WeatherMode::drawRadarFrame() {
   if (!rainRadarAcquire(v)) return false;
   if (rFrame_ >= v.frames) rFrame_ = 0;
   rFrames_ = v.frames;
-  const uint8_t* g = v.grid[rFrame_];
+  uint8_t s_rGrid[RR_GRID_BYTES];   // loop-stack: ~2 KB for the draw only
+  uint8_t s_rMapRow[RR_MAP_PX];
+  if (!rainRadarReadGrid(rFrame_, s_rGrid) || !rainRadarMapBegin()) {
+    rainRadarRelease();
+    return false;
+  }
 
   uint16_t line[TFT_WIDTH];
+  int haveRow = -1;
   for (int y = 0; y < TFT_HEIGHT; y++) {
     const int ty = y + RR_CROP;
-    const uint8_t* mrow = v.map + (size_t)(ty >> 1) * RR_MAP_PX;
+    const int mr = ty >> 1;
+    if (mr != haveRow) {
+      if (!rainRadarMapRow(mr, s_rMapRow)) memset(s_rMapRow, 0, sizeof(s_rMapRow));
+      haveRow = mr;
+    }
     const int gy = ty >> 2;
     for (int x = 0; x < TFT_WIDTH; x++) {
       const int tx = x + RR_CROP;
-      uint16_t c = rr332to565(mrow[tx >> 1]);
-      const uint8_t n = rrGridGet(g, tx >> 2, gy);
+      uint16_t c = rr332to565(s_rMapRow[tx >> 1]);
+      const uint8_t n = rrGridGet(s_rGrid, tx >> 2, gy);
       if (n >= RR_GATE_NIBBLE) c = rrBlend565(c, rrPalette[n]);
       line[x] = c;
     }
     gfx->draw16bitRGBBitmap(0, y, line, TFT_WIDTH, 1);
   }
+  rainRadarMapEnd();
 
   // You are here.
   const int mx = (int)v.markerX - RR_CROP, my = (int)v.markerY - RR_CROP;
