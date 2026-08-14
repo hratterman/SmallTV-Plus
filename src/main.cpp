@@ -62,6 +62,7 @@
 #if WITH_WEATHER
 #include "WeatherMode.h"
 #include "WeatherClient.h"
+#include "RainRadarClient.h"
 #endif
 #if HAS_TOUCH
 #include "Touch.h"
@@ -224,6 +225,7 @@ static void tetherStatusFill(String& out) {
     weatherSnapshot(w);
     if (w.error && w.errMsg[0]) d["weather"] = w.errMsg;
     else if (w.valid) d["weather"] = "ok";
+    d["radar"] = rainRadarNote();
   }
 #endif
   serializeJson(d, out);

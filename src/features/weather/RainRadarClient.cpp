@@ -131,40 +131,6 @@ struct RRInflate {
   uint8_t prev[RR_TILE_PX * 4];      // previous scanline, defiltered
 };
 
-struct RRScan {           // scanline assembler state across tinfl output blocks
-  RRInflate* z;
-  uint8_t*   grid;
-  uint16_t   fill;        // bytes of `cur` collected so far
-  uint16_t   y;
-  bool       bad;
-};
-
-void rrScanConsume(RRScan& s, const uint8_t* d, size_t n) {
-  const uint16_t stride = 1 + RR_TILE_PX * 4;
-  while (n && !s.bad && s.y < RR_TILE_PX) {
-    uint16_t want = stride - s.fill;
-    if (want > n) want = (uint16_t)n;
-    memcpy(s.z->cur + s.fill, d, want);
-    s.fill += want;
-    d += want;
-    n -= want;
-    if (s.fill < stride) return;
-    s.fill = 0;
-    if (!rrDefilter(s.z->cur[0], s.z->cur + 1, s.z->prev, RR_TILE_PX * 4, 4)) {
-      s.bad = true;
-      return;
-    }
-    const uint8_t* px = s.z->cur + 1;
-    const int cy = s.y >> 2;
-    for (int x = 0; x < RR_TILE_PX; x++) {
-      const uint8_t nib = rrNibble(px[x * 4], px[x * 4 + 3]);
-      if (nib) rrGridMax(s.grid, x >> 2, cy, nib);
-    }
-    memcpy(s.z->prev, s.z->cur + 1, RR_TILE_PX * 4);
-    s.y++;
-  }
-}
-
 // Decode a fetched PNG into `grid` (cleared first). Only the exact shape
 // RainViewer serves is accepted: 256x256, 8-bit RGBA.
 bool rrDecodePng(const uint8_t* png, uint32_t len, uint8_t* grid,
@@ -196,7 +162,7 @@ bool rrDecodePng(const uint8_t* png, uint32_t len, uint8_t* grid,
   }
   tinfl_init(&z->inf);
   memset(z->prev, 0, sizeof(z->prev));
-  RRScan scan = {z, grid, 0, 0, false};
+  RRScan scan = {z->cur, z->prev, grid, 0, 0, false};
 
   bool ok = false;
   size_t dictOfs = 0;
@@ -351,9 +317,12 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
 
   char err[48] = "";
 
-  // The whole build needs ~110 KB of headroom in pieces up to 32 KB. Better to
-  // sit a cycle out than to fail a TLS handshake somewhere else by trying.
-  if (ESP.getFreeHeap() < 100000 || platformMaxFreeBlock() < 36000) {
+  // The build's biggest single pieces are 32 KB (the inflate dictionary and
+  // the tile buffer); everything is allocation-checked, so the guard only has
+  // to keep the attempt from starving a TLS handshake somewhere else. On a
+  // cube running the miner the heap simply never looks comfortable, and the
+  // first guard (100 KB free) turned out to mean "never" there.
+  if (ESP.getFreeHeap() < 80000 || platformMaxFreeBlock() < 34000) {
     snprintf(s_note, sizeof(s_note), "radar: heap %uk blk %uk",
              (unsigned)(ESP.getFreeHeap() / 1024),
              (unsigned)(platformMaxFreeBlock() / 1024));

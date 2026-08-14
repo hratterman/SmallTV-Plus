@@ -26,6 +26,7 @@ class WeatherMode : public DisplayMode {
   uint32_t renderedOk_ = 0xFFFFFFFF;
   bool     renderedErr_ = false;
   uint32_t lastDrawMs_ = 0;
+  bool     footAlt_ = false;   // footer alternates age with the radar note
 
   // The radar sub-screen: conditions and the timelapse share this mode's slot,
   // alternating while there is an animation worth showing.

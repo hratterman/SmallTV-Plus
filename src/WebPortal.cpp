@@ -31,6 +31,10 @@
 #if WITH_CALENDAR
 #include "CalendarClient.h"
 #endif
+#if WITH_WEATHER
+#include "WeatherClient.h"
+#include "RainRadarClient.h"
+#endif
 
 // Defined in main.cpp — re-init every mode + force a repaint after a config change.
 extern void appInvalidate();
@@ -180,6 +184,20 @@ static void handleStatus() {
         t["basis"] = onRange ? "range" : "day";     // which basis that was
       }
     }
+  }
+#endif
+
+#if WITH_WEATHER
+  {
+    WeatherData w;
+    weatherSnapshot(w);
+    JsonObject wx = o["weather"].to<JsonObject>();
+    wx["ok"] = w.valid && !w.error;
+    if (w.error && w.errMsg[0]) wx["err"] = w.errMsg;
+    // The radar's whole diagnosis in one string - "radar: 9 frames",
+    // "radar quiet", or the exact reason it could not build.
+    wx["radar"] = rainRadarNote();
+    wx["radarReady"] = rainRadarReady();
   }
 #endif
 

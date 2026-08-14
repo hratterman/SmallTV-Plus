@@ -12,6 +12,7 @@
 // gray = (dBZ + 32) * 2, and weak echo fades out through the alpha channel.
 #pragma once
 #include <stdint.h>
+#include <string.h>
 #include <math.h>
 
 // The world, at one tile. Zoom 7 makes a 256 px tile span roughly 300 km at
@@ -140,6 +141,46 @@ static inline bool rrDefilter(uint8_t filter, uint8_t* cur, const uint8_t* prev,
       }
       return true;
     default: return false;   // not a PNG we understand; drop the frame
+  }
+}
+
+// ---- scanline assembler -----------------------------------------------------
+// Consumes decompressed PNG bytes in whatever piece sizes the inflater emits,
+// assembles them into scanlines, defilters, and folds every pixel into the
+// grid. Shared verbatim between the device (fed by the ROM inflater) and the
+// host selftest (fed by zlib), so what the test proves is what the cube runs.
+struct RRScan {
+  uint8_t* cur;     // 1 + RR_TILE_PX*4: the filter byte + one RGBA scanline
+  uint8_t* prev;    // RR_TILE_PX*4: previous scanline, defiltered
+  uint8_t* grid;    // RR_GRID_BYTES, cleared by the caller
+  uint16_t fill;    // bytes of `cur` collected so far
+  uint16_t y;
+  bool     bad;
+};
+
+static inline void rrScanConsume(RRScan& s, const uint8_t* d, size_t n) {
+  const uint16_t stride = 1 + RR_TILE_PX * 4;
+  while (n && !s.bad && s.y < RR_TILE_PX) {
+    uint16_t want = (uint16_t)(stride - s.fill);
+    if (want > n) want = (uint16_t)n;
+    memcpy(s.cur + s.fill, d, want);
+    s.fill = (uint16_t)(s.fill + want);
+    d += want;
+    n -= want;
+    if (s.fill < stride) return;
+    s.fill = 0;
+    if (!rrDefilter(s.cur[0], s.cur + 1, s.prev, RR_TILE_PX * 4, 4)) {
+      s.bad = true;
+      return;
+    }
+    const uint8_t* px = s.cur + 1;
+    const int cy = s.y >> 2;
+    for (int x = 0; x < RR_TILE_PX; x++) {
+      const uint8_t nib = rrNibble(px[x * 4], px[x * 4 + 3]);
+      if (nib) rrGridMax(s.grid, x >> 2, cy, nib);
+    }
+    memcpy(s.prev, s.cur + 1, RR_TILE_PX * 4);
+    s.y++;
   }
 }
 

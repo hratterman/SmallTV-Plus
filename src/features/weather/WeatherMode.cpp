@@ -202,12 +202,21 @@ void WeatherMode::render(const Settings& s, const WeatherData& w) {
     gfxLabel(cx - gfxLabelW(t, 2) / 2, FC_LO_Y, t, 2, C_DIMTX);
   }
 
-  // Footer: age, and a quiet red dot when the last refresh failed.
+  // Footer: age, and a quiet red dot when the last refresh failed. While the
+  // radar is enabled but has nothing to show, its status note takes the line
+  // every other repaint - the screen is where this cube explains itself, and
+  // "radar quiet" versus "radar: heap 82k" versus a fetch error are three
+  // different conversations.
   {
-    const uint32_t age = (millis() - w.lastOkMs) / 60000UL;
-    char f[24];
-    if (age < 1) strlcpy(f, "just updated", sizeof(f));
-    else         snprintf(f, sizeof(f), "updated %lum ago", (unsigned long)age);
+    char f[52];
+    const char* rn = rainRadarNote();
+    if (s.weather.rainRadar && !rainRadarReady() && rn[0] && (footAlt_ = !footAlt_)) {
+      strlcpy(f, rn, sizeof(f));
+    } else {
+      const uint32_t age = (millis() - w.lastOkMs) / 60000UL;
+      if (age < 1) strlcpy(f, "just updated", sizeof(f));
+      else         snprintf(f, sizeof(f), "updated %lum ago", (unsigned long)age);
+    }
     gfxDrawCentered(f, FOOT_Y, 1, C_FAINT);
     if (w.error) gfx->fillCircle(6, 6, 3, C_RED);
   }

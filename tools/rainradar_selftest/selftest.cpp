@@ -7,6 +7,9 @@
 // alpha 255 in the clear-air ring around it).
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <vector>
+#include <zlib.h>
 #include "../../src/features/weather/RainRadar.h"
 
 static int fails = 0;
@@ -112,6 +115,58 @@ int main() {
   CHECK(rrTimelineX(0, 10) == RR_TL_X0, "timeline: first frame at the left edge");
   CHECK(rrTimelineX(9, 10) == RR_TL_X0 + RR_TL_W, "timeline: last frame at the right");
   CHECK(rrTimelineX(1, 2) == RR_TL_X0 + RR_TL_W, "timeline: two frames span it all");
+
+  // ---- the real tile, end to end ------------------------------------------
+  // fixture_storm.png is an actual RainViewer colour-scheme-0 tile pulled over
+  // a Florida thunderstorm (z7 x34 y53). The device's own scanline assembler
+  // (rrScanConsume, shared via RainRadar.h) is fed the zlib-inflated stream in
+  // deliberately awkward 997-byte pieces — the sizes the ROM inflater hands
+  // out are just as arbitrary — and must land on the count an independent
+  // Python decode of the same tile produced: 490 cells of real rain.
+  {
+    const char* fx = getenv("RR_FIXTURE");
+    FILE* f = fopen(fx ? fx : "fixture_storm.png", "rb");
+    CHECK(f != nullptr, "fixture: storm tile present");
+    if (f) {
+      std::vector<uint8_t> png;
+      uint8_t rb[4096];
+      size_t got;
+      while ((got = fread(rb, 1, sizeof(rb), f)) > 0) png.insert(png.end(), rb, rb + got);
+      fclose(f);
+
+      // Concatenate the IDAT payloads, exactly as the device's chunk walk does.
+      std::vector<uint8_t> idat;
+      for (size_t off = 8; off + 12 <= png.size();) {
+        const uint32_t clen = ((uint32_t)png[off] << 24) | ((uint32_t)png[off + 1] << 16) |
+                              ((uint32_t)png[off + 2] << 8) | png[off + 3];
+        if (!memcmp(&png[off + 4], "IDAT", 4))
+          idat.insert(idat.end(), &png[off + 8], &png[off + 8] + clen);
+        if (!memcmp(&png[off + 4], "IEND", 4)) break;
+        off += 12 + clen;
+      }
+      CHECK(!idat.empty(), "fixture: IDAT found");
+
+      std::vector<uint8_t> raw(257 * 1025);   // decompressed stream, with slack
+      uLongf rawLen = raw.size();
+      const int zr = uncompress(raw.data(), &rawLen, idat.data(), idat.size());
+      CHECK(zr == Z_OK && rawLen == 256 * 1025, "fixture: zlib stream inflates whole");
+
+      uint8_t cur[1 + RR_TILE_PX * 4], prev[RR_TILE_PX * 4];
+      uint8_t grid[RR_GRID_BYTES];
+      memset(prev, 0, sizeof(prev));
+      memset(grid, 0, sizeof(grid));
+      RRScan scan = {cur, prev, grid, 0, 0, false};
+      for (size_t p = 0; p < rawLen; p += 997)
+        rrScanConsume(scan, raw.data() + p, rawLen - p < 997 ? rawLen - p : 997);
+
+      CHECK(!scan.bad, "real tile: every filter understood");
+      CHECK(scan.y == RR_TILE_PX, "real tile: all 256 scanlines assembled");
+      const int active = rrGridActive(grid);
+      printf("     real tile: %d active cells\n", active);
+      CHECK(active == 490, "real tile: matches the Python reference (490)");
+      CHECK(active >= RR_GATE_CELLS, "real tile: a storm passes the gate");
+    }
+  }
 
   printf(fails ? "\n%d FAILURES\n" : "\nall ok\n", fails);
   return fails ? 1 : 0;
