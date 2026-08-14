@@ -70,7 +70,14 @@ static inline SecureClient* platformMakeSecureClient(uint16_t rxBuf,
   sc->setInsecure();
   return sc;
 }
-static inline uint32_t platformMaxFreeBlock() { return ESP.getMaxAllocHeap(); }
+// Not getMaxAllocHeap(): that counts MALLOC_CAP_INTERNAL, which includes the
+// ESP32's 32-bit-only IRAM heap - a ~30 KB block malloc() can never hand out
+// for byte buffers. A week of diagnostics faithfully reported "blk 33k" while
+// 32 KB allocations failed, because the number was the size of memory nothing
+// byte-addressed could ever have. Measure what malloc can actually give.
+static inline uint32_t platformMaxFreeBlock() {
+  return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+}
 static inline uint32_t platformFreeContStack() { return 0; }   // N/A on ESP32
 
 #else

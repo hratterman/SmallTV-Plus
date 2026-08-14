@@ -75,6 +75,11 @@ static uint8_t  s_markerX = 0, s_markerY = 0;
 static int      s_mapTileX = -1, s_mapTileY = -1;
 
 static char s_note[52] = "radar: not tried";
+// The inflate dictionary: 32 KB, contiguous, byte-addressable - the scarcest
+// resource this feature needs, and a lottery ticket if requested per decode
+// on a fragmenting heap. Won once (retried each cycle until then) and kept
+// for the life of the radar; released only when the feature is disabled.
+static uint8_t* s_dict = nullptr;
 static uint32_t s_nextCycleMs = 0;
 static float s_lastLat = 0, s_lastLon = 0;
 
@@ -462,7 +467,6 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   free(cur);
   free(out);
   free(z);
-  free(dict);
   rrNetUnlock();
   rrNetUnlock();
 
@@ -645,8 +649,13 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
   if (!s_lock) s_lock = xSemaphoreCreateMutex();
   if (!enabled) {
     if (s_ready || s_mapTileX >= 0) rrTeardown("radar off");
+    if (s_dict) { free(s_dict); s_dict = nullptr; }   // the one time it lets go
     return;
   }
+  // Win the dictionary as early in this cube's life as possible - the young
+  // heap has 32 KB blocks that the old, fragmented one only sometimes does.
+  // Tried every cycle until won, then held for the feature's lifetime.
+  if (!s_dict) s_dict = (uint8_t*)malloc(32768);
   const uint32_t now = millis();
   if (lat != s_lastLat || lon != s_lastLon) {
     s_lastLat = lat;
@@ -659,10 +668,16 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
 
   char err[48] = "";
 
-  // The inflate transient is the whole heap story: a 32 KB dictionary in one
-  // piece plus ~6 KB of uzlib state and buffers. The field cube this was
-  // tuned against reports 48 KB free / 33 KB block, and must pass.
-  if (ESP.getFreeHeap() < 42000 || platformMaxFreeBlock() < 33500) {
+  // With the dictionary held for life, the per-cycle needs are modest: ~6 KB
+  // of inflate transients in small pieces, plus the 32 KB RAM fetch stage.
+  // Without the dictionary yet, say so honestly (the block figure now counts
+  // only memory malloc can actually give) and try again next cycle.
+  if (!s_dict) {
+    snprintf(s_note, sizeof(s_note), "radar: no 32k block yet, blk %uk",
+             (unsigned)(platformMaxFreeBlock() / 1024));
+    return;
+  }
+  if (ESP.getFreeHeap() < 40000) {
     snprintf(s_note, sizeof(s_note), "radar: heap %uk blk %uk",
              (unsigned)(ESP.getFreeHeap() / 1024),
              (unsigned)(platformMaxFreeBlock() / 1024));
