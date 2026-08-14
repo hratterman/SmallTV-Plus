@@ -10,6 +10,9 @@
 #include <cstdlib>
 #include <vector>
 #include <zlib.h>
+extern "C" {
+#include "../../src/vendor/uzlib/uzlib.h"
+}
 #include "../../src/features/weather/RainRadar.h"
 
 static int fails = 0;
@@ -165,6 +168,59 @@ int main() {
       printf("     real tile: %d active cells\n", active);
       CHECK(active == 490, "real tile: matches the Python reference (490)");
       CHECK(active >= RR_GATE_CELLS, "real tile: a storm passes the gate");
+
+      // The same tile again, through the inflater the DEVICE actually ships —
+      // the vendored uzlib — fed via the read callback in 512-byte refills,
+      // output drained in 1 KB chunks, dictionary ring in play. This is the
+      // exact engine and calling pattern of RainRadarClient's decode.
+      {
+        struct Src {
+          struct uzlib_uncomp u;             // first member: cb containerofs it
+          const uint8_t* p;
+          size_t left;
+          uint8_t in[512];
+        } s;
+        memset(&s.u, 0, sizeof(s.u));
+        s.p = idat.data();
+        s.left = idat.size();
+        s.u.source = s.u.source_limit = nullptr;
+        s.u.source_read_cb = [](struct uzlib_uncomp* u) -> int {
+          Src* c = (Src*)u;
+          if (!c->left) return -1;
+          size_t take = c->left < sizeof(c->in) ? c->left : sizeof(c->in);
+          memcpy(c->in, c->p, take);
+          c->p += take;
+          c->left -= take;
+          u->source = c->in + 1;
+          u->source_limit = c->in + take;
+          return c->in[0];
+        };
+        std::vector<uint8_t> dict(32768);
+        uzlib_uncompress_init(&s.u, dict.data(), 32768);
+        CHECK(uzlib_zlib_parse_header(&s.u) >= 0, "uzlib: zlib header accepted");
+
+        uint8_t cur2[1 + RR_TILE_PX * 4], prev2[RR_TILE_PX * 4];
+        uint8_t grid2[RR_GRID_BYTES];
+        memset(prev2, 0, sizeof(prev2));
+        memset(grid2, 0, sizeof(grid2));
+        RRScan scan2 = {cur2, prev2, grid2, 0, 0, false};
+        uint8_t out[1024];
+        bool done = false, corrupt = false;
+        while (!done && !corrupt && !scan2.bad) {
+          s.u.dest_start = s.u.dest = out;
+          s.u.dest_limit = out + sizeof(out);
+          const int res = uzlib_uncompress(&s.u);
+          const size_t got = (size_t)(s.u.dest - out);
+          if (got) rrScanConsume(scan2, out, got);
+          if (res == TINF_DONE) done = true;
+          else if (res != TINF_OK) corrupt = true;
+          else if (!got) corrupt = true;
+        }
+        CHECK(done && !corrupt, "uzlib: the stream inflates to DONE");
+        CHECK(scan2.y == RR_TILE_PX, "uzlib: all 256 scanlines arrive");
+        CHECK(rrGridActive(grid2) == 490,
+              "uzlib: the device engine matches the reference (490)");
+      }
     }
   }
 

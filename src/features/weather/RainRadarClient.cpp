@@ -7,7 +7,9 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <esp32/rom/tjpgd.h>
-#include <miniz.h>              // the ROM inflater: tinfl_* costs no flash
+extern "C" {
+#include "../../vendor/uzlib/uzlib.h"   // ~1.4 KB of state where ROM miniz wants ~14
+}
 #include "NetFetch.h"
 #include "Platform.h"
 
@@ -214,17 +216,50 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
 }
 
 // ---------------------------------------------------------------------------
-// Radar tile -> 64x64 nibble grid, streamed from the flash file. The ROM
-// miniz inflates with a 32 KB dictionary; that dictionary plus its state
-// (~45 KB together) is the biggest thing this feature ever allocates, and it
-// exists only here — after the connection is closed, never alongside it.
+// Radar tile -> 64x64 nibble grid, streamed from the flash file. uzlib
+// inflates with the unavoidable 32 KB dictionary but only ~1.4 KB of its own
+// state - the ROM miniz wanted ~14 KB more, which on a cube reporting 48 KB
+// free was the difference between running and refusing. The PNG chunk walk
+// lives inside the input callback: uzlib asks for bytes, and the callback
+// serves IDAT payloads off the file, skipping headers and CRCs as it goes.
 // ---------------------------------------------------------------------------
-struct RRInflate {
-  tinfl_decompressor inf;
-  uint8_t cur[1 + RR_TILE_PX * 4];   // filter byte + one RGBA scanline
-  uint8_t prev[RR_TILE_PX * 4];      // previous scanline, defiltered
-  uint8_t in[1024];                  // compressed bytes, read from flash
+struct RRUz {
+  struct uzlib_uncomp u;             // FIRST: the read callback containerofs it
+  File*    f;
+  uint32_t chunkLeft;                // bytes left in the current IDAT payload
+  bool     sawEnd;
+  uint8_t  in[512];                  // compressed bytes, read from flash
+  uint8_t  out[1024];                // inflated bytes, handed to the scanliner
+  uint8_t  cur[1 + RR_TILE_PX * 4];  // filter byte + one RGBA scanline
+  uint8_t  prev[RR_TILE_PX * 4];     // previous scanline, defiltered
 };
+
+int rrUzRead(struct uzlib_uncomp* u) {
+  RRUz* s = (RRUz*)u;                // u is the first member
+  while (s->chunkLeft == 0) {
+    if (s->sawEnd) return -1;
+    // Skip the previous chunk's CRC, then read the next chunk's header.
+    uint8_t ch[8];
+    s->f->seek(s->f->position() + 4);
+    if (s->f->read(ch, 8) != 8) { s->sawEnd = true; return -1; }
+    const uint32_t clen = ((uint32_t)ch[0] << 24) | ((uint32_t)ch[1] << 16) |
+                          ((uint32_t)ch[2] << 8) | ch[3];
+    if (memcmp(ch + 4, "IEND", 4) == 0) { s->sawEnd = true; return -1; }
+    if (memcmp(ch + 4, "IDAT", 4) != 0) {
+      s->f->seek(s->f->position() + clen);   // its CRC goes on the next loop
+      continue;
+    }
+    s->chunkLeft = clen;
+  }
+  size_t want = sizeof(s->in);
+  if (want > s->chunkLeft) want = s->chunkLeft;
+  const int got = s->f->read(s->in, want);
+  if (got <= 0) { s->sawEnd = true; return -1; }
+  s->chunkLeft -= (uint32_t)got;
+  u->source = s->in + 1;
+  u->source_limit = s->in + got;
+  return s->in[0];
+}
 
 bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   memset(grid, 0, RR_GRID_BYTES);
@@ -255,10 +290,12 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
     f.close();
     return false;
   }
+  // The file now sits right after IHDR's payload; the read callback's first
+  // act is to skip IHDR's CRC and find the first IDAT.
 
   // Biggest first, so the note names the dictionary if the heap cannot seat it.
-  uint8_t* dict = (uint8_t*)malloc(TINFL_LZ_DICT_SIZE);
-  RRInflate* z = dict ? (RRInflate*)malloc(sizeof(RRInflate)) : nullptr;
+  uint8_t* dict = (uint8_t*)malloc(32768);
+  RRUz* z = dict ? (RRUz*)malloc(sizeof(RRUz)) : nullptr;
   if (!dict || !z) {
     free(z);
     free(dict);
@@ -267,45 +304,30 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
              (unsigned)(platformMaxFreeBlock() / 1024));
     return false;
   }
-  tinfl_init(&z->inf);
+  memset(&z->u, 0, sizeof(z->u));
+  z->f = &f;
+  z->chunkLeft = 0;
+  z->sawEnd = false;
   memset(z->prev, 0, sizeof(z->prev));
+  z->u.source = z->u.source_limit = nullptr;
+  z->u.source_read_cb = rrUzRead;
+  uzlib_uncompress_init(&z->u, dict, 32768);
   RRScan scan = {z->cur, z->prev, grid, 0, 0, false};
 
-  // Walk the chunks off the file; feed every IDAT byte through the inflater.
   bool done = false, corrupt = false;
-  size_t dictOfs = 0;
-  f.seek(8);
-  while (!done && !corrupt) {
-    uint8_t ch[8];
-    if (f.read(ch, 8) != 8) break;
-    uint32_t clen = ((uint32_t)ch[0] << 24) | ((uint32_t)ch[1] << 16) |
-                    ((uint32_t)ch[2] << 8) | ch[3];
-    const bool idat = memcmp(ch + 4, "IDAT", 4) == 0;
-    if (memcmp(ch + 4, "IEND", 4) == 0) break;
-    if (!idat) {
-      f.seek(f.position() + clen + 4);       // payload + CRC
-      continue;
+  if (uzlib_zlib_parse_header(&z->u) < 0) {
+    corrupt = true;
+  } else {
+    while (!done && !corrupt && !scan.bad) {
+      z->u.dest_start = z->u.dest = z->out;
+      z->u.dest_limit = z->out + sizeof(z->out);
+      const int res = uzlib_uncompress(&z->u);
+      const size_t got = (size_t)(z->u.dest - z->out);
+      if (got) rrScanConsume(scan, z->out, got);
+      if (res == TINF_DONE) done = true;
+      else if (res != TINF_OK) corrupt = true;
+      else if (!got) corrupt = true;         // no progress: a wedged stream
     }
-    while (clen && !done && !corrupt) {
-      const size_t want = clen < sizeof(z->in) ? clen : sizeof(z->in);
-      if (f.read(z->in, want) != (int)want) { corrupt = true; break; }
-      clen -= want;
-      size_t inPos = 0;
-      while (inPos < want && !done && !corrupt) {
-        size_t inSz = want - inPos;
-        size_t outSz = TINFL_LZ_DICT_SIZE - dictOfs;
-        const tinfl_status st = tinfl_decompress(
-            &z->inf, z->in + inPos, &inSz, dict, dict + dictOfs, &outSz,
-            TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_HAS_MORE_INPUT);
-        inPos += inSz;
-        if (outSz) rrScanConsume(scan, dict + dictOfs, outSz);
-        dictOfs = (dictOfs + outSz) & (TINFL_LZ_DICT_SIZE - 1);
-        if (st == TINFL_STATUS_DONE) done = true;
-        else if (st < 0) corrupt = true;
-        else if (st == TINFL_STATUS_NEEDS_MORE_INPUT && inPos >= want) break;
-      }
-    }
-    f.seek(f.position() + 4);                // this chunk's CRC
   }
   f.close();
   free(z);
@@ -469,10 +491,10 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
 
   char err[48] = "";
 
-  // The inflate transient (~47 KB, its dictionary a single 32 KB piece) is
-  // the whole heap story now. The field cube this was rebuilt for reports
-  // 55 KB free / 33 KB block: it must pass this guard, with room to say so.
-  if (ESP.getFreeHeap() < 52000 || platformMaxFreeBlock() < 33500) {
+  // The inflate transient is the whole heap story: a 32 KB dictionary in one
+  // piece plus ~6 KB of uzlib state and buffers. The field cube this was
+  // tuned against reports 48 KB free / 33 KB block, and must pass.
+  if (ESP.getFreeHeap() < 42000 || platformMaxFreeBlock() < 33500) {
     snprintf(s_note, sizeof(s_note), "radar: heap %uk blk %uk",
              (unsigned)(ESP.getFreeHeap() / 1024),
              (unsigned)(platformMaxFreeBlock() / 1024));
