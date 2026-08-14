@@ -221,6 +221,78 @@ int main() {
         CHECK(rrGridActive(grid2) == 490,
               "uzlib: the device engine matches the reference (490)");
       }
+
+      // Third pass: the WHOLE FILE this time, through a byte-exact replica of
+      // the device's chunk-walking read callback (seek past CRCs, skip
+      // non-IDAT chunks, serve IDAT payloads in 512-byte refills). A walk
+      // that lands the inflater one byte off dies at the zlib header — which
+      // is precisely what "PNG data error y=0" would look like in the field.
+      {
+        struct FWalk {
+          struct uzlib_uncomp u;
+          const uint8_t* file;
+          size_t size, pos;
+          uint32_t chunkLeft;
+          bool sawEnd;
+          uint8_t in[512];
+        } s;
+        memset(&s.u, 0, sizeof(s.u));
+        s.file = png.data();
+        s.size = png.size();
+        s.pos = 29;                        // ON IHDR's CRC, as the device sits
+        s.chunkLeft = 0;
+        s.sawEnd = false;
+        s.u.source = s.u.source_limit = nullptr;
+        s.u.source_read_cb = [](struct uzlib_uncomp* u) -> int {
+          FWalk* c = (FWalk*)u;
+          while (c->chunkLeft == 0) {
+            if (c->sawEnd) return -1;
+            c->pos += 4;                   // the previous chunk's CRC
+            if (c->pos + 8 > c->size) { c->sawEnd = true; return -1; }
+            const uint8_t* ch = c->file + c->pos;
+            c->pos += 8;
+            const uint32_t clen = ((uint32_t)ch[0] << 24) | ((uint32_t)ch[1] << 16) |
+                                  ((uint32_t)ch[2] << 8) | ch[3];
+            if (!memcmp(ch + 4, "IEND", 4)) { c->sawEnd = true; return -1; }
+            if (memcmp(ch + 4, "IDAT", 4) != 0) { c->pos += clen; continue; }
+            c->chunkLeft = clen;
+          }
+          size_t want = sizeof(c->in);
+          if (want > c->chunkLeft) want = c->chunkLeft;
+          if (c->pos + want > c->size) { c->sawEnd = true; return -1; }
+          memcpy(c->in, c->file + c->pos, want);
+          c->pos += want;
+          c->chunkLeft -= (uint32_t)want;
+          u->source = c->in + 1;
+          u->source_limit = c->in + want;
+          return c->in[0];
+        };
+        std::vector<uint8_t> dict(32768);
+        uzlib_uncompress_init(&s.u, dict.data(), 32768);
+        CHECK(uzlib_zlib_parse_header(&s.u) >= 0, "walk: header found via chunk walk");
+
+        uint8_t cur3[1 + RR_TILE_PX * 4], prev3[RR_TILE_PX * 4];
+        uint8_t grid3[RR_GRID_BYTES];
+        memset(prev3, 0, sizeof(prev3));
+        memset(grid3, 0, sizeof(grid3));
+        RRScan scan3 = {cur3, prev3, grid3, 0, 0, false};
+        uint8_t out3[1024];
+        bool done3 = false, corrupt3 = false;
+        while (!done3 && !corrupt3 && !scan3.bad) {
+          s.u.dest_start = s.u.dest = out3;
+          s.u.dest_limit = out3 + sizeof(out3);
+          const int res = uzlib_uncompress(&s.u);
+          const size_t got = (size_t)(s.u.dest - out3);
+          if (got) rrScanConsume(scan3, out3, got);
+          if (res == TINF_DONE) done3 = true;
+          else if (res != TINF_OK) corrupt3 = true;
+          else if (!got) corrupt3 = true;
+        }
+        CHECK(done3 && !corrupt3 && scan3.y == RR_TILE_PX,
+              "walk: whole-file decode completes");
+        CHECK(rrGridActive(grid3) == 490,
+              "walk: chunk-walked decode matches the reference (490)");
+      }
     }
   }
 

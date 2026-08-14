@@ -279,8 +279,14 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
     return false;
   }
 
-  uint8_t hdr[33];
-  bool shapeOk = f.read(hdr, 33) == 33;
+  // 29 bytes: signature(8) + IHDR length(4) + type(4) + payload(13). NOT the
+  // CRC too - reading 33 left the file at the next chunk's header, and the
+  // callback's skip-the-CRC step then landed the inflater four bytes inside
+  // it, misreading "IDAT" as a length. That one-byte arithmetic slip was
+  // "PNG data error y=0" in the field, and the selftest's chunk-walk replica
+  // now fails loudly if it ever comes back.
+  uint8_t hdr[29];
+  bool shapeOk = f.read(hdr, 29) == 29;
   static const uint8_t kSig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
   if (shapeOk) shapeOk = memcmp(hdr, kSig, 8) == 0;
   if (shapeOk) {
@@ -300,8 +306,8 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
     f.close();
     return false;
   }
-  // The file now sits right after IHDR's payload; the read callback's first
-  // act is to skip IHDR's CRC and find the first IDAT.
+  // The file now sits ON IHDR's CRC; the read callback's first act is to
+  // skip those four bytes and find the first IDAT.
 
   // Biggest first, so the note names the dictionary if the heap cannot seat
   // it; then the small pieces, which live in the crumbs.
