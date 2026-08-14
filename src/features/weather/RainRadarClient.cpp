@@ -74,7 +74,7 @@ static int16_t  s_minOff[RR_FRAMES_MAX];
 static uint8_t  s_markerX = 0, s_markerY = 0;
 static int      s_mapTileX = -1, s_mapTileY = -1;
 
-static char s_note[52] = "radar: not tried";
+static char s_note[64] = "radar: not tried";
 // The inflate dictionary: 32 KB, contiguous, byte-addressable - the scarcest
 // resource this feature needs, and a lottery ticket if requested per decode
 // on a fragmenting heap. Won once (retried each cycle until then) and kept
@@ -259,7 +259,7 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
       }
       free(ram);
       if (!overflow) {                    // a genuine network failure: report it
-        if (!r.ok) snprintf(err, errLen, "%.44s", r.error);
+        if (!r.ok) snprintf(err, errLen, "%.60s", r.error);
         else strlcpy(err, "empty reply", errLen);
         return false;
       }
@@ -283,7 +283,7 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
     if (r.bytes > s.len || s.len >= RR_FILE_CAP)
       snprintf(err, errLen, "tile over %uk", RR_FILE_CAP / 1024);
     else if (r.ok && s.len) ok = true;
-    else if (!r.ok) snprintf(err, errLen, "%.44s", r.error);
+    else if (!r.ok) snprintf(err, errLen, "%.60s", r.error);
     else strlcpy(err, "empty reply", errLen);
   }
   if (tls) rrNetUnlock();
@@ -658,7 +658,7 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
   if (s_nextCycleMs && (int32_t)(now - s_nextCycleMs) < 0) return;
   s_nextCycleMs = now + RR_RETRY_MS;   // pessimistic; success stretches it below
 
-  char err[48] = "";
+  char err[64] = "";
 
   // With the dictionary held for life, the per-cycle needs are modest: ~6 KB
   // of inflate transients in small pieces, plus the 32 KB RAM fetch stage.
@@ -704,7 +704,7 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
                                               nullptr, 0, idx, 8192, 12000);
     if (tether) rrNetUnlock();
     if (!r.ok) {
-      snprintf(s_note, sizeof(s_note), "radar idx: %.32s", r.error);
+      snprintf(s_note, sizeof(s_note), "radar idx: %.52s", r.error);
       return;
     }
   }
@@ -794,13 +794,13 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
       snprintf(url, sizeof(url), RR_TILE_FMT, host.c_str(), paths[nowIdx].c_str(),
                RR_ZOOM, tile.x, tile.y);
       if (!rrFetchToTmp(url, tether, err, sizeof(err))) {
-        snprintf(s_note, sizeof(s_note), "radar: %.40s", err);
+        snprintf(s_note, sizeof(s_note), "radar: %.56s", err);
         return;
       }
       const bool dec = rrDecodeTmp(grid, err, sizeof(err));
       LittleFS.remove(RR_TMP_PATH);
       if (!dec) {
-        snprintf(s_note, sizeof(s_note), "radar: %.40s", err);
+        snprintf(s_note, sizeof(s_note), "radar: %.56s", err);
         return;
       }
     }
@@ -828,8 +828,23 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
     char mp[28];
     snprintf(mp, sizeof(mp), RR_MAP_FMT, tile.x, tile.y);
     if (!LittleFS.exists(mp)) {
-      if (!rrBuildMap(tile.x, tile.y, err, sizeof(err))) {
-        snprintf(s_note, sizeof(s_note), "radar map: %.38s", err);
+      // The map is the radar's one TLS fetch, and mbedTLS wants exactly the
+      // kind of contiguous block the lifetime dictionary sits on (the field
+      // line: "connect failed (-1)" the first cycle the decode ever got this
+      // far). Hand the 32 KB back for the seconds the handshake needs, then
+      // take it again; the map is cached on flash, so the trade is once per
+      // tile, not once per cycle.
+      free(s_dict);
+      s_dict = nullptr;
+      const bool mapOk = rrBuildMap(tile.x, tile.y, err, sizeof(err));
+      s_dict = (uint8_t*)malloc(32768);
+      if (!mapOk) {
+        snprintf(s_note, sizeof(s_note), "radar map: %.52s", err);
+        return;
+      }
+      if (!s_dict) {              // the frame loop below inflates against it
+        snprintf(s_note, sizeof(s_note), "radar: no 32k block yet, blk %uk",
+                 (unsigned)(platformMaxFreeBlock() / 1024));
         return;
       }
     } else {
@@ -846,7 +861,7 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
     if (LittleFS.exists(gp)) continue;
     if (!rrBuildFrame(host.c_str(), paths[i].c_str(), tile.x, tile.y,
                       tether, tss[i], grid, err, sizeof(err))) {
-      snprintf(s_note, sizeof(s_note), "radar f%u: %.38s", i, err);
+      snprintf(s_note, sizeof(s_note), "radar f%u: %.50s", i, err);
       return;
     }
   }
