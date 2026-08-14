@@ -510,7 +510,11 @@ const char* otaCableBegin(uint32_t totalSize) {
 #endif
   s_otaReject = nullptr;
   s_otaSawFirst = false;
-  const uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+  // The full slot, no shave: Update.begin validates against the real
+  // partition. The old "-0x1000, page-aligned" caution invented a ceiling
+  // 4 KB under the truth, and the 2.9.6 image missed it by 896 bytes - every
+  // flash path refused an image the hardware had room for.
+  const uint32_t maxSpace = ESP.getFreeSketchSpace();
   if (totalSize == 0) return "empty image";
   if (totalSize > maxSpace) return "image larger than the OTA space";
   if (!Update.begin(totalSize)) {
@@ -575,7 +579,7 @@ static void handleUpdateUpload() {
     // later attempt then fails at begin() with "not enough space" until a
     // power cycle. One aborted stale transaction fixes it forever.
     platformUpdateAbort();
-    uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+    const uint32_t maxSpace = ESP.getFreeSketchSpace();   // the true slot size
     if (!Update.begin(maxSpace)) {
       Update.printError(Serial);
       s_otaReject = "update engine busy or no slot space";
