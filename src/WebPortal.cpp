@@ -569,6 +569,12 @@ static void handleUpdateUpload() {
 #endif
     s_otaReject = nullptr;
     s_otaSawFirst = false;
+    // A fresh start supersedes whatever came before - the cable path has
+    // always done this, and the web path learned why the hard way: an upload
+    // that dies mid-transfer leaves the engine mid-transaction, and every
+    // later attempt then fails at begin() with "not enough space" until a
+    // power cycle. One aborted stale transaction fixes it forever.
+    platformUpdateAbort();
     uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     if (!Update.begin(maxSpace)) {
       Update.printError(Serial);
