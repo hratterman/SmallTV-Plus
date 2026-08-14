@@ -431,6 +431,7 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
     corrupt = true;
   } else {
     stage = 1;
+    int chunks = 0;
     while (!done && !corrupt && !scan.bad) {
       z->u.dest_start = z->u.dest = out;
       z->u.dest_limit = out + 1024;
@@ -440,6 +441,10 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
       if (res == TINF_DONE) done = true;
       else if (res != TINF_OK) corrupt = true;
       else if (!got) corrupt = true;         // no progress: a wedged stream
+      // A tile is ~257 KB of output: pure CPU for a second or two on the core
+      // the idle task also needs. Breathe every 16 KB so the task watchdog
+      // never mistakes honest work for a hang.
+      if ((++chunks & 15) == 0) vTaskDelay(1);
     }
   }
   const uint8_t z2h0 = z->zh[0], z2h1 = z->zh[1];

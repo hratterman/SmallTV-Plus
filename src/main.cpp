@@ -490,7 +490,11 @@ void setup() {
   } else if (g_safeMode) {
     // Last boot crashed: show the crash address (persistent) and keep the web
     // server up for OTA recovery — don't enter the render path that crashed.
-    gfxCrash(g_epcStr, g_addrStr, netIP().c_str());
+    // A blank EPC is a verdict of its own: exceptions save their address,
+    // watchdogs and brownouts do not. Put the reset reason where the empty
+    // hex would be, so the screen names the killer instead of shrugging.
+    gfxCrash(g_epcStr[0] ? g_epcStr : appResetReason(), g_addrStr,
+             netIP().c_str());
   } else {
     // Show which network we joined and how to reach the web UI, long enough to read.
     gfxStaInfo(netSSID().c_str(), netIP().c_str(), g_settings.hostname.c_str());
