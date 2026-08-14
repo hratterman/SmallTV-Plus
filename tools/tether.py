@@ -525,7 +525,7 @@ def loopback(ck) -> int:
         return got
 
     # 1. Handshake: hello in, ack and a clock back.
-    os.write(master, encode(HELLO, 0, b"smalltv-plus 2.9.2"))
+    os.write(master, encode(HELLO, 0, b"smalltv-plus 2.9.3"))
     pump(2.0)
     ck(any(f[0] == HELLO_ACK for f in got), "hello is acknowledged")
     times = [f for f in got if f[0] == TIME]

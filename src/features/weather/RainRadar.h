@@ -21,10 +21,12 @@
 #define RR_ZOOM       7
 #define RR_TILE_PX    256
 
-// Storage. The map keeps half tile resolution (pixel-doubled back on draw);
-// radar keeps a 64x64 grid of intensity nibbles — 4x4 tile pixels per cell,
-// max-pooled so a small strong cell cannot average itself invisible.
-#define RR_MAP_PX     128
+// Storage. The map keeps FULL tile resolution — it lives as a flash file, so
+// the 64 KB costs no RAM and the screen gets crisp cartography instead of
+// pixel-doubled mush. Radar keeps a 64x64 grid of intensity nibbles — 4x4
+// tile pixels per cell, max-pooled so a small strong cell cannot average
+// itself invisible — and the renderer smooths it back out (rrFieldAt16).
+#define RR_MAP_PX     256
 #define RR_GRID       64
 #define RR_GRID_BYTES (RR_GRID * RR_GRID / 2)
 
@@ -209,6 +211,46 @@ static inline uint16_t rrBlend565(uint16_t a, uint16_t b) {
 // and dim enough that the overlay owns the scene.
 static inline uint8_t rr565to332dim(uint8_t r8, uint8_t g8, uint8_t b8) {
   return (uint8_t)(((r8 >> 1) & 0xE0) | (((g8 >> 1) >> 3) & 0x1C) | ((b8 >> 1) >> 6));
+}
+
+// Straight RGB332, for a basemap that is already designed dark (the Esri dark
+// canvas): dimming it again buried the coastlines.
+static inline uint8_t rr888to332(uint8_t r8, uint8_t g8, uint8_t b8) {
+  return (uint8_t)((r8 & 0xE0) | ((g8 >> 3) & 0x1C) | (b8 >> 6));
+}
+
+// ---- smooth rain field ------------------------------------------------------
+// Bilinear intensity (x16) of the rain field at a tile pixel: the 64x64 grid
+// stays 2 KB per frame, and the blockiness is interpolated away at draw time,
+// the way every radar app does it. Cell centres sit at tile pixel 4c+2.
+static inline int rrFieldAt16(const uint8_t* g, int tx, int ty) {
+  int u = tx - 2, v = ty - 2;
+  if (u < 0) u = 0;
+  if (v < 0) v = 0;
+  int cx = u >> 2, cy = v >> 2;
+  const int fx = u & 3, fy = v & 3;
+  if (cx > RR_GRID - 2) cx = RR_GRID - 2;
+  if (cy > RR_GRID - 2) cy = RR_GRID - 2;
+  const int v00 = rrGridGet(g, cx, cy),     v01 = rrGridGet(g, cx + 1, cy);
+  const int v10 = rrGridGet(g, cx, cy + 1), v11 = rrGridGet(g, cx + 1, cy + 1);
+  const int top = v00 * (4 - fx) + v01 * fx;      // x4
+  const int bot = v10 * (4 - fx) + v11 * fx;      // x4
+  return top * (4 - fy) + bot * fy;               // x16: 0..240
+}
+
+// Composite one pixel: nothing under ~1.5 (the interpolated fringe of real
+// echo), a quarter of colour for drizzle, half for rain, three quarters for
+// the cores — the map stays a map underneath all of it.
+static inline uint16_t rrShade(uint16_t base, int n16) {
+  if (n16 < 24) return base;
+  int idx = n16 >> 4;
+  if (idx < 1) idx = 1;
+  if (idx > 15) idx = 15;
+  const uint16_t c = rrPalette[idx];
+  const uint16_t half = rrBlend565(base, c);
+  if (n16 >= 128) return rrBlend565(half, c);     // heavy: 75% colour
+  if (n16 >= 48)  return half;                    // moderate: 50%
+  return rrBlend565(base, half);                  // light: 25%
 }
 
 static inline uint16_t rr332to565(uint8_t c) {

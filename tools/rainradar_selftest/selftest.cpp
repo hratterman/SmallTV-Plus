@@ -114,6 +114,22 @@ int main() {
           "map store: round-trip red lands near half");
   }
 
+  // ---- smooth field + shading ---------------------------------------------
+  {
+    uint8_t g[RR_GRID_BYTES];
+    memset(g, 0, sizeof(g));
+    rrGridMax(g, 10, 10, 8);
+    // Dead centre of cell (10,10) is tile pixel 42: full strength there.
+    CHECK(rrFieldAt16(g, 42, 42) == 128, "field: cell centre reads full x16");
+    // Midway to the empty neighbour: half strength.
+    CHECK(rrFieldAt16(g, 44, 42) == 64, "field: halfway between cells is half");
+    // Far away: nothing.
+    CHECK(rrFieldAt16(g, 100, 100) == 0, "field: empty space reads zero");
+    CHECK(rrShade(0x0000, 10) == 0x0000, "shade: below the fringe shows map");
+    CHECK(rrShade(0x0000, 128) != rrShade(0x0000, 48),
+          "shade: heavy rain is more opaque than moderate");
+  }
+
   // ---- timeline -----------------------------------------------------------
   CHECK(rrTimelineX(0, 10) == RR_TL_X0, "timeline: first frame at the left edge");
   CHECK(rrTimelineX(9, 10) == RR_TL_X0 + RR_TL_W, "timeline: last frame at the right");

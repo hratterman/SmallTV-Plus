@@ -283,21 +283,14 @@ bool WeatherMode::drawRadarFrame() {
   }
 
   uint16_t line[TFT_WIDTH];
-  int haveRow = -1;
   for (int y = 0; y < TFT_HEIGHT; y++) {
     const int ty = y + RR_CROP;
-    const int mr = ty >> 1;
-    if (mr != haveRow) {
-      if (!rainRadarMapRow(mr, s_rMapRow)) memset(s_rMapRow, 0, sizeof(s_rMapRow));
-      haveRow = mr;
-    }
-    const int gy = ty >> 2;
+    if (!rainRadarMapRow(ty, s_rMapRow)) memset(s_rMapRow, 0, sizeof(s_rMapRow));
     for (int x = 0; x < TFT_WIDTH; x++) {
       const int tx = x + RR_CROP;
-      uint16_t c = rr332to565(s_rMapRow[tx >> 1]);
-      const uint8_t n = rrGridGet(s_rGrid, tx >> 2, gy);
-      if (n >= RR_GATE_NIBBLE) c = rrBlend565(c, rrPalette[n]);
-      line[x] = c;
+      // Full-res dark canvas underneath, the rain field sampled bilinearly on
+      // top: smooth cells, opacity by intensity, the map always showing through.
+      line[x] = rrShade(rr332to565(s_rMapRow[tx]), rrFieldAt16(s_rGrid, tx, ty));
     }
     gfx->draw16bitRGBBitmap(0, y, line, TFT_WIDTH, 1);
   }
@@ -311,18 +304,20 @@ bool WeatherMode::drawRadarFrame() {
     gfx->fillCircle(mx, my, 1, C_WHITE);
   }
 
-  // Header band: what this is, and when this frame was.
-  gfx->fillRect(0, 0, TFT_WIDTH, 14, C_BLACK);
+  // Header band: what this is, and when this frame was - big enough to read
+  // from across a room, which is where a weather cube lives.
+  gfx->fillRect(0, 0, TFT_WIDTH, 18, C_BLACK);
   gfx->setTextSize(1);
   gfx->setTextColor(C_DIMTX);
-  gfx->setCursor(6, 3);
+  gfx->setCursor(6, 5);
   gfx->print("RADAR");
   char lbl[8];
   const int off = (int)v.minOff[rFrame_];
   if (rFrame_ == v.nowIdx || off == 0) strlcpy(lbl, "now", sizeof(lbl));
   else snprintf(lbl, sizeof(lbl), "%+dm", off);
+  gfx->setTextSize(2);
   gfx->setTextColor(rFrame_ > v.nowIdx ? C_RAINB : C_WHITE);
-  gfx->setCursor(TFT_WIDTH - 6 - gfxTextW(lbl, 1), 3);
+  gfx->setCursor(TFT_WIDTH - 6 - gfxTextW(lbl, 2), 2);
   gfx->print(lbl);
 
   // Timeline band: a tick per frame, the observed/forecast divide, a cursor.

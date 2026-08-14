@@ -26,8 +26,14 @@ extern "C" {
 // there and mixed-content rules require it anyway. Esri only answers TLS.
 #define RR_IDX_FMT  "%s://api.rainviewer.com/public/weather-maps.json"
 #define RR_TILE_FMT "%s%s/256/%d/%d/%d/0/0_0.png"
+// The dark canvas, not the street map: it is designed for glowing overlays
+// (Esri publishes it for exactly that), it is already dark so it needs no
+// dimming, and at a cube's zoom its shapes stay clean where the street map's
+// halved-and-doubled labels turned to mush - the field's first review of the
+// working radar was "looks really bad and hard to read", and this is most of
+// the answer.
 #define RR_MAP_URL \
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/%d/%d/%d"
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/%d/%d/%d"
 
 #define RR_CYCLE_MS  600000UL   // RainViewer regenerates every ten minutes
 #define RR_RETRY_MS  120000UL   // after a real failure
@@ -52,7 +58,7 @@ extern "C" {
 // last cycle's frames are already on disk under their own names.
 #define RR_TMP_PATH  "/rr_t.tmp"
 #define RR_GRID_FMT  "/rr_g%u.bin"
-#define RR_MAP_FMT   "/rr_m_%d_%d.bin"
+#define RR_MAP_FMT   "/rr_M2_%d_%d.bin"   // v2: full-res dark canvas
 
 // ---------------------------------------------------------------------------
 // Shared state. The weather task writes, the display loop reads; s_ready
@@ -365,19 +371,41 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   // The file now sits ON IHDR's CRC; the read callback's first act is to
   // skip those four bytes and find the first IDAT.
 
+  // The decode is a big-heap operation exactly like a TLS session, so it
+  // holds the same radio lock TLS users hold: a Spotify poll or album-art
+  // fetch can then never be mid-handshake - big blocks spoken for - at the
+  // instant the dictionary asks for its 32 KB. The field showed the need in
+  // one line: "no heap to inflate, 96k blk 33k" - plenty free on average,
+  // nothing free at that exact moment.
+  if (!rrNetLock()) {
+    f.close();
+    strlcpy(err, "radio busy", errLen);
+    return false;
+  }
   // Biggest first, so the note names the dictionary if the heap cannot seat
-  // it; then the small pieces, which live in the crumbs.
-  uint8_t* dict = (uint8_t*)malloc(32768);
-  RRUz*    z    = (RRUz*)malloc(sizeof(RRUz));
-  uint8_t* out  = (uint8_t*)malloc(1024);
-  uint8_t* cur  = (uint8_t*)malloc(1 + RR_TILE_PX * 4);
-  uint8_t* prev = (uint8_t*)malloc(RR_TILE_PX * 4);
+  // it; then the small pieces, which live in the crumbs. A couple of short
+  // retries ride out whoever was mid-allocation when the lock changed hands.
+  uint8_t* dict = nullptr;
+  RRUz*    z    = nullptr;
+  uint8_t* out  = nullptr;
+  uint8_t* cur  = nullptr;
+  uint8_t* prev = nullptr;
+  for (int a = 0; a < 3; a++) {
+    if (!dict) dict = (uint8_t*)malloc(32768);
+    if (!z)    z    = (RRUz*)malloc(sizeof(RRUz));
+    if (!out)  out  = (uint8_t*)malloc(1024);
+    if (!cur)  cur  = (uint8_t*)malloc(1 + RR_TILE_PX * 4);
+    if (!prev) prev = (uint8_t*)malloc(RR_TILE_PX * 4);
+    if (dict && z && out && cur && prev) break;
+    vTaskDelay(400 / portTICK_PERIOD_MS);
+  }
   if (!dict || !z || !out || !cur || !prev) {
     free(prev);
     free(cur);
     free(out);
     free(z);
     free(dict);
+    rrNetUnlock();
     f.close();
     snprintf(err, errLen, "no heap to inflate, %uk blk %uk",
              (unsigned)(ESP.getFreeHeap() / 1024),
@@ -421,6 +449,8 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   free(out);
   free(z);
   free(dict);
+  rrNetUnlock();
+  rrNetUnlock();
 
   const bool complete = done && !scan.bad && scan.y == RR_TILE_PX;
   if (!complete) {
@@ -467,26 +497,48 @@ bool rrBuildFrame(const char* host, const char* path, int tx, int ty,
 // ROM TJpgDec at 1/2 scale into a 16 KB staging buffer, dimmed to RGB332,
 // written back to flash, freed. The renderer never sees it in RAM again.
 // ---------------------------------------------------------------------------
-struct RRJpeg { File* f; uint8_t* out; };
+// Full resolution with almost no RAM: TJpgDec hands out MCU rows top to
+// bottom, so a 16-row band buffer (4 KB) is filled and flushed to the map
+// file as the decode walks down the image. 64 KB of crisp cartography on
+// flash, 8 KB of RAM for the seconds it takes to put it there.
+#define RR_MAP_BAND 16
+
+struct RRJpeg {
+  File*    fin;
+  File*    fout;
+  uint8_t* band;      // RR_MAP_PX * RR_MAP_BAND
+  int      bandTop;
+  bool     ioErr;
+};
 
 UINT rrJpgIn(JDEC* jd, BYTE* buff, UINT n) {
   RRJpeg* j = (RRJpeg*)jd->device;
-  if (buff) return (UINT)j->f->read(buff, n);
-  j->f->seek(j->f->position() + n);
+  if (buff) return (UINT)j->fin->read(buff, n);
+  j->fin->seek(j->fin->position() + n);
   return n;
+}
+
+bool rrMapFlushBand(RRJpeg* j) {
+  const size_t n = (size_t)RR_MAP_PX * RR_MAP_BAND;
+  if (j->fout->write(j->band, n) != n) { j->ioErr = true; return false; }
+  j->bandTop += RR_MAP_BAND;
+  return true;
 }
 
 UINT rrJpgOut(JDEC* jd, void* bitmap, JRECT* rect) {
   RRJpeg* j = (RRJpeg*)jd->device;
+  while (rect->top >= j->bandTop + RR_MAP_BAND)
+    if (!rrMapFlushBand(j)) return 0;            // FS trouble: stop the decode
   const uint8_t* src = (const uint8_t*)bitmap;
   const int w = rect->right - rect->left + 1;
   for (int y = rect->top; y <= rect->bottom; y++) {
-    if (y >= RR_MAP_PX) break;
-    uint8_t* dst = j->out + (size_t)y * RR_MAP_PX;
+    const int row = y - j->bandTop;
+    if (row < 0 || row >= RR_MAP_BAND || y >= RR_MAP_PX) continue;
+    uint8_t* dst = j->band + (size_t)row * RR_MAP_PX;
     for (int x = rect->left; x <= rect->right; x++) {
       if (x >= RR_MAP_PX) continue;
       const uint8_t* p = src + ((size_t)(y - rect->top) * w + (x - rect->left)) * 3;
-      dst[x] = rr565to332dim(p[0], p[1], p[2]);
+      dst[x] = rr888to332(p[0], p[1], p[2]);     // the canvas is already dark
     }
   }
   return 1;
@@ -498,39 +550,39 @@ bool rrBuildMap(int tx, int ty, char* err, size_t errLen) {
   if (!rrFetchToTmp(url, true, err, errLen)) return false;
 
   bool ok = false;
-  uint8_t* stage = (uint8_t*)malloc((size_t)RR_MAP_PX * RR_MAP_PX);
-  void* work = stage ? malloc(4096) : nullptr;
-  if (!stage || !work) {
+  uint8_t* band = (uint8_t*)malloc((size_t)RR_MAP_PX * RR_MAP_BAND);
+  void* work = band ? malloc(4096) : nullptr;
+  char mp[28];
+  snprintf(mp, sizeof(mp), RR_MAP_FMT, tx, ty);
+  if (!band || !work) {
     strlcpy(err, "no heap for the map", errLen);
   } else {
     File f = LittleFS.open(RR_TMP_PATH, "r");
-    if (!f) {
-      strlcpy(err, "fs: map went missing", errLen);
+    File m = LittleFS.open(mp, "w");
+    if (!f || !m) {
+      strlcpy(err, "fs: map files", errLen);
+      if (f) f.close();
+      if (m) m.close();
     } else {
-      RRJpeg j{&f, stage};
+      RRJpeg j{&f, &m, band, 0, false};
       JDEC jd;
       JRESULT r = jd_prepare(&jd, rrJpgIn, work, 4096, &j);
-      if (r == JDR_OK) r = jd_decomp(&jd, rrJpgOut, 1);      // 1/2 scale: 128x128
+      if (r == JDR_OK) r = jd_decomp(&jd, rrJpgOut, 0);      // full 256x256
+      while (r == JDR_OK && !j.ioErr && j.bandTop < RR_MAP_PX)
+        rrMapFlushBand(&j);                                  // the last bands
       f.close();
-      if (r != JDR_OK) {
-        snprintf(err, errLen, "map decode err %d", (int)r);
+      m.close();
+      if (r != JDR_OK || j.ioErr) {
+        if (j.ioErr) strlcpy(err, "fs: map write failed", errLen);
+        else snprintf(err, errLen, "map decode err %d", (int)r);
+        LittleFS.remove(mp);
       } else {
-        char mp[28];
-        snprintf(mp, sizeof(mp), RR_MAP_FMT, tx, ty);
-        File m = LittleFS.open(mp, "w");
-        if (m && m.write(stage, (size_t)RR_MAP_PX * RR_MAP_PX) ==
-                     (size_t)RR_MAP_PX * RR_MAP_PX) {
-          ok = true;
-        } else {
-          if (m) { m.close(); LittleFS.remove(mp); }
-          strlcpy(err, "fs: map write failed", errLen);
-        }
-        if (ok) m.close();
+        ok = true;
       }
     }
   }
   free(work);
-  free(stage);
+  free(band);
   LittleFS.remove(RR_TMP_PATH);
   if (ok) { s_mapTileX = tx; s_mapTileY = ty; }
   return ok;
@@ -560,8 +612,8 @@ bool rrKeepCurrent(const char* name) {
       if (g_keepTs[i] == v) return true;
     return false;
   }
-  if (strncmp(name, "rr_m_", 5) == 0) {
-    const char* p = name + 5;
+  if (strncmp(name, "rr_M2_", 6) == 0) {
+    const char* p = name + 6;
     uint32_t x, y;
     if (!rrParseUint(p, x) || *p != '_') return false;
     p++;
