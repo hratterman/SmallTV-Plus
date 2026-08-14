@@ -385,41 +385,35 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   // The file now sits ON IHDR's CRC; the read callback's first act is to
   // skip those four bytes and find the first IDAT.
 
-  // The decode is a big-heap operation exactly like a TLS session, so it
-  // holds the same radio lock TLS users hold: a Spotify poll or album-art
-  // fetch can then never be mid-handshake - big blocks spoken for - at the
-  // instant the dictionary asks for its 32 KB. The field showed the need in
-  // one line: "no heap to inflate, 96k blk 33k" - plenty free on average,
-  // nothing free at that exact moment.
-  if (!rrNetLock()) {
+  // The one big piece - the 32 KB dictionary - is the lifetime s_dict, won
+  // at cycle start while the heap still had a block that size. What remains
+  // here is kilobyte-class: the uzlib state and three scanline buffers, in
+  // separate pieces so they fit the crumbs of any working heap. With no big
+  // allocation left in the decode there is nothing to shield from a TLS
+  // handshake, so it no longer queues for the radio: Spotify polls and
+  // covers proceed while a tile chews.
+  if (!s_dict) {                      // the cycle guards this; belt and braces
     f.close();
-    strlcpy(err, "radio busy", errLen);
+    strlcpy(err, "no dictionary", errLen);
     return false;
   }
-  // Biggest first, so the note names the dictionary if the heap cannot seat
-  // it; then the small pieces, which live in the crumbs. A couple of short
-  // retries ride out whoever was mid-allocation when the lock changed hands.
-  uint8_t* dict = nullptr;
   RRUz*    z    = nullptr;
   uint8_t* out  = nullptr;
   uint8_t* cur  = nullptr;
   uint8_t* prev = nullptr;
   for (int a = 0; a < 3; a++) {
-    if (!dict) dict = (uint8_t*)malloc(32768);
     if (!z)    z    = (RRUz*)malloc(sizeof(RRUz));
     if (!out)  out  = (uint8_t*)malloc(1024);
     if (!cur)  cur  = (uint8_t*)malloc(1 + RR_TILE_PX * 4);
     if (!prev) prev = (uint8_t*)malloc(RR_TILE_PX * 4);
-    if (dict && z && out && cur && prev) break;
+    if (z && out && cur && prev) break;
     vTaskDelay(400 / portTICK_PERIOD_MS);
   }
-  if (!dict || !z || !out || !cur || !prev) {
+  if (!z || !out || !cur || !prev) {
     free(prev);
     free(cur);
     free(out);
     free(z);
-    free(dict);
-    rrNetUnlock();
     f.close();
     snprintf(err, errLen, "no heap to inflate, %uk blk %uk",
              (unsigned)(ESP.getFreeHeap() / 1024),
@@ -436,7 +430,7 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   memset(prev, 0, RR_TILE_PX * 4);
   z->u.source = z->u.source_limit = nullptr;
   z->u.source_read_cb = rrUzRead;
-  uzlib_uncompress_init(&z->u, dict, 32768);
+  uzlib_uncompress_init(&z->u, s_dict, 32768);
   RRScan scan = {cur, prev, grid, 0, 0, false};
 
   bool done = false, corrupt = false;
@@ -467,8 +461,6 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   free(cur);
   free(out);
   free(z);
-  rrNetUnlock();
-  rrNetUnlock();
 
   const bool complete = done && !scan.bad && scan.y == RR_TILE_PX;
   if (!complete) {
