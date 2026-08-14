@@ -187,7 +187,17 @@ static NetFetchResult fetchOverWifi(const char* url, bool post, const char* head
 
   http.end();
   r.ok = (r.status >= 200 && r.status < 300);
-  if (!r.ok) snprintf(r.error, sizeof(r.error), "HTTP %d", r.status);
+  if (!r.ok) {
+    snprintf(r.error, sizeof(r.error), "HTTP %d", r.status);
+  } else if (remaining > 0 && !abandoned) {
+    // The server promised a length and the loop ended before delivering it
+    // (deadline, or a mid-body hangup). Reporting that as success handed
+    // callers silently truncated bodies — the radar caught it as a PNG whose
+    // stream stopped early, but a clipped JSON just parses as gibberish.
+    r.ok = false;
+    snprintf(r.error, sizeof(r.error), "body short: %u of %u",
+             (unsigned)r.bytes, (unsigned)(r.bytes + (uint32_t)remaining));
+  }
   return r;
 }
 

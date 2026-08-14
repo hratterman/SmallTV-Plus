@@ -32,7 +32,11 @@ extern "C" {
 #define RR_CYCLE_MS  600000UL   // RainViewer regenerates every ten minutes
 #define RR_RETRY_MS  120000UL   // after a real failure
 #define RR_BUSY_MS   12000UL    // after losing the radio: it frees in seconds
-#define RR_FILE_CAP  40960      // largest tile or map we will store
+// A z7 tile with a whole storm system across it compresses far worse than a
+// lone cell cluster: the field cube met one past 40 KB, whose truncation the
+// decoder then reported as "short PNG" every cycle. The FS partition is
+// ~960 KB; 96 KB of cap costs nothing and covers the honest worst case.
+#define RR_FILE_CAP  98304
 
 // Flash layout, all in the FS root: the grid files are keyed by the frame's
 // timestamp, which is what makes a steady rain cost one fetch per cycle —
@@ -205,8 +209,11 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
     const NetFetchResult r = netFetch(url, false, nullptr, nullptr, 0,
                                       rrToFile, &s, 20000);
     s.f.close();
-    if (r.ok && s.len) ok = true;
-    else if (s.len >= RR_FILE_CAP) snprintf(err, errLen, "tile over %uk", RR_FILE_CAP / 1024);
+    // Cap first: a sink that stopped accepting still leaves r.ok true (the
+    // status was 200), and accepting that file hands the decoder a stream
+    // with its tail cut off. That was a real bug, found as "short PNG".
+    if (s.len >= RR_FILE_CAP) snprintf(err, errLen, "tile over %uk", RR_FILE_CAP / 1024);
+    else if (r.ok && s.len) ok = true;
     else if (!r.ok) snprintf(err, errLen, "%.44s", r.error);
     else strlcpy(err, "empty reply", errLen);
   }
@@ -223,15 +230,18 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
 // lives inside the input callback: uzlib asks for bytes, and the callback
 // serves IDAT payloads off the file, skipping headers and CRCs as it goes.
 // ---------------------------------------------------------------------------
+// The context stays small (~2 KB) and the scanline buffers are allocated as
+// separate kilobyte pieces, because of a lesson the field cube taught in one
+// line ("no heap to inflate, blk 33k"): after the 32 KB dictionary takes the
+// heap's one big block, a further 6 KB piece may not exist anywhere — the
+// rest of a 48 KB heap is crumbs. Several small allocations fit where one
+// medium one cannot.
 struct RRUz {
   struct uzlib_uncomp u;             // FIRST: the read callback containerofs it
   File*    f;
   uint32_t chunkLeft;                // bytes left in the current IDAT payload
   bool     sawEnd;
   uint8_t  in[512];                  // compressed bytes, read from flash
-  uint8_t  out[1024];                // inflated bytes, handed to the scanliner
-  uint8_t  cur[1 + RR_TILE_PX * 4];  // filter byte + one RGBA scanline
-  uint8_t  prev[RR_TILE_PX * 4];     // previous scanline, defiltered
 };
 
 int rrUzRead(struct uzlib_uncomp* u) {
@@ -293,14 +303,22 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   // The file now sits right after IHDR's payload; the read callback's first
   // act is to skip IHDR's CRC and find the first IDAT.
 
-  // Biggest first, so the note names the dictionary if the heap cannot seat it.
+  // Biggest first, so the note names the dictionary if the heap cannot seat
+  // it; then the small pieces, which live in the crumbs.
   uint8_t* dict = (uint8_t*)malloc(32768);
-  RRUz* z = dict ? (RRUz*)malloc(sizeof(RRUz)) : nullptr;
-  if (!dict || !z) {
+  RRUz*    z    = (RRUz*)malloc(sizeof(RRUz));
+  uint8_t* out  = (uint8_t*)malloc(1024);
+  uint8_t* cur  = (uint8_t*)malloc(1 + RR_TILE_PX * 4);
+  uint8_t* prev = (uint8_t*)malloc(RR_TILE_PX * 4);
+  if (!dict || !z || !out || !cur || !prev) {
+    free(prev);
+    free(cur);
+    free(out);
     free(z);
     free(dict);
     f.close();
-    snprintf(err, errLen, "no heap to inflate, blk %uk",
+    snprintf(err, errLen, "no heap to inflate, %uk blk %uk",
+             (unsigned)(ESP.getFreeHeap() / 1024),
              (unsigned)(platformMaxFreeBlock() / 1024));
     return false;
   }
@@ -308,33 +326,42 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   z->f = &f;
   z->chunkLeft = 0;
   z->sawEnd = false;
-  memset(z->prev, 0, sizeof(z->prev));
+  memset(prev, 0, RR_TILE_PX * 4);
   z->u.source = z->u.source_limit = nullptr;
   z->u.source_read_cb = rrUzRead;
   uzlib_uncompress_init(&z->u, dict, 32768);
-  RRScan scan = {z->cur, z->prev, grid, 0, 0, false};
+  RRScan scan = {cur, prev, grid, 0, 0, false};
 
   bool done = false, corrupt = false;
   if (uzlib_zlib_parse_header(&z->u) < 0) {
     corrupt = true;
   } else {
     while (!done && !corrupt && !scan.bad) {
-      z->u.dest_start = z->u.dest = z->out;
-      z->u.dest_limit = z->out + sizeof(z->out);
+      z->u.dest_start = z->u.dest = out;
+      z->u.dest_limit = out + 1024;
       const int res = uzlib_uncompress(&z->u);
-      const size_t got = (size_t)(z->u.dest - z->out);
-      if (got) rrScanConsume(scan, z->out, got);
+      const size_t got = (size_t)(z->u.dest - out);
+      if (got) rrScanConsume(scan, out, got);
       if (res == TINF_DONE) done = true;
       else if (res != TINF_OK) corrupt = true;
       else if (!got) corrupt = true;         // no progress: a wedged stream
     }
   }
   f.close();
+  free(prev);
+  free(cur);
+  free(out);
   free(z);
   free(dict);
 
   const bool complete = done && !scan.bad && scan.y == RR_TILE_PX;
-  if (!complete) strlcpy(err, scan.bad ? "bad PNG filter" : "short PNG", errLen);
+  if (!complete) {
+    // Which failure, and how far in: y=0 died at the zlib header, y=255 died
+    // at the finish line, and those are different bugs to go and find.
+    if (scan.bad)     snprintf(err, errLen, "bad PNG filter y=%u", scan.y);
+    else if (corrupt) snprintf(err, errLen, "PNG data error y=%u", scan.y);
+    else              snprintf(err, errLen, "short PNG y=%u", scan.y);
+  }
   return complete;
 }
 
@@ -500,7 +527,7 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
              (unsigned)(platformMaxFreeBlock() / 1024));
     return;
   }
-  if (LittleFS.totalBytes() - LittleFS.usedBytes() < 100000) {
+  if (LittleFS.totalBytes() - LittleFS.usedBytes() < 220000) {
     snprintf(s_note, sizeof(s_note), "radar: fs %uk free",
              (unsigned)((LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024));
     return;
