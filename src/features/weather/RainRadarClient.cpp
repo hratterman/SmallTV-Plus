@@ -51,7 +51,7 @@ extern "C" {
 // measured in the field as "body short 3651 of 22062", one flash block into a
 // 22 KB tile. Plain-HTTP fetches have no TLS arena in play, so 24 KB of
 // staging is affordable exactly when it is needed.
-#define RR_RAM_FETCH  24576
+#define RR_RAM_FETCH  32768
 
 // Flash layout, all in the FS root: the grid files are keyed by the frame's
 // timestamp, which is what makes a steady rain cost one fetch per cycle —
@@ -233,7 +233,11 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
       RRMemSink m{ram, 0, RR_RAM_FETCH};
       const NetFetchResult r = netFetch(url, false, nullptr, nullptr, 0,
                                         rrToMem, &m, 20000);
-      const bool overflow = m.len >= RR_RAM_FETCH;   // sink refused: too big
+      // Refusal, not fullness, is the overflow signal: the chunk that would
+      // not fit leaves the count just UNDER the cap, and testing >= cap alone
+      // classified a 97%-complete tile as whole. The field caught it as
+      // "PNG e1 y=199" - a perfect stream that ends 78% of the way down.
+      const bool overflow = r.bytes > m.len || m.len >= RR_RAM_FETCH;
       if (r.ok && m.len && !overflow) {
         File w = LittleFS.open(RR_TMP_PATH, "w");
         const bool wrote = w && w.write(ram, m.len) == m.len;
@@ -264,10 +268,11 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
     const NetFetchResult r = netFetch(url, false, nullptr, nullptr, 0,
                                       rrToFile, &s, 20000);
     s.f.close();
-    // Cap first: a sink that stopped accepting still leaves r.ok true (the
-    // status was 200), and accepting that file hands the decoder a stream
-    // with its tail cut off. That was a real bug, found as "short PNG".
-    if (s.len >= RR_FILE_CAP) snprintf(err, errLen, "tile over %uk", RR_FILE_CAP / 1024);
+    // Refusal first: a sink that stopped accepting (cap, or a failed flash
+    // write) still leaves r.ok true, and the refused chunk leaves the count
+    // under the cap - r.bytes > s.len is the honest incompleteness signal.
+    if (r.bytes > s.len || s.len >= RR_FILE_CAP)
+      snprintf(err, errLen, "tile over %uk", RR_FILE_CAP / 1024);
     else if (r.ok && s.len) ok = true;
     else if (!r.ok) snprintf(err, errLen, "%.44s", r.error);
     else strlcpy(err, "empty reply", errLen);
