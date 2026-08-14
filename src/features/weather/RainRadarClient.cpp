@@ -3,6 +3,7 @@
 
 #include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <esp32/rom/tjpgd.h>
 #include <miniz.h>              // the ROM inflater: tinfl_* costs no flash
@@ -23,7 +24,8 @@
 #define RR_PNG_CAP   32768      // a z7 radar tile ran 7 KB in a Florida storm
 #define RR_JPEG_CAP  40960      // the street tile ran 15 KB
 #define RR_CYCLE_MS  600000UL   // RainViewer regenerates every ten minutes
-#define RR_RETRY_MS  120000UL
+#define RR_RETRY_MS  120000UL   // after a real failure
+#define RR_BUSY_MS   12000UL    // after losing the radio: it frees in seconds
 
 // ---------------------------------------------------------------------------
 // Shared state. The weather task writes, the display loop reads; s_ready flips
@@ -82,6 +84,34 @@ static void rrTeardown(const char* why) {
 }
 
 // ---------------------------------------------------------------------------
+// The shared TLS radio, taken politely. This cube's lock is a busy place -
+// the Spotify poll cycles it every few seconds while music plays, the
+// calendar holds it for whole fetches - and a background nicety like the
+// radar must wait its turn rather than fail: three long attempts, and when
+// it still loses, the next look is rescheduled for seconds away instead of
+// the ordinary failure backoff. "radar: radio busy" on the footer for two
+// minutes at a stretch is how the first version taught us this.
+// ---------------------------------------------------------------------------
+static bool rrNetLock() {
+#if WITH_SPOTIFY
+  for (int a = 0; a < 3; a++) {
+    if (spotifyNetLock(8000)) return true;
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+  }
+  s_nextCycleMs = millis() + RR_BUSY_MS;
+  return false;
+#else
+  return true;
+#endif
+}
+
+static void rrNetUnlock() {
+#if WITH_SPOTIFY
+  spotifyNetUnlock();
+#endif
+}
+
+// ---------------------------------------------------------------------------
 // Fetch plumbing: collect a bounded binary body.
 // ---------------------------------------------------------------------------
 namespace {
@@ -96,16 +126,12 @@ bool rrCollect(void* ctx, const uint8_t* data, uint16_t len) {
 }
 
 bool rrFetch(const char* url, RRBuf& b, const char* accept, char* err, size_t errLen) {
-#if WITH_SPOTIFY
-  if (!spotifyNetLock(10000)) {
-    strlcpy(err, "busy: poll holds the radio", errLen);
+  if (!rrNetLock()) {
+    strlcpy(err, "radio busy", errLen);
     return false;
   }
-#endif
   const NetFetchResult r = netFetch(url, false, accept, nullptr, 0, rrCollect, &b, 15000);
-#if WITH_SPOTIFY
-  spotifyNetUnlock();
-#endif
+  rrNetUnlock();
   if (!r.ok) {
     snprintf(err, errLen, "%.44s", r.error);
     return false;
@@ -339,15 +365,11 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
   // 1. The frame index.
   String idx;
   {
-#if WITH_SPOTIFY
-    if (!spotifyNetLock(10000)) { strlcpy(s_note, "radar: radio busy", sizeof(s_note)); return; }
-#endif
+    if (!rrNetLock()) { strlcpy(s_note, "radar: radio busy", sizeof(s_note)); return; }
     const NetFetchResult r = netFetchToString(RR_INDEX_URL, false,
                                               "Accept: application/json",
                                               nullptr, 0, idx, 8192, 12000);
-#if WITH_SPOTIFY
-    spotifyNetUnlock();
-#endif
+    rrNetUnlock();
     if (!r.ok) {
       snprintf(s_note, sizeof(s_note), "radar idx: %.32s", r.error);
       return;
