@@ -1,5 +1,8 @@
 #include "WebPortal.h"
 #include "Platform.h"
+#if !defined(SMALLTV_ESP8266)
+#include <esp_ota_ops.h>
+#endif
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "webui_gz.h"
@@ -110,6 +113,18 @@ static void handleStatus() {
   o["version"] = FW_VERSION;
   o["repo"] = REPO_URL;
   if (g_updateMsg.length()) o["updateMsg"] = g_updateMsg;
+#if !defined(SMALLTV_ESP8266)
+  {
+    // Which app slot is running and which one the NEXT boot uses. After a
+    // "successful" flash these differing is the proof the switch happened;
+    // them matching is the proof it did not - evidence for the field mystery
+    // where three delivered builds in a row never appeared on the cube.
+    const esp_partition_t* runp = esp_ota_get_running_partition();
+    const esp_partition_t* bootp = esp_ota_get_boot_partition();
+    if (runp)  o["part"] = runp->label;
+    if (bootp) o["bootPart"] = bootp->label;
+  }
+#endif
   o["mode"] = (netMode() == NET_AP) ? "ap" : "sta";
   o["connected"] = netConnected();
   o["ssid"] = netSSID();
@@ -555,7 +570,10 @@ static void handleUpdateUpload() {
     s_otaReject = nullptr;
     s_otaSawFirst = false;
     uint32_t maxSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-    if (!Update.begin(maxSpace)) Update.printError(Serial);
+    if (!Update.begin(maxSpace)) {
+      Update.printError(Serial);
+      s_otaReject = "update engine busy or no slot space";
+    }
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (s_otaReject) return;                     // already rejected; drain the rest quietly
     if (!s_otaSawFirst) {                        // first chunk: check what we were handed
@@ -567,7 +585,11 @@ static void handleUpdateUpload() {
         return;
       }
     }
-    if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) {
+      Update.printError(Serial);
+      s_otaReject = "flash write failed mid-upload";
+      platformUpdateAbort();
+    }
   } else if (up.status == UPLOAD_FILE_END) {
     if (s_otaReject) return;
     if (!Update.end(true)) Update.printError(Serial);
