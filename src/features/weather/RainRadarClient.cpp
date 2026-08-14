@@ -241,6 +241,8 @@ struct RRUz {
   File*    f;
   uint32_t chunkLeft;                // bytes left in the current IDAT payload
   bool     sawEnd;
+  uint8_t  zh[2];                    // first two bytes served: the zlib header
+  bool     zhSeen;                   // (forensics for the failure note)
   uint8_t  in[512];                  // compressed bytes, read from flash
 };
 
@@ -266,6 +268,11 @@ int rrUzRead(struct uzlib_uncomp* u) {
   const int got = s->f->read(s->in, want);
   if (got <= 0) { s->sawEnd = true; return -1; }
   s->chunkLeft -= (uint32_t)got;
+  if (!s->zhSeen) {
+    s->zh[0] = s->in[0];
+    s->zh[1] = got > 1 ? s->in[1] : 0;
+    s->zhSeen = true;
+  }
   u->source = s->in + 1;
   u->source_limit = s->in + got;
   return s->in[0];
@@ -332,6 +339,9 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   z->f = &f;
   z->chunkLeft = 0;
   z->sawEnd = false;
+  z->zhSeen = false;
+  z->zh[0] = z->zh[1] = 0;
+  const uint32_t fileKb = (uint32_t)(f.size() / 1024);
   memset(prev, 0, RR_TILE_PX * 4);
   z->u.source = z->u.source_limit = nullptr;
   z->u.source_read_cb = rrUzRead;
@@ -339,9 +349,11 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
   RRScan scan = {cur, prev, grid, 0, 0, false};
 
   bool done = false, corrupt = false;
+  int stage = 0;                       // 0: died in the zlib header; 1: after
   if (uzlib_zlib_parse_header(&z->u) < 0) {
     corrupt = true;
   } else {
+    stage = 1;
     while (!done && !corrupt && !scan.bad) {
       z->u.dest_start = z->u.dest = out;
       z->u.dest_limit = out + 1024;
@@ -353,6 +365,7 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
       else if (!got) corrupt = true;         // no progress: a wedged stream
     }
   }
+  const uint8_t z2h0 = z->zh[0], z2h1 = z->zh[1];
   f.close();
   free(prev);
   free(cur);
@@ -362,11 +375,18 @@ bool rrDecodeTmp(uint8_t* grid, char* err, size_t errLen) {
 
   const bool complete = done && !scan.bad && scan.y == RR_TILE_PX;
   if (!complete) {
-    // Which failure, and how far in: y=0 died at the zlib header, y=255 died
-    // at the finish line, and those are different bugs to go and find.
-    if (scan.bad)     snprintf(err, errLen, "bad PNG filter y=%u", scan.y);
-    else if (corrupt) snprintf(err, errLen, "PNG data error y=%u", scan.y);
-    else              snprintf(err, errLen, "short PNG y=%u", scan.y);
+    // Everything a remote diagnosis needs on one line: which stage died (e0 =
+    // the zlib header itself, e1 = mid-stream), how many scanlines arrived,
+    // the file's size, and the two bytes the inflater was handed as the zlib
+    // header. 78 9C there says the walk found a real stream; anything else
+    // says the file is not what the tile server serves.
+    if (scan.bad)
+      snprintf(err, errLen, "PNG filter y=%u", scan.y);
+    else if (corrupt)
+      snprintf(err, errLen, "PNG e%d y=%u %uk %02X%02X", stage, scan.y,
+               (unsigned)fileKb, z2h0, z2h1);
+    else
+      snprintf(err, errLen, "short PNG y=%u %uk", scan.y, (unsigned)fileKb);
   }
   return complete;
 }
