@@ -225,9 +225,13 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
     return false;
   }
 
-  // RAM first when the arena is free (no TLS in play): the network is served
-  // at full speed, and flash gets the bytes only after the peer is gone.
-  if (!tls) {
+  // RAM first whenever the DEVICE is not doing TLS - plain HTTP on WiFi, or
+  // anything over the tether (the browser owns the TLS there). Streaming to
+  // flash mid-transfer is what corrupts: on WiFi a block-erase stall makes
+  // the CDN hang up; on the cable it overruns the 4 KB serial buffer and
+  // drops unrepeated frames - the field read that as "PNG filter y=45", an
+  // impossible filter byte where the lost bytes desynced the stream.
+  if (!tls || netFetchTethered()) {
     uint8_t* ram = (uint8_t*)malloc(RR_RAM_FETCH);
     if (ram) {
       RRMemSink m{ram, 0, RR_RAM_FETCH};

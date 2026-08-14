@@ -2,6 +2,7 @@
 #if WITH_SPOTIFY
 
 #include "AlbumArt.h"
+#include <LittleFS.h>
 #include <Arduino_GFX_Library.h>
 #include "Gfx.h"
 #include <WiFiClient.h>
@@ -33,12 +34,14 @@ enum ArtStop : uint8_t {
 };
 
 struct ArtCtx {
-  // Two ways in, one way out. Over WiFi the decoder pulls straight off the
+  // Three ways in, one way out. Over WiFi the decoder pulls straight off the
   // socket and the picture fills in as it downloads. Over the tether the bytes
   // arrive pushed, a frame at a time, and a pull-driven decoder cannot be fed
-  // that way — so they are collected first and the decoder reads the buffer.
+  // that way — so they are collected first (RAM when a cover-sized block
+  // exists, a flash file when it does not) and the decoder reads that.
   // Same callback, same decode, one branch at the top of it.
-  WiFiClient* stream;    // null when reading from memory
+  WiFiClient* stream;    // null when reading from memory or a file
+  File* file;            // null unless staging through flash
   const uint8_t* mem;
   uint32_t memLen, memPos;
   int32_t  remaining;    // bytes the server said are left, -1 if unknown
@@ -83,7 +86,23 @@ const char* artJdErr(int r) {
 UINT artIn(JDEC* jd, BYTE* buff, UINT nbyte) {
   ArtCtx* c = (ArtCtx*)jd->device;
 
-  if (!c->stream) {                     // buffered: the tether path
+  if (c->file) {                        // staged on flash: the big-cover path
+    UINT got;
+    if (buff) {
+      got = (UINT)c->file->read(buff, nbyte);
+    } else {
+      c->file->seek(c->file->position() + nbyte);
+      got = nbyte;
+    }
+    if (buff)
+      for (UINT k = 0; k < got && c->magicLen < 2; k++)
+        c->magic[c->magicLen++] = buff[k];
+    c->got += got;
+    if (got < nbyte) c->stop = ART_STOP_LENGTH;
+    return got;
+  }
+
+  if (!c->stream) {                     // buffered in RAM: the tether path
     const uint32_t left = c->memLen - c->memPos;
     const UINT take = nbyte < left ? nbyte : (UINT)left;
     if (buff && take) memcpy(buff, c->mem + c->memPos, take);
@@ -239,47 +258,96 @@ bool artCollect(void* ctx, const uint8_t* data, uint16_t len) {
   b->len += len;
   return true;
 }
+
+struct ArtFileSink { File f; uint32_t len; };
+
+bool artToFile(void* ctx, const uint8_t* data, uint16_t len) {
+  ArtFileSink* s = (ArtFileSink*)ctx;
+  if (s->len + len > ART_MAX_BYTES) return false;
+  if (s->f.write(data, len) != len) return false;
+  s->len += len;
+  return true;
+}
 }  // namespace
 
 // Over the cable the bytes are pushed at us, and a pull-driven decoder cannot
-// be fed that way without a second task to block in. Holding the file instead
-// is far simpler and costs one allocation the length of a cover — Spotify's
-// 300 px JPEGs run 15-25 KB, which this device has when the miner is paused.
-static bool albumArtDrawTethered(const char* url, int16_t x, int16_t y) {
-  uint8_t* buf = (uint8_t*)malloc(ART_MAX_BYTES);
-  if (!buf) {
-    snprintf(s_status, sizeof(s_status), "no heap for a cover, blk %uk",
-             (unsigned)(platformMaxFreeBlock() / 1024));
-    s_retryAt = millis() + 15000;
-    return false;
-  }
-  ArtBuf b{buf, 0, ART_MAX_BYTES};
+// be fed that way without a second task to block in. So the cover is held
+// first — but a 40 KB single allocation never fit this cube's fragmented
+// heap ("no heap for a cover, blk 35k" from the field, on a heap whose
+// largest block has hovered near 33 KB all along). The stage is 24 KB now,
+// which covers Spotify's 15-25 KB reality and fits the blocks this heap
+// actually has; a bigger cover falls back to staging through a flash file,
+// the same trick the rain radar lives by.
+#define ART_RAM_STAGE 24576
+#define ART_TMP_PATH  "/aa_t.tmp"
+
+static bool artFetchToFile(const char* url) {
+  ArtFileSink s;
+  s.f = LittleFS.open(ART_TMP_PATH, "w");
+  s.len = 0;
+  if (!s.f) return false;
   const NetFetchResult r = netFetch(url, false, "Accept: image/jpeg", nullptr, 0,
-                                    artCollect, &b, 15000);
-  if (!r.ok || !b.len) {
-    if (b.len >= ART_MAX_BYTES)
-      snprintf(s_status, sizeof(s_status), "cover over %u KB", ART_MAX_BYTES / 1024);
-    else
-      snprintf(s_status, sizeof(s_status), "tether: %.28s", r.error);
+                                    artToFile, &s, 20000);
+  s.f.close();
+  const bool ok = r.ok && s.len && r.bytes <= s.len;
+  if (!ok) {
+    snprintf(s_status, sizeof(s_status), "tether: %.28s",
+             r.error[0] ? r.error : "cover truncated");
+    LittleFS.remove(ART_TMP_PATH);
+  }
+  return ok;
+}
+
+static bool albumArtDrawTethered(const char* url, int16_t x, int16_t y) {
+  // The common case: the whole cover in one RAM stage, decoded from memory.
+  uint8_t* buf = (uint8_t*)malloc(ART_RAM_STAGE);
+  if (buf) {
+    ArtBuf b{buf, 0, ART_RAM_STAGE};
+    const NetFetchResult r = netFetch(url, false, "Accept: image/jpeg", nullptr, 0,
+                                      artCollect, &b, 15000);
+    const bool overflow = r.bytes > b.len || b.len >= ART_RAM_STAGE;
+    if (r.ok && b.len && !overflow) {
+      ArtCtx ctx = {};
+      ctx.mem = buf;
+      ctx.memLen = b.len;
+      ctx.declared = b.len;
+      ctx.ox = x;
+      ctx.oy = y;
+      ctx.magicLen = 2;
+      ctx.magic[0] = buf[0];
+      ctx.magic[1] = b.len > 1 ? buf[1] : 0;
+      const bool ok = artDecode(ctx, x, y);
+      free(buf);
+      s_retryAt = ok ? 0 : millis() + 15000;
+      return ok;
+    }
     free(buf);
+    if (!overflow) {
+      snprintf(s_status, sizeof(s_status), "tether: %.28s", r.error);
+      s_retryAt = millis() + 15000;
+      return false;
+    }
+    // A cover bigger than the stage: stage it through flash instead.
+  }
+
+  if (!artFetchToFile(url)) {
     s_retryAt = millis() + 15000;
     return false;
   }
-
-  ArtCtx ctx = {};
-  ctx.stream = nullptr;
-  ctx.mem = buf;
-  ctx.memLen = b.len;
-  ctx.memPos = 0;
-  ctx.declared = b.len;
-  ctx.ox = x;
-  ctx.oy = y;
-  ctx.magicLen = 2;
-  ctx.magic[0] = b.len > 0 ? buf[0] : 0;
-  ctx.magic[1] = b.len > 1 ? buf[1] : 0;
-
-  const bool ok = artDecode(ctx, x, y);
-  free(buf);
+  File f = LittleFS.open(ART_TMP_PATH, "r");
+  bool ok = false;
+  if (f) {
+    ArtCtx ctx = {};
+    ctx.file = &f;
+    ctx.declared = f.size();
+    ctx.ox = x;
+    ctx.oy = y;
+    ok = artDecode(ctx, x, y);
+    f.close();
+  } else {
+    strlcpy(s_status, "fs: cover went missing", sizeof(s_status));
+  }
+  LittleFS.remove(ART_TMP_PATH);
   s_retryAt = ok ? 0 : millis() + 15000;
   return ok;
 }

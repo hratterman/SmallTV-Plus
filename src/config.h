@@ -12,7 +12,7 @@
 // Firmware identity
 // ---------------------------------------------------------------------------
 #define FW_NAME     "smalltv-plus"
-#define FW_VERSION  "2.9.7"
+#define FW_VERSION  "2.9.8"
 
 // Project / update references (shown in the web UI; used by the GitHub self-update)
 #define REPO_URL      "https://github.com/hratterman/smalltv-plus"
