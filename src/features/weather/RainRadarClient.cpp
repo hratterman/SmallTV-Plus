@@ -38,6 +38,15 @@ extern "C" {
 // ~960 KB; 96 KB of cap costs nothing and covers the honest worst case.
 #define RR_FILE_CAP  98304
 
+// Tiles at or under this size are fetched into RAM and written to flash only
+// after the connection closes. Streaming straight to flash looked elegant and
+// was wrong: a LittleFS block erase mid-transfer stops the socket being
+// drained, TCP's window closes, and the CDN hangs up on the stalled client -
+// measured in the field as "body short 3651 of 22062", one flash block into a
+// 22 KB tile. Plain-HTTP fetches have no TLS arena in play, so 24 KB of
+// staging is affordable exactly when it is needed.
+#define RR_RAM_FETCH  24576
+
 // Flash layout, all in the FS root: the grid files are keyed by the frame's
 // timestamp, which is what makes a steady rain cost one fetch per cycle —
 // last cycle's frames are already on disk under their own names.
@@ -182,6 +191,16 @@ static void rrNetUnlock() {
 // Fetch: the body streams straight into a flash file, no RAM in between.
 // ---------------------------------------------------------------------------
 namespace {
+struct RRMemSink { uint8_t* p; uint32_t len, cap; };
+
+bool rrToMem(void* ctx, const uint8_t* data, uint16_t len) {
+  RRMemSink* s = (RRMemSink*)ctx;
+  if (s->len + len > s->cap) return false;
+  memcpy(s->p + s->len, data, len);
+  s->len += len;
+  return true;
+}
+
 struct RRFileSink { File f; uint32_t len; };
 
 bool rrToFile(void* ctx, const uint8_t* data, uint16_t len) {
@@ -199,6 +218,36 @@ bool rrFetchToTmp(const char* url, bool tls, char* err, size_t errLen) {
     strlcpy(err, "radio busy", errLen);
     return false;
   }
+
+  // RAM first when the arena is free (no TLS in play): the network is served
+  // at full speed, and flash gets the bytes only after the peer is gone.
+  if (!tls) {
+    uint8_t* ram = (uint8_t*)malloc(RR_RAM_FETCH);
+    if (ram) {
+      RRMemSink m{ram, 0, RR_RAM_FETCH};
+      const NetFetchResult r = netFetch(url, false, nullptr, nullptr, 0,
+                                        rrToMem, &m, 20000);
+      const bool overflow = m.len >= RR_RAM_FETCH;   // sink refused: too big
+      if (r.ok && m.len && !overflow) {
+        File w = LittleFS.open(RR_TMP_PATH, "w");
+        const bool wrote = w && w.write(ram, m.len) == m.len;
+        if (w) w.close();
+        free(ram);
+        if (wrote) return true;
+        LittleFS.remove(RR_TMP_PATH);
+        strlcpy(err, "fs: cannot write", errLen);
+        return false;
+      }
+      free(ram);
+      if (!overflow) {                    // a genuine network failure: report it
+        if (!r.ok) snprintf(err, errLen, "%.44s", r.error);
+        else strlcpy(err, "empty reply", errLen);
+        return false;
+      }
+      // Bigger than the staging buffer: fall through to the streaming path.
+    }
+  }
+
   RRFileSink s;
   s.f = LittleFS.open(RR_TMP_PATH, "w");
   s.len = 0;
