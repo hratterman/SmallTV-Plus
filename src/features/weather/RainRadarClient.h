@@ -44,6 +44,12 @@ void rainRadarCycle(float lat, float lon, bool enabled);
 bool rainRadarReady();            // cheap hint, any thread
 const char* rainRadarNote();      // last outcome, for status surfaces
 
+// The circuit breaker: a crash while the radar is live parks the feature at
+// the next boot. This clears the park; the weather task calls it when a
+// settings save changes the weather config (a deliberate act = permission to
+// try again — toggling the radar checkbox always qualifies).
+void rainRadarClearParked();
+
 // Lock + metadata. Balance every true return with rainRadarRelease().
 bool rainRadarAcquire(RainRadarView& v);
 void rainRadarRelease();

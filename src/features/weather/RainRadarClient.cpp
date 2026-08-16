@@ -59,6 +59,13 @@ extern "C" {
 #define RR_TMP_PATH  "/rr_t.tmp"
 #define RR_GRID_FMT  "/rr_g%u.bin"
 #define RR_MAP_FMT   "/rr_M2_%d_%d.bin"   // v2: full-res dark canvas
+// The circuit breaker's two flags. rr_live exists while the radar is enabled
+// and doing real work this boot; if a crash lands anywhere in the firmware
+// while it exists, the next boot writes rr_park and the radar sits out - the
+// cube's uptime outranks the timelapse. A deliberate settings save re-arms it
+// (rainRadarClearParked).
+#define RR_LIVE_PATH "/rr_live"
+#define RR_PARK_PATH "/rr_park"
 
 // ---------------------------------------------------------------------------
 // Shared state. The weather task writes, the display loop reads; s_ready
@@ -82,6 +89,10 @@ static char s_note[64] = "radar: not tried";
 static uint8_t* s_dict = nullptr;
 static uint32_t s_nextCycleMs = 0;
 static float s_lastLat = 0, s_lastLon = 0;
+static int8_t s_parked = -1;      // breaker state: -1 not yet checked, else 0/1
+static bool s_liveArmed = false;  // rr_live written this boot
+
+bool appLastBootCrashed();        // main.cpp: did this boot follow a crash?
 
 static inline void lockTake() { if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY); }
 static inline void lockGive() { if (s_lock) xSemaphoreGive(s_lock); }
@@ -614,6 +625,8 @@ bool rrParseUint(const char*& p, uint32_t& v) {
 
 bool rrKeepCurrent(const char* name) {
   if (name[0] == '/') name++;
+  if (strcmp(name, "rr_live") == 0 || strcmp(name, "rr_park") == 0)
+    return true;                       // the breaker's flags are never swept
   if (strncmp(name, "rr_g", 4) == 0) {
     const char* p = name + 4;
     uint32_t v;
@@ -639,9 +652,29 @@ bool rrKeepCurrent(const char* name) {
 // ---------------------------------------------------------------------------
 void rainRadarCycle(float lat, float lon, bool enabled) {
   if (!s_lock) s_lock = xSemaphoreCreateMutex();
+  // The breaker, evaluated once per boot before anything else: a crash while
+  // rr_live existed parks the radar. The stale live flag is cleared either
+  // way - only a crash during THIS boot may park the NEXT one.
+  if (s_parked < 0) {
+    if (appLastBootCrashed() && LittleFS.exists(RR_LIVE_PATH)) {
+      File p = LittleFS.open(RR_PARK_PATH, "w");
+      if (p) { p.write((uint8_t)'p'); p.close(); }
+    }
+    LittleFS.remove(RR_LIVE_PATH);
+    s_parked = LittleFS.exists(RR_PARK_PATH) ? 1 : 0;
+  }
   if (!enabled) {
     if (s_ready || s_mapTileX >= 0) rrTeardown("radar off");
     if (s_dict) { free(s_dict); s_dict = nullptr; }   // the one time it lets go
+    if (s_liveArmed) { LittleFS.remove(RR_LIVE_PATH); s_liveArmed = false; }
+    return;
+  }
+  if (s_parked > 0) {
+    if (s_dict) { free(s_dict); s_dict = nullptr; }   // parked: hoard nothing
+    // "toggle", not "re-save": an unchanged save keeps the same config
+    // fingerprint and never reaches the epoch bump that clears the park.
+    strlcpy(s_note, "radar: parked after a crash - toggle it in settings",
+            sizeof(s_note));
     return;
   }
   // Win the dictionary as early in this cube's life as possible - the young
@@ -679,6 +712,14 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
     snprintf(s_note, sizeof(s_note), "radar: fs %uk free",
              (unsigned)((LittleFS.totalBytes() - LittleFS.usedBytes()) / 1024));
     return;
+  }
+
+  // Real work is about to start: raise the breaker's live flag (once per
+  // boot). From here on, any crash anywhere parks the radar on the next boot.
+  if (!s_liveArmed) {
+    File l = LittleFS.open(RR_LIVE_PATH, "w");
+    if (l) { l.write((uint8_t)'l'); l.close(); }
+    s_liveArmed = true;
   }
 
 #if WITH_MINER
@@ -886,6 +927,13 @@ void rainRadarCycle(float lat, float lon, bool enabled) {
   lockGive();
   snprintf(s_note, sizeof(s_note), "radar: %u frames", total);
   s_nextCycleMs = now + RR_CYCLE_MS;
+}
+
+// A deliberate settings save re-arms a parked radar. Called from the weather
+// task when it adopts a new config epoch (same task as the cycle: no lock).
+void rainRadarClearParked() {
+  LittleFS.remove(RR_PARK_PATH);
+  if (s_parked > 0) s_parked = 0;
 }
 
 #endif  // WITH_WEATHER

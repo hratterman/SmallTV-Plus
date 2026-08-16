@@ -76,4 +76,5 @@ void gfxBoot(const char* line1, const char* line2);
 void gfxApInfo(const char* ssid, const char* pass, const char* ip);
 void gfxStaInfo(const char* ssid, const char* ip, const char* host);
 void gfxMessage(const char* title, const char* msg, uint16_t titleColor);
-void gfxCrash(const char* epc, const char* addr, const char* ip);  // safe-mode diag
+void gfxCrash(const char* epc, const char* addr, const char* ip,
+              bool resuming);  // safe-mode diag; resuming = back up in a minute

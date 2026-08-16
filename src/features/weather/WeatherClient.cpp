@@ -99,7 +99,11 @@ void weatherInit(const Settings& s) {
   lockGive();
   if (!s_task) {
     // Core 0 with the Spotify and calendar polls, away from the display loop.
-    xTaskCreatePinnedToCore(weatherTask, "weather", 8192, nullptr, 1, &s_task, 0);
+    // 10 KB, not 8: this task's own TLS fetch always fit, but the radar's map
+    // fetch reaches TLS through three more frames (cycle -> build -> fetch),
+    // and a handshake's deepest excursion on top of that is exactly the kind
+    // of margin a stability build pays 2 KB to never think about again.
+    xTaskCreatePinnedToCore(weatherTask, "weather", 10240, nullptr, 1, &s_task, 0);
   }
 }
 
@@ -264,6 +268,7 @@ static void weatherTask(void*) {
   // forecast should not re-announce it.
   bool    havePrev = false;
   uint8_t prevClass[WX_DAYS] = {0};
+  bool    firstCfg = true;   // boot's own epoch bump is not a user's save
 
   for (;;) {
     if (myEpoch != s_cfg.epoch) {
@@ -277,6 +282,10 @@ static void weatherTask(void*) {
       pollSec    = s_cfg.pollSec;
       lockGive();
       nextPollMs = 0;                    // a new place: fetch now
+      // A settings save is a deliberate human act: if a crash parked the
+      // radar's circuit breaker, this is the permission to try again.
+      if (!firstCfg) rainRadarClearParked();
+      firstCfg = false;
     }
 
     // netHaveRoute, not the radio: tethered there is no station connection

@@ -236,6 +236,18 @@ static String   g_resetReason;        // why the chip last reset (diagnostics)
 static bool     g_safeMode = false;   // last reset was an exception -> don't re-enter the crash
 static char     g_epcStr[16] = "";
 static char     g_addrStr[16] = "";
+// Crash containment. One crash used to strand the cube on the red screen
+// until a human power-cycled it; now the screen is a bounded pause, not a
+// verdict. The counter lives in noinit DRAM: it survives the crash's own
+// reboot (so a genuine reboot loop is recognized and parks the cube for OTA
+// recovery on the third strike) but not a power cycle (a human touching the
+// plug deserves a fresh start).
+#if !defined(ESP8266)
+__NOINIT_ATTR static uint32_t g_crashMagic;
+__NOINIT_ATTR static uint32_t g_crashCount;
+#endif
+static uint32_t g_safeUntil  = 0;      // when to leave safe mode; 0 = parked for good
+static bool     g_wasCrash   = false;  // this boot followed a crash (radar breaker)
 static int  g_lastBr  = -1;      // last effective brightness written (-1 = none yet)
 static bool g_lastInv = false;   // ...and the polarity it was written with
 static const char* g_brWhy = "manual";   // which rule picked it (diagnostics)
@@ -290,6 +302,9 @@ const char* appBrightnessWhy()   { return g_brWhy; }
 
 // Exposed to the web portal (/api/status) so the last reset reason is visible.
 const char* appResetReason() { return g_resetReason.c_str(); }
+
+// For the rain radar's circuit breaker: did this boot follow a crash?
+bool appLastBootCrashed() { return g_wasCrash; }
 
 // Called by the web portal after settings are applied: re-init every mode and
 // force a fresh repaint so a mode/URL/symbol change takes effect immediately.
@@ -398,14 +413,27 @@ void setup() {
 
   if (pr.wasCrash) {
     g_safeMode = true;                   // crashed last boot -> stay out of the crash path
+    g_wasCrash = true;
     strlcpy(g_epcStr,  pr.epc,  sizeof(g_epcStr));
     strlcpy(g_addrStr, pr.addr, sizeof(g_addrStr));
     char rich[80];
     snprintf(rich, sizeof(rich), "%s epc %s addr %s", pr.reason.c_str(),
              g_epcStr[0] ? g_epcStr : "-", g_addrStr[0] ? g_addrStr : "-");
     g_resetReason = rich;
+#if !defined(ESP8266)
+    // First and second crash: show the screen long enough to read and
+    // photograph, then get back to work. Third in a row without a healthy
+    // stretch between them: a real reboot loop - park with the web UI up.
+    if (g_crashMagic != 0xC0DEC4A5UL) { g_crashMagic = 0xC0DEC4A5UL; g_crashCount = 0; }
+    g_crashCount++;
+    if (g_crashCount < 3) g_safeUntil = millis() + 75000UL;
+#endif
   } else {
     g_resetReason = pr.reason;
+#if !defined(ESP8266)
+    g_crashMagic = 0xC0DEC4A5UL;
+    g_crashCount = 0;
+#endif
   }
 
   Serial.println("[boot] settings");
@@ -494,7 +522,7 @@ void setup() {
     // watchdogs and brownouts do not. Put the reset reason where the empty
     // hex would be, so the screen names the killer instead of shrugging.
     gfxCrash(g_epcStr[0] ? g_epcStr : appResetReason(), g_addrStr,
-             netIP().c_str());
+             netIP().c_str(), g_safeUntil != 0);
   } else {
     // Show which network we joined and how to reach the web UI, long enough to read.
     gfxStaInfo(netSSID().c_str(), netIP().c_str(), g_settings.hostname.c_str());
@@ -526,9 +554,29 @@ void loop() {
   }
 
   if (g_safeMode) {
-    delay(5);
-    return;  // crashed last boot: web UI stays up for OTA recovery, no rendering
+    // One crash is a data point, not a verdict. The screen has been up long
+    // enough to read; resume normal duty. (g_safeUntil stays 0 - parked for
+    // good, web UI up for OTA - only on the third consecutive crash.)
+    if (g_safeUntil && (int32_t)(millis() - g_safeUntil) >= 0) {
+      g_safeMode = false;
+      clockReapply(g_settings);       // SNTP was skipped on the crash boot
+      appInvalidate();                // paint over the crash screen
+    } else {
+      delay(5);
+      return;  // web UI stays up for OTA recovery, no rendering
+    }
   }
+#if !defined(ESP8266)
+  // Ten healthy minutes clear the strike counter: only crashes in quick
+  // succession count as a loop.
+  {
+    static bool s_strikesCleared = false;
+    if (!s_strikesCleared && millis() > 600000UL) {
+      s_strikesCleared = true;
+      g_crashCount = 0;
+    }
+  }
+#endif
 
   // Setup mode holds the screen on the join-the-hotspot card and runs nothing
   // else — right when there is no connection, and wrong the moment a cable is

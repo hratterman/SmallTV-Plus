@@ -275,14 +275,19 @@ bool WeatherMode::drawRadarFrame() {
   if (!rainRadarAcquire(v)) return false;
   if (rFrame_ >= v.frames) rFrame_ = 0;
   rFrames_ = v.frames;
-  uint8_t s_rGrid[RR_GRID_BYTES];   // loop-stack: ~2 KB for the draw only
-  uint8_t s_rMapRow[RR_MAP_PX];
+  // Static, deliberately: these ~2.8 KB (with `line` below) briefly lived on
+  // the loop task's stack, the same 8 KB that also carries the web server and
+  // the display driver - and the first field render of a finished radar
+  // ended in Exception/Panic. Resident RAM is the cheap price of a frame the
+  // stack cannot be blamed for.
+  static uint8_t s_rGrid[RR_GRID_BYTES];
+  static uint8_t s_rMapRow[RR_MAP_PX];
   if (!rainRadarReadGrid(rFrame_, s_rGrid) || !rainRadarMapBegin()) {
     rainRadarRelease();
     return false;
   }
 
-  uint16_t line[TFT_WIDTH];
+  static uint16_t line[TFT_WIDTH];
   for (int y = 0; y < TFT_HEIGHT; y++) {
     const int ty = y + RR_CROP;
     if (!rainRadarMapRow(ty, s_rMapRow)) memset(s_rMapRow, 0, sizeof(s_rMapRow));
