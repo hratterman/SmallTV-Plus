@@ -329,7 +329,8 @@ void gfxMessage(const char* title, const char* msg, uint16_t titleColor) {
 
 // Persistent crash screen shown in safe mode (after an exception reset). Holds the
 // crash PC + fault address still so they can be read, and the IP for OTA recovery.
-void gfxCrash(const char* epc, const char* addr, const char* ip, bool resuming) {
+void gfxCrash(const char* epc, const char* addr, const char* ip,
+              uint8_t resumeMin) {
   if (!gfx) return;
   gfx->fillScreen(C_BLACK);
   gfxDrawCentered("CRASH", 12, 4, C_RED);
@@ -337,7 +338,8 @@ void gfxCrash(const char* epc, const char* addr, const char* ip, bool resuming) 
   gfxDrawCentered(epc && epc[0] ? epc : "-", 80, 3, C_WHITE);
   gfxDrawCentered("addr", 124, 2, C_GRAY);
   gfxDrawCentered(addr && addr[0] ? addr : "-", 146, 2, C_WHITE);
-  gfxDrawCentered(resuming ? "resumes in 1 minute" : "OTA flash to fix:", 182, 2,
-                  C_GRAY);
+  char rl[24];
+  snprintf(rl, sizeof(rl), "resumes in %u min", (unsigned)resumeMin);
+  gfxDrawCentered(resumeMin ? rl : "OTA flash to fix:", 182, 2, C_GRAY);
   gfxDrawCentered(ip && ip[0] ? ip : "-", 204, 2, C_GREEN);
 }

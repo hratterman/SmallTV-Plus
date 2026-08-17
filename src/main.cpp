@@ -10,6 +10,7 @@
 // License: WTFPL
 #include <Arduino.h>
 #include "Platform.h"
+#include "PanicTrap.h"
 #include "config.h"
 #include "Settings.h"
 #include "Net.h"
@@ -235,7 +236,7 @@ static void tetherStatusFill(String& out) {
 static String   g_resetReason;        // why the chip last reset (diagnostics)
 static bool     g_safeMode = false;   // last reset was an exception -> don't re-enter the crash
 static char     g_epcStr[16] = "";
-static char     g_addrStr[16] = "";
+static char     g_addrStr[24] = "";   // fits "canary (taskname)" from the trap
 // Crash containment. One crash used to strand the cube on the red screen
 // until a human power-cycled it; now the screen is a bounded pause, not a
 // verdict. The counter lives in noinit DRAM: it survives the crash's own
@@ -246,7 +247,8 @@ static char     g_addrStr[16] = "";
 __NOINIT_ATTR static uint32_t g_crashMagic;
 __NOINIT_ATTR static uint32_t g_crashCount;
 #endif
-static uint32_t g_safeUntil  = 0;      // when to leave safe mode; 0 = parked for good
+static uint32_t g_safeUntil  = 0;      // when to leave safe mode; 0 = parked (8266)
+static uint8_t  g_resumeMin  = 0;      // what the crash screen promises
 static bool     g_wasCrash   = false;  // this boot followed a crash (radar breaker)
 static int  g_lastBr  = -1;      // last effective brightness written (-1 = none yet)
 static bool g_lastInv = false;   // ...and the polarity it was written with
@@ -403,6 +405,10 @@ void setup() {
   Serial.println();
   Serial.println(FW_NAME " " FW_VERSION);
 
+  // First thing, before anything that could fault: if this boot panics, keep
+  // the address and reason where the next boot can show them.
+  panicTrapArm();
+
   // Capture why we (re)booted. On a reboot loop this is the key clue, and the
   // device's UART isn't exposed — so we also show it on screen below. On the
   // ESP8266 we also keep the crash PC (epc1) for addr2line decoding; the
@@ -416,17 +422,45 @@ void setup() {
     g_wasCrash = true;
     strlcpy(g_epcStr,  pr.epc,  sizeof(g_epcStr));
     strlcpy(g_addrStr, pr.addr, sizeof(g_addrStr));
-    char rich[80];
-    snprintf(rich, sizeof(rich), "%s epc %s addr %s", pr.reason.c_str(),
+    // The trap knows more than the reset registers: the exact PC and IDF's
+    // reason string, which for a stack overflow names the guilty task
+    // outright. The backtrace goes to /api/status; each address resolves to
+    // a source line with addr2line against this build's .elf.
+    PanicTrapInfo trap;
+    const bool trapped = panicTrapRead(trap);
+    if (trapped) {
+      snprintf(g_epcStr, sizeof(g_epcStr), "%08x", (unsigned)trap.pc);
+      // "Stack canary watchpoint triggered (weather)" won't fit a screen row;
+      // "canary (weather)" says everything that matters.
+      const char* par = strchr(trap.reason, '(');
+      if (strncmp(trap.reason, "Stack canary", 12) == 0 && par)
+        snprintf(g_addrStr, sizeof(g_addrStr), "canary %s", par);
+      else
+        strlcpy(g_addrStr, trap.reason, sizeof(g_addrStr));
+    }
+    char rich[112];
+    snprintf(rich, sizeof(rich), "%s%s%s epc %s addr %s", pr.reason.c_str(),
+             trapped ? ": " : "", trapped ? trap.reason : "",
              g_epcStr[0] ? g_epcStr : "-", g_addrStr[0] ? g_addrStr : "-");
     g_resetReason = rich;
+    if (trapped && trap.btLen) {
+      g_resetReason += " bt";
+      for (uint8_t i = 0; i < trap.btLen; i++) {
+        char b[12];
+        snprintf(b, sizeof(b), " %08x", (unsigned)trap.bt[i]);
+        g_resetReason += b;
+      }
+    }
 #if !defined(ESP8266)
-    // First and second crash: show the screen long enough to read and
-    // photograph, then get back to work. Third in a row without a healthy
-    // stretch between them: a real reboot loop - park with the web UI up.
+    // Always get back up - a desk clock's first duty is running. Crashes one
+    // and two pause 75 s (long enough to read and photograph); a streak
+    // pauses ten minutes per round so a genuine loop still spends most of
+    // its time reachable and diagnosable, never permanently parked. Ten
+    // healthy minutes (below) reset the streak.
     if (g_crashMagic != 0xC0DEC4A5UL) { g_crashMagic = 0xC0DEC4A5UL; g_crashCount = 0; }
     g_crashCount++;
-    if (g_crashCount < 3) g_safeUntil = millis() + 75000UL;
+    g_resumeMin = g_crashCount < 3 ? 1 : 10;
+    g_safeUntil = millis() + (uint32_t)g_resumeMin * 60000UL + 15000UL;
 #endif
   } else {
     g_resetReason = pr.reason;
@@ -522,7 +556,7 @@ void setup() {
     // watchdogs and brownouts do not. Put the reset reason where the empty
     // hex would be, so the screen names the killer instead of shrugging.
     gfxCrash(g_epcStr[0] ? g_epcStr : appResetReason(), g_addrStr,
-             netIP().c_str(), g_safeUntil != 0);
+             netIP().c_str(), g_resumeMin);
   } else {
     // Show which network we joined and how to reach the web UI, long enough to read.
     gfxStaInfo(netSSID().c_str(), netIP().c_str(), g_settings.hostname.c_str());
@@ -555,8 +589,10 @@ void loop() {
 
   if (g_safeMode) {
     // One crash is a data point, not a verdict. The screen has been up long
-    // enough to read; resume normal duty. (g_safeUntil stays 0 - parked for
-    // good, web UI up for OTA - only on the third consecutive crash.)
+    // enough to read; resume normal duty. (On the ESP32 targets g_safeUntil
+    // is always armed - short pause first, ten minutes during a streak - so
+    // the cube never permanently parks itself; the 8266 keeps its old
+    // parked-for-OTA behavior.)
     if (g_safeUntil && (int32_t)(millis() - g_safeUntil) >= 0) {
       g_safeMode = false;
       clockReapply(g_settings);       // SNTP was skipped on the crash boot
